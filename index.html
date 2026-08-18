@@ -45,15 +45,29 @@
         <div id="search-results" class="search-results hidden"></div>
       </div>
 
-      <!-- Add stop form -->
+      <!-- Add/Edit stop form -->
       <div class="section">
-        <label class="section-label">Нова зупинка <span class="hint">(клік на карті або пошук)</span></label>
-        <input type="text" id="stop-name" class="input-field" placeholder="Назва зупинки (укр.)" />
-        <div class="coords-row">
-          <input type="number" id="stop-lat" class="input-field coord-input" placeholder="Широта" step="0.000001" />
-          <input type="number" id="stop-lon" class="input-field coord-input" placeholder="Довгота" step="0.000001" />
+        <label class="section-label">Інфо. про зупинку <span class="hint">(клік по списку/карті)</span></label>
+        
+        <div style="display: flex; gap: 5px; margin-bottom: 10px;">
+          <input type="text" id="stop-name" class="input-field" placeholder="Назва зупинки (укр.)" style="flex: 1;" />
+          <button class="btn-icon" title="Копіювати назву" onclick="copyField('stop-name')">📋</button>
         </div>
-        <button class="btn btn-primary" id="add-stop-btn">＋ Додати зупинку</button>
+        
+        <div class="coords-row" style="display: flex; gap: 10px; margin-bottom: 15px;">
+          <div style="display: flex; gap: 5px; flex: 1;">
+            <input type="number" id="stop-lat" class="input-field coord-input" placeholder="Широта" step="0.000001" style="flex: 1;" />
+            <button class="btn-icon" title="Копіювати широту" onclick="copyField('stop-lat')">📋</button>
+          </div>
+          <div style="display: flex; gap: 5px; flex: 1;">
+            <input type="number" id="stop-lon" class="input-field coord-input" placeholder="Довгота" step="0.000001" style="flex: 1;" />
+            <button class="btn-icon" title="Копіювати довготу" onclick="copyField('stop-lon')">📋</button>
+          </div>
+        </div>
+        
+        <div style="display: flex; gap: 10px;">
+          <button class="btn btn-primary" id="add-stop-btn" style="flex: 1;">＋ Додати / Оновити</button>
+        </div>
       </div>
 
       <!-- Stops list -->

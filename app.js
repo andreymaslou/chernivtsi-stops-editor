@@ -223,6 +223,21 @@ function placeStopMarker(stop, index) {
     permanent: false, direction: 'top', className: 'stop-marker-label',
   });
 
+  marker.on('click', () => {
+    document.getElementById('stop-name').value = stop.name;
+    document.getElementById('stop-lat').value = stop.lat.toFixed(6);
+    document.getElementById('stop-lon').value = stop.lon.toFixed(6);
+    
+    if (state.pendingMarker) {
+      state.pendingMarker.setLatLng([stop.lat, stop.lon]);
+    } else {
+      state.pendingMarker = L.circleMarker([stop.lat, stop.lon], {
+        radius: 8, color: '#6c63ff', fillColor: '#8b85ff',
+        fillOpacity: 0.9, weight: 2,
+      }).addTo(map);
+    }
+  });
+
   state.stopMarkers.push(marker);
 }
 
@@ -259,10 +274,25 @@ function renderStopsList() {
       <button class="stop-del" data-index="${i}" title="Видалити">✕</button>
     `;
 
-    // Fly to on click
+    // Fly to and populate inputs on click
     card.addEventListener('click', (e) => {
       if (e.target.classList.contains('stop-del')) return;
       map.flyTo([stop.lat, stop.lon], 17, { animate: true, duration: 0.8 });
+      
+      // Populate inputs for easy copying to admin panel
+      document.getElementById('stop-name').value = stop.name;
+      document.getElementById('stop-lat').value = stop.lat.toFixed(6);
+      document.getElementById('stop-lon').value = stop.lon.toFixed(6);
+      
+      // Move temp pending marker to highlight selection
+      if (state.pendingMarker) {
+        state.pendingMarker.setLatLng([stop.lat, stop.lon]);
+      } else {
+        state.pendingMarker = L.circleMarker([stop.lat, stop.lon], {
+          radius: 8, color: '#6c63ff', fillColor: '#8b85ff',
+          fillOpacity: 0.9, weight: 2,
+        }).addTo(map);
+      }
     });
 
     // Delete
@@ -444,6 +474,20 @@ document.getElementById('download-btn').addEventListener('click', () => {
   showToast('📥 Файл завантажено', 'success');
 });
 
+// ===== Copy Helper =====
+window.copyField = function(id) {
+  const el = document.getElementById(id);
+  if (!el.value) return;
+  navigator.clipboard.writeText(el.value).then(() => {
+    // Visual feedback
+    const originalBg = el.style.backgroundColor;
+    el.style.backgroundColor = 'rgba(74, 222, 128, 0.2)';
+    setTimeout(() => el.style.backgroundColor = originalBg, 400);
+    showToast('📋 Скoпійовано: ' + el.value, 'success');
+  });
+};
+
 // ===== Init =====
 updateRouteLabel();
 renderStopsList();
+
