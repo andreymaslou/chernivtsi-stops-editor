@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Редактор зупинок — Транспорт Онлайн Чернівці</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="app">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <div class="logo">
+          <span class="logo-icon">🚌</span>
+          <div>
+            <div class="logo-title">Транспорт Онлайн</div>
+            <div class="logo-sub">Чернівці — Редактор маршрутів</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Route selector -->
+      <div class="section">
+        <label class="section-label">Маршрут</label>
+        <div class="row-inputs">
+          <input type="text" id="route-number" class="input-field" placeholder="№ маршруту" value="23" style="width:80px" />
+          <select id="direction" class="input-field select-field">
+            <option value="A">Напрямок А ➡</option>
+            <option value="B">Напрямок Б ⬅</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Search -->
+      <div class="section">
+        <label class="section-label">Пошук зупинки</label>
+        <div class="search-wrap">
+          <input type="text" id="search-input" class="input-field" placeholder="Напр: вул. Гагаріна, Чернівці" />
+          <button class="btn btn-secondary" id="search-btn">🔍</button>
+        </div>
+        <div id="search-results" class="search-results hidden"></div>
+      </div>
+
+      <!-- Add/Edit stop form -->
+      <div class="section">
+        <label class="section-label">Інфо. про зупинку <span class="hint">(клік по списку/карті)</span></label>
+        
+        <div style="display: flex; gap: 5px; margin-bottom: 10px; align-items: center;">
+          <div class="stop-num" id="current_stop_order" style="display: flex; margin-top: 0;" title="Порядковий номер">+</div>
+          <input type="text" id="stop-name" class="input-field" placeholder="Назва зупинки (укр.)" style="flex: 1;" />
+          <button class="btn-icon" title="Копіювати назву" onclick="copyField('stop-name')">📋</button>
+        </div>
+        
+        <div class="coords-row" style="display: flex; gap: 10px; margin-bottom: 15px;">
+          <div style="display: flex; gap: 5px; flex: 1;">
+            <input type="number" id="stop-lat" class="input-field coord-input" placeholder="Широта" step="0.000001" style="flex: 1;" />
+            <button class="btn-icon" title="Копіювати широту" onclick="copyField('stop-lat')">📋</button>
+          </div>
+          <div style="display: flex; gap: 5px; flex: 1;">
+            <input type="number" id="stop-lon" class="input-field coord-input" placeholder="Довгота" step="0.000001" style="flex: 1;" />
+            <button class="btn-icon" title="Копіювати довготу" onclick="copyField('stop-lon')">📋</button>
+          </div>
+        </div>
+        
+        <div style="display: flex; gap: 10px;">
+          <button class="btn btn-primary" id="add-stop-btn" style="flex: 1;">＋ Додати / Оновити</button>
+        </div>
+      </div>
+
+      <!-- Stops list -->
+      <div class="section stops-section">
+        <div class="stops-header">
+          <label class="section-label">
+            Зупинки маршруту <span id="route-label">23 / А</span>
+            <span class="badge" id="stop-count">0</span>
+          </label>
+          <div class="stops-actions">
+            <button class="btn-icon" id="clear-btn" title="Очистити список">🗑</button>
+            <input type="file" id="import-file-input" accept=".json" style="display:none;" />
+            <button class="btn-icon" id="import-json-btn" title="Імпорт JSON">⬆️</button>
+            <button class="btn-icon" id="export-csv-btn" title="Експорт CSV">📥</button>
+            <button class="btn-icon" id="export-json-btn" title="Експорт JSON">{ }</button>
+          </div>
+        </div>
+        <div id="stops-list" class="stops-list">
+          <div class="empty-state">Клікніть на карті щоб додати першу зупинку</div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Map -->
+    <main class="map-container">
+      <div id="map"></div>
+      <div class="map-hint">
+        <span>🖱 Клік на карті — встановлює координати нової зупинки</span>
+      </div>
+    </main>
+  </div>
+
+  <!-- Toast -->
+  <div id="toast" class="toast hidden"></div>
+
+  <!-- Export Modal -->
+  <div id="export-modal" class="modal-overlay hidden">
+    <div class="modal">
+      <div class="modal-header">
+        <h3 id="modal-title">Експорт даних</h3>
+        <button class="modal-close" id="modal-close">✕</button>
+      </div>
+      <pre id="export-content" class="export-pre"></pre>
+      <div class="modal-footer">
+        <button class="btn btn-primary" id="copy-btn">📋 Скопіювати</button>
+        <button class="btn btn-secondary" id="download-btn">⬇ Завантажити</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
