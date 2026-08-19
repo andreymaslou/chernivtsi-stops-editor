@@ -82,6 +82,16 @@
             <button class="btn-icon" title="Копіювати довготу" onclick="copyField('stop-lon')">📋</button>
           </div>
         </div>
+
+        <div class="coords-row" style="display: flex; gap: 10px; margin-bottom: 15px;">
+          <div style="display: flex; gap: 5px; flex: 1;">
+            <input type="number" id="stop-angle" class="input-field coord-input" placeholder="Кут (°)" step="1" style="flex: 1;" />
+            <button class="btn-icon" title="Копіювати кут" onclick="copyField('stop-angle')">📋</button>
+          </div>
+          <div style="display: flex; gap: 5px; flex: 1;">
+            <!-- empty space for layout balance -->
+          </div>
+        </div>
         
         <div style="display: flex; gap: 10px;">
           <button class="btn btn-primary" id="add-stop-btn" style="flex: 1;">＋ Додати / Оновити</button>

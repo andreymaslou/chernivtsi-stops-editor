@@ -44,6 +44,36 @@ function getCurrentStops() {
   return state.routes[key];
 }
 
+function getRouteBearing(lat1, lon1, lat2, lon2) {
+  const toRad = deg => deg * Math.PI / 180;
+  const toDeg = rad => rad * 180 / Math.PI;
+  const dLon = toRad(lon2 - lon1);
+  lat1 = toRad(lat1);
+  lat2 = toRad(lat2);
+  const y = Math.sin(dLon) * Math.cos(lat2);
+  const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon);
+  const bearing = (toDeg(Math.atan2(y, x)) + 360) % 360;
+  return Math.round(bearing);
+}
+
+function recalculateAllAngles() {
+  const stops = getCurrentStops();
+  if (!stops || stops.length === 0) return;
+  for (let i = 0; i < stops.length; i++) {
+    if (stops[i].customAngle) continue;
+    let p1 = stops[i];
+    let p2 = stops[i + 1];
+    if (p2) {
+      stops[i].angle = getRouteBearing(p1.lat, p1.lon, p2.lat, p2.lon);
+    } else if (i > 0) {
+      let prev = stops[i - 1];
+      stops[i].angle = getRouteBearing(prev.lat, prev.lon, p1.lat, p1.lon);
+    } else {
+      stops[i].angle = 0;
+    }
+  }
+}
+
 function showToast(msg, type = 'default') {
   const t = document.getElementById('toast');
   t.textContent = msg;
@@ -233,28 +263,54 @@ function addStop() {
   const name = document.getElementById('stop-name').value.trim();
   const lat = parseFloat(document.getElementById('stop-lat').value);
   const lon = parseFloat(document.getElementById('stop-lon').value);
+  const angleInput = document.getElementById('stop-angle').value;
 
   if (!name) { showToast('⚠ Введіть назву зупинки', 'error'); return; }
   if (isNaN(lat) || isNaN(lon)) { showToast('⚠ Клікніть на карті або знайдіть через пошук', 'error'); return; }
 
   const stops = getCurrentStops();
-  stops.push({ name, lat, lon });
+  const badgeText = document.getElementById('current_stop_order').textContent;
+  
+  let newObj = { name, lat, lon };
+  
+  // Angle parsing
+  if (angleInput.trim() !== '') {
+    newObj.angle = parseInt(angleInput);
+    newObj.customAngle = true;
+  } else {
+    newObj.angle = 0;
+    newObj.customAngle = false;
+  }
+
+  if (badgeText !== '+' && !isNaN(parseInt(badgeText))) {
+    // Modify existing stop
+    const idx = parseInt(badgeText) - 1;
+    stops[idx] = { ...stops[idx], ...newObj };
+    showToast(`✅ Зупинку "${name}" оновлено`, 'success');
+  } else {
+    // Add new stop
+    stops.push(newObj);
+    showToast(`✅ Зупинку "${name}" додано`, 'success');
+  }
 
   // Clear pending marker and place permanent
   if (state.pendingMarker) {
     map.removeLayer(state.pendingMarker);
     state.pendingMarker = null;
   }
-  placeStopMarker({ name, lat, lon }, stops.length);
+  
+  recalculateAllAngles();
+  redrawAllMarkers();
+  renderStopsList();
 
   // Reset inputs
   document.getElementById('stop-name').value = '';
   document.getElementById('stop-lat').value = '';
   document.getElementById('stop-lon').value = '';
-  document.getElementById('current_stop_order').style.display = 'none';
-
-  renderStopsList();
-  showToast(`✅ Зупинку "${name}" додано`, 'success');
+  document.getElementById('stop-angle').value = '';
+  const badge = document.getElementById('current_stop_order');
+  badge.textContent = '+';
+  badge.style.background = '#323232';
 }
 
 function placeStopMarker(stop, index) {
@@ -274,6 +330,7 @@ function placeStopMarker(stop, index) {
     document.getElementById('stop-name').value = stop.name;
     document.getElementById('stop-lat').value = stop.lat.toFixed(6);
     document.getElementById('stop-lon').value = stop.lon.toFixed(6);
+    document.getElementById('stop-angle').value = stop.angle !== undefined ? stop.angle : '';
     
     const badge = document.getElementById('current_stop_order');
     badge.textContent = index + 1;
@@ -335,7 +392,7 @@ function renderStopsList() {
       <div class="stop-num">${i + 1}</div>
       <div class="stop-info">
         <div class="stop-name-text">${escapeHtml(stop.name)}</div>
-        <div class="stop-coords">${stop.lat.toFixed(6)}, ${stop.lon.toFixed(6)}</div>
+        <div class="stop-coords">${stop.lat.toFixed(6)}, ${stop.lon.toFixed(6)} <span style="background:#555; padding:2px 6px; border-radius:4px; margin-left:5px; font-size: 10px;">∠ ${stop.angle !== undefined ? stop.angle : 0}°</span></div>
       </div>
       <button class="stop-del" data-index="${i}" title="Видалити">✕</button>
     `;
@@ -349,6 +406,7 @@ function renderStopsList() {
       document.getElementById('stop-name').value = stop.name;
       document.getElementById('stop-lat').value = stop.lat.toFixed(6);
       document.getElementById('stop-lon').value = stop.lon.toFixed(6);
+      document.getElementById('stop-angle').value = stop.angle !== undefined ? stop.angle : '';
       
       // Move temp pending marker to highlight selection
       if (state.pendingMarker) {
@@ -370,6 +428,7 @@ function renderStopsList() {
     card.querySelector('.stop-del').addEventListener('click', (e) => {
       e.stopPropagation();
       getCurrentStops().splice(i, 1);
+      recalculateAllAngles();
       redrawAllMarkers();
       renderStopsList();
       showToast(`🗑 Зупинку видалено`);
@@ -399,6 +458,7 @@ function renderStopsList() {
       const [item] = stops.splice(from, 1);
       stops.splice(to, 0, item);
       state.dragIndex = null;
+      recalculateAllAngles();
       redrawAllMarkers();
       renderStopsList();
     });
@@ -451,8 +511,11 @@ async function loadRouteFromScrapedData() {
       state.routes[key] = data.map(s => ({
         name: s.name,
         lat: parseFloat(s.lat),
-        lon: parseFloat(s.lon)
+        lon: parseFloat(s.lon),
+        angle: s.angle || 0,
+        customAngle: s.angle !== undefined
       }));
+      recalculateAllAngles();
       showToast(`✅ Завантажено маршрут ${num} (${dir})`, 'success');
       redrawAllMarkers();
       renderStopsList();
@@ -485,9 +548,9 @@ document.getElementById('export-csv-btn').addEventListener('click', () => {
   const dir = document.getElementById('direction').value;
   const dirNum = dir === 'A' ? 1 : 2;
 
-  let csv = 'order,name,lat,lon,route,direction\n';
+  let csv = 'order,name,lat,lon,route,direction,angle\n';
   stops.forEach((s, i) => {
-    csv += `${i + 1},"${s.name}",${s.lat.toFixed(6)},${s.lon.toFixed(6)},${num},${dirNum}\n`;
+    csv += `${i + 1},"${s.name}",${s.lat.toFixed(6)},${s.lon.toFixed(6)},${num},${dirNum},${s.angle || 0}\n`;
   });
 
   state.exportData = { content: csv, filename: `route_${num}_${dir}.csv`, type: 'text/csv' };
@@ -511,6 +574,7 @@ document.getElementById('export-json-btn').addEventListener('click', () => {
     lon: parseFloat(s.lon.toFixed(6)),
     route: num,
     direction: dirNum,
+    angle: s.angle || 0
   }));
 
   const json = JSON.stringify(data, null, 2);
@@ -534,19 +598,24 @@ document.getElementById('import-file-input').addEventListener('change', (e) => {
       const data = JSON.parse(ev.target.result);
       if (!Array.isArray(data)) throw new Error("JSON format error");
       
-      const parsedStops = data.map(s => ({
-        name: s.name || "Невідома зупинка",
-        lat: parseFloat(s.lat),
-        lon: parseFloat(s.lon)
-      })).filter(s => !isNaN(s.lat) && !isNaN(s.lon));
+      const stops = data.map(s => ({
+        name: s.name,
+        lat: s.lat,
+        lon: s.lon,
+        angle: s.angle || 0,
+        customAngle: s.angle !== undefined,
+      }));
       
       const key = getRouteKey();
-      state.routes[key] = parsedStops;
+      state.routes[key] = stops;
+      
+      recalculateAllAngles();
+      updateRouteLabel();
       redrawAllMarkers();
       renderStopsList();
 
-      if (parsedStops.length > 0) {
-          map.flyTo([parsedStops[0].lat, parsedStops[0].lon], 14);
+      if (stops.length > 0) {
+          map.flyTo([stops[0].lat, stops[0].lon], 14);
       }
 
       showToast('✅ Дані успішно імпортовано', 'success');
