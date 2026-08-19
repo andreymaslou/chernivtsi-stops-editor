@@ -36,13 +36,17 @@
       <!-- Route selector -->
       <div class="section">
         <label class="section-label">Транспорт і маршрут</label>
-        <div class="row-inputs">
-          <select id="transport-type" class="input-field select-field" style="width:110px">
-            <option value="bus">🚌 Автобус</option>
-            <option value="trolley">🚎 Тролейбус</option>
+        <div class="row-inputs" style="gap: 5px;">
+          <div class="transport-toggle" style="display:flex; background:#2A2A2A; border-radius:12px; padding:2px; flex:1;">
+            <button id="btn-bus" class="type-btn active" onclick="setTransportType('bus')">🚌 Автобус</button>
+            <button id="btn-trolley" class="type-btn" onclick="setTransportType('trolley')">🚎 Тролейбус</button>
+          </div>
+        </div>
+        <div class="row-inputs" style="margin-top: 10px;">
+          <select id="route-number" class="input-field select-field" style="width:70px" onchange="loadBtn.click()">
+            <!-- Options populated by JS -->
           </select>
-          <input type="text" id="route-number" class="input-field" placeholder="№" value="23" style="width:60px" />
-          <select id="direction" class="input-field select-field">
+          <select id="direction" class="input-field select-field" onchange="loadBtn.click()">
             <option value="A">Напрямок А ➡</option>
             <option value="B">Напрямок Б ⬅</option>
           </select>
