@@ -140,6 +140,18 @@ body {
   box-shadow: 0 0 0 3px var(--accent-glow);
 }
 
+/* Remove number input arrrows (spinners) */
+input[type=number]::-webkit-inner-spin-button, 
+input[type=number]::-webkit-outer-spin-button { 
+  -webkit-appearance: none; 
+  appearance: none;
+  margin: 0; 
+}
+input[type=number] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
 .select-field {
   cursor: pointer;
   flex: 1;

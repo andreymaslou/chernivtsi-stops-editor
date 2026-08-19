@@ -3,6 +3,7 @@ const state = {
   routes: {}, // { "23-A": [...stops], "23-B": [...stops] }
   pendingMarker: null,   // temp marker for new stop
   stopMarkers: [],       // all placed stop markers on map
+  routeLine: null,       // polyline connecting the stops
   dragIndex: null,
   exportData: { content: '', filename: '' },
 };
@@ -14,7 +15,7 @@ const map = L.map('map', {
   zoomControl: true,
 });
 
-L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
   maxZoom: 19,
 }).addTo(map);
 
@@ -51,16 +52,22 @@ map.on('click', function (e) {
   document.getElementById('stop-lat').value = lat.toFixed(6);
   document.getElementById('stop-lon').value = lng.toFixed(6);
 
+  const stops = getCurrentStops();
+  const badge = document.getElementById('current_stop_order');
+  badge.textContent = stops.length + 1;
+  badge.style.display = 'flex';
+  badge.style.background = '#4ade80';
+
   // Place/move temp marker
   if (state.pendingMarker) {
     state.pendingMarker.setLatLng([lat, lng]);
   } else {
     state.pendingMarker = L.circleMarker([lat, lng], {
-      radius: 8,
-      color: '#6c63ff',
+      radius: 11,
+      color: '#ffffff',
       fillColor: '#8b85ff',
-      fillOpacity: 0.9,
-      weight: 2,
+      fillOpacity: 1,
+      weight: 2.5,
     }).addTo(map);
     state.pendingMarker.bindTooltip('Нова зупинка', {
       permanent: true, direction: 'top', className: 'stop-marker-label',
@@ -134,6 +141,12 @@ async function doSearch() {
         document.getElementById('stop-lat').value = lat.toFixed(6);
         document.getElementById('stop-lon').value = lng.toFixed(6);
 
+        const stops = getCurrentStops();
+        const badge = document.getElementById('current_stop_order');
+        badge.textContent = stops.length + 1;
+        badge.style.display = 'flex';
+        badge.style.background = '#4ade80';
+
         // Suggest name
         const addr = r.address;
         let suggestion = '';
@@ -152,8 +165,8 @@ async function doSearch() {
           state.pendingMarker.setLatLng([lat, lng]);
         } else {
           state.pendingMarker = L.circleMarker([lat, lng], {
-            radius: 8, color: '#6c63ff', fillColor: '#8b85ff',
-            fillOpacity: 0.9, weight: 2,
+            radius: 11, color: '#ffffff', fillColor: '#8b85ff',
+            fillOpacity: 1, weight: 2.5,
           }).addTo(map);
           state.pendingMarker.bindTooltip('Нова зупинка', {
             permanent: true, direction: 'top', className: 'stop-marker-label',
@@ -205,6 +218,7 @@ function addStop() {
   document.getElementById('stop-name').value = '';
   document.getElementById('stop-lat').value = '';
   document.getElementById('stop-lon').value = '';
+  document.getElementById('current_stop_order').style.display = 'none';
 
   renderStopsList();
   showToast(`✅ Зупинку "${name}" додано`, 'success');
@@ -212,10 +226,10 @@ function addStop() {
 
 function placeStopMarker(stop, index) {
   const marker = L.circleMarker([stop.lat, stop.lon], {
-    radius: 7,
-    color: '#4ade80',
+    radius: 9,
+    color: '#ffffff',
     fillColor: '#22c55e',
-    fillOpacity: 0.85,
+    fillOpacity: 1,
     weight: 2,
   }).addTo(map);
 
@@ -228,12 +242,17 @@ function placeStopMarker(stop, index) {
     document.getElementById('stop-lat').value = stop.lat.toFixed(6);
     document.getElementById('stop-lon').value = stop.lon.toFixed(6);
     
+    const badge = document.getElementById('current_stop_order');
+    badge.textContent = index + 1;
+    badge.style.display = 'flex';
+    badge.style.background = 'linear-gradient(135deg, #6c63ff 0%, #8b85ff 100%)';
+    
     if (state.pendingMarker) {
       state.pendingMarker.setLatLng([stop.lat, stop.lon]);
     } else {
       state.pendingMarker = L.circleMarker([stop.lat, stop.lon], {
-        radius: 8, color: '#6c63ff', fillColor: '#8b85ff',
-        fillOpacity: 0.9, weight: 2,
+        radius: 11, color: '#ffffff', fillColor: '#8b85ff',
+        fillOpacity: 1, weight: 2.5,
       }).addTo(map);
     }
   });
@@ -244,7 +263,21 @@ function placeStopMarker(stop, index) {
 function redrawAllMarkers() {
   state.stopMarkers.forEach(m => map.removeLayer(m));
   state.stopMarkers = [];
-  getCurrentStops().forEach((stop, i) => placeStopMarker(stop, i + 1));
+  if (state.routeLine) map.removeLayer(state.routeLine);
+
+  const stops = getCurrentStops();
+  const latlngs = stops.map(s => [s.lat, s.lon]);
+  
+  if (latlngs.length > 1) {
+    state.routeLine = L.polyline(latlngs, {
+      color: '#4ade80',
+      weight: 3,
+      opacity: 0.6,
+      dashArray: '5, 8'
+    }).addTo(map);
+  }
+
+  stops.forEach((stop, i) => placeStopMarker(stop, i + 1));
 }
 
 // ===== Render Stops List =====
@@ -289,10 +322,15 @@ function renderStopsList() {
         state.pendingMarker.setLatLng([stop.lat, stop.lon]);
       } else {
         state.pendingMarker = L.circleMarker([stop.lat, stop.lon], {
-          radius: 8, color: '#6c63ff', fillColor: '#8b85ff',
-          fillOpacity: 0.9, weight: 2,
+          radius: 11, color: '#ffffff', fillColor: '#8b85ff',
+          fillOpacity: 1, weight: 2.5,
         }).addTo(map);
       }
+
+      const badge = document.getElementById('current_stop_order');
+      badge.textContent = i + 1;
+      badge.style.display = 'flex';
+      badge.style.background = 'linear-gradient(135deg, #6c63ff 0%, #8b85ff 100%)';
     });
 
     // Delete
@@ -341,16 +379,53 @@ function escapeHtml(s) {
 }
 
 // ===== Route change =====
+let routeChangeTimeout;
 document.getElementById('route-number').addEventListener('input', () => {
   updateRouteLabel();
   redrawAllMarkers();
   renderStopsList();
+  
+  clearTimeout(routeChangeTimeout);
+  routeChangeTimeout = setTimeout(loadRouteFromScrapedData, 500);
 });
 document.getElementById('direction').addEventListener('change', () => {
   updateRouteLabel();
   redrawAllMarkers();
   renderStopsList();
+  loadRouteFromScrapedData();
 });
+
+async function loadRouteFromScrapedData() {
+  const num = document.getElementById('route-number').value.trim();
+  const dir = document.getElementById('direction').value;
+  if (!num) return;
+  const key = getRouteKey();
+  
+  // Don't overwrite if it already has stops loaded
+  if (state.routes[key] && state.routes[key].length > 0) return;
+
+  try {
+    const rawNum = num.replace(/[^a-zA-Z0-9А-Яа-яЄєІіЇїҐґ]/g, '');
+    const res = await fetch(`scraped_data/route_${rawNum}_${dir}.json`);
+    if (!res.ok) return;
+    const data = await res.json();
+    if (Array.isArray(data) && data.length > 0) {
+      state.routes[key] = data.map(s => ({
+        name: s.name,
+        lat: parseFloat(s.lat),
+        lon: parseFloat(s.lon)
+      }));
+      showToast(`✅ Завантажено маршрут ${num} (${dir})`, 'success');
+      redrawAllMarkers();
+      renderStopsList();
+      if (state.routes[key][0]) {
+        map.flyTo([state.routes[key][0].lat, state.routes[key][0].lon], 13);
+      }
+    }
+  } catch (e) {
+    // silent failure if file doesn't exist
+  }
+}
 
 // ===== Clear =====
 document.getElementById('clear-btn').addEventListener('click', () => {
@@ -454,6 +529,9 @@ document.getElementById('export-modal').addEventListener('click', e => {
     document.getElementById('export-modal').classList.add('hidden');
   }
 });
+
+// Load the default initial route if exists
+setTimeout(loadRouteFromScrapedData, 500);
 
 // Copy
 document.getElementById('copy-btn').addEventListener('click', () => {

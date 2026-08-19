@@ -49,7 +49,8 @@
       <div class="section">
         <label class="section-label">Інфо. про зупинку <span class="hint">(клік по списку/карті)</span></label>
         
-        <div style="display: flex; gap: 5px; margin-bottom: 10px;">
+        <div style="display: flex; gap: 5px; margin-bottom: 10px; align-items: center;">
+          <div class="stop-num" id="current_stop_order" style="display: flex; margin-top: 0;" title="Порядковий номер">+</div>
           <input type="text" id="stop-name" class="input-field" placeholder="Назва зупинки (укр.)" style="flex: 1;" />
           <button class="btn-icon" title="Копіювати назву" onclick="copyField('stop-name')">📋</button>
         </div>
