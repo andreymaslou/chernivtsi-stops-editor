@@ -317,10 +317,10 @@ function placeStopMarker(stop, index) {
   const angle = stop.angle || 0;
   // Point UP (North = 0deg). CSS rotates clockwise.
   const svgHTML = `
-    <div style="transform: rotate(${angle}deg); width: 24px; height: 24px; filter: drop-shadow(0 1px 3px rgba(0,0,0,0.4));">
-      <svg width="24" height="24" viewBox="0 0 24 24">
-        <path d="M 12 1 L 17 9 L 7 9 Z" fill="#22c55e" stroke="#ffffff" stroke-width="1.5" stroke-linejoin="round"/>
-        <circle cx="12" cy="12" r="7" fill="#22c55e" stroke="#ffffff" stroke-width="2" />
+    <div style="transform: rotate(${angle}deg); width: 48px; height: 48px; filter: drop-shadow(0 2px 5px rgba(0,0,0,0.4));">
+      <svg width="48" height="48" viewBox="0 0 48 48">
+        <path d="M 24 2 L 34 18 L 14 18 Z" fill="#22c55e" stroke="#ffffff" stroke-width="2.5" stroke-linejoin="round"/>
+        <circle cx="24" cy="24" r="14" fill="#22c55e" stroke="#ffffff" stroke-width="3" />
       </svg>
     </div>
   `;
@@ -329,8 +329,8 @@ function placeStopMarker(stop, index) {
     icon: L.divIcon({
       className: 'dir-marker',
       html: svgHTML,
-      iconSize: [24, 24],
-      iconAnchor: [12, 12]
+      iconSize: [48, 48],
+      iconAnchor: [24, 24]
     })
   }).addTo(map);
 
@@ -353,8 +353,8 @@ function placeStopMarker(stop, index) {
       state.pendingMarker.setLatLng([stop.lat, stop.lon]);
     } else {
       state.pendingMarker = L.circleMarker([stop.lat, stop.lon], {
-        radius: 11, color: '#ffffff', fillColor: '#8b85ff',
-        fillOpacity: 1, weight: 2.5,
+        radius: 20, color: '#ffffff', fillColor: '#8b85ff',
+        fillOpacity: 1, weight: 3.5,
       }).addTo(map);
     }
   });
@@ -425,8 +425,8 @@ function renderStopsList() {
         state.pendingMarker.setLatLng([stop.lat, stop.lon]);
       } else {
         state.pendingMarker = L.circleMarker([stop.lat, stop.lon], {
-          radius: 11, color: '#ffffff', fillColor: '#8b85ff',
-          fillOpacity: 1, weight: 2.5,
+          radius: 20, color: '#ffffff', fillColor: '#8b85ff',
+          fillOpacity: 1, weight: 3.5,
         }).addTo(map);
       }
 
