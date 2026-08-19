@@ -35,9 +35,13 @@
 
       <!-- Route selector -->
       <div class="section">
-        <label class="section-label">Маршрут</label>
+        <label class="section-label">Транспорт і маршрут</label>
         <div class="row-inputs">
-          <input type="text" id="route-number" class="input-field" placeholder="№ маршруту" value="23" style="width:80px" />
+          <select id="transport-type" class="input-field select-field" style="width:110px">
+            <option value="bus">🚌 Автобус</option>
+            <option value="trolley">🚎 Тролейбус</option>
+          </select>
+          <input type="text" id="route-number" class="input-field" placeholder="№" value="23" style="width:60px" />
           <select id="direction" class="input-field select-field">
             <option value="A">Напрямок А ➡</option>
             <option value="B">Напрямок Б ⬅</option>

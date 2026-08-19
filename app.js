@@ -21,9 +21,10 @@ L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
 
 // ===== Helpers =====
 function getRouteKey() {
+  const type = document.getElementById('transport-type').value;
   const num = document.getElementById('route-number').value.trim() || '?';
   const dir = document.getElementById('direction').value;
-  return `${num}-${dir}`;
+  return `${type}-${num}-${dir}`;
 }
 
 function getCurrentStops() {
@@ -41,9 +42,11 @@ function showToast(msg, type = 'default') {
 }
 
 function updateRouteLabel() {
+  const typeEl = document.getElementById('transport-type');
+  const typeText = typeEl.options[typeEl.selectedIndex].text;
   const num = document.getElementById('route-number').value.trim() || '?';
   const dir = document.getElementById('direction').value;
-  document.getElementById('route-label').textContent = `${num} / ${dir}`;
+  document.getElementById('route-label').textContent = `${typeText} ${num} / ${dir}`;
 }
 
 // ===== Map Click =====
@@ -394,8 +397,15 @@ document.getElementById('direction').addEventListener('change', () => {
   renderStopsList();
   loadRouteFromScrapedData();
 });
+document.getElementById('transport-type').addEventListener('change', () => {
+  updateRouteLabel();
+  redrawAllMarkers();
+  renderStopsList();
+  loadRouteFromScrapedData();
+});
 
 async function loadRouteFromScrapedData() {
+  const type = document.getElementById('transport-type').value;
   const num = document.getElementById('route-number').value.trim();
   const dir = document.getElementById('direction').value;
   if (!num) return;
@@ -406,7 +416,13 @@ async function loadRouteFromScrapedData() {
 
   try {
     const rawNum = num.replace(/[^a-zA-Z0-9А-Яа-яЄєІіЇїҐґ]/g, '');
-    const res = await fetch(`scraped_data/route_${rawNum}_${dir}.json`);
+    let res = await fetch(`scraped_data/route_${type}_${rawNum}_${dir}.json`);
+    
+    // Fallback to old format
+    if (!res.ok) {
+      res = await fetch(`scraped_data/route_${rawNum}_${dir}.json`);
+    }
+
     if (!res.ok) return;
     const data = await res.json();
     if (Array.isArray(data) && data.length > 0) {
