@@ -10,10 +10,19 @@
   <link rel="stylesheet" href="style.css" />
   <script>
     (function() {
-      var p = prompt('Введіть пароль для доступу:');
-      if (!p || btoa(p) !== 'MTUyMDE1MjA=') {
-        alert('Невірний пароль!');
-        document.documentElement.innerHTML = '<h2 style="color:white; font-family:sans-serif; text-align:center; margin-top:50px;">Access Denied</h2>';
+      var valid = false;
+      while (!valid) {
+        var p = prompt('Введіть пароль для доступу:');
+        if (p === null) {
+          document.documentElement.innerHTML = '<h2 style="color:white; font-family:sans-serif; text-align:center; margin-top:50px;">Доступ заборонено</h2>';
+          window.stop();
+          break;
+        }
+        if (btoa(p) === 'MTUyMDE1MjA=') {
+          valid = true;
+        } else {
+          alert('Пароль не вірний, введіть ще раз!');
+        }
       }
     })();
   </script>
