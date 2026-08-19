@@ -42,10 +42,10 @@
           </div>
         </div>
         <div class="row-inputs" style="margin-top: 10px;">
-          <select id="route-number" class="input-field select-field" style="width:70px" onchange="loadBtn.click()">
+          <select id="route-number" class="input-field select-field" style="width:70px" onchange="handleRouteChange()">
             <!-- Options populated by JS -->
           </select>
-          <select id="direction" class="input-field select-field" onchange="loadBtn.click()">
+          <select id="direction" class="input-field select-field" onchange="handleRouteChange()">
             <option value="A">Напрямок А ➡</option>
             <option value="B">Напрямок Б ⬅</option>
           </select>
@@ -80,6 +80,16 @@
           <div style="display: flex; gap: 5px; flex: 1;">
             <input type="number" id="stop-lon" class="input-field coord-input" placeholder="Довгота" step="0.000001" style="flex: 1;" />
             <button class="btn-icon" title="Копіювати довготу" onclick="copyField('stop-lon')">📋</button>
+          </div>
+        </div>
+
+        <div class="coords-row" style="display: flex; gap: 10px; margin-bottom: 15px;">
+          <div style="display: flex; gap: 5px; flex: 1;">
+            <input type="number" id="stop-angle" class="input-field coord-input" placeholder="Кут (°)" step="1" style="flex: 1;" />
+            <button class="btn-icon" title="Копіювати кут" onclick="copyField('stop-angle')">📋</button>
+          </div>
+          <div style="display: flex; gap: 5px; flex: 1;">
+            <!-- empty space for layout balance -->
           </div>
         </div>
         
