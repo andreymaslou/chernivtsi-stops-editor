@@ -16,8 +16,7 @@ const AVAILABLE_BUSES = ["1", "2", "3", "4", "5", "6", "7", "8", "8А", "9", "9A
 // DOM Elements
 const els = {
   routeNumber: document.getElementById('route-number'),
-  direction: document.getElementById('direction'),
-  loadBtn: document.getElementById('load-route')
+  direction: document.getElementById('direction')
 };
 
 // Global polyline ref
@@ -77,7 +76,7 @@ window.setTransportType = function(type) {
   document.getElementById('btn-trolley').classList.remove('active');
   document.getElementById('btn-' + type).classList.add('active');
   populateRouteDropdown(type);
-  els.loadBtn.click();
+  window.handleRouteChange();
 };
 
 // ===== Map Click =====
@@ -413,7 +412,7 @@ function escapeHtml(s) {
 }
 
 // ===== Route change =====
-els.loadBtn.addEventListener('click', async () => {
+window.handleRouteChange = async () => {
   // Clear map markers before loading new route
   state.stopMarkers.forEach(m => map.removeLayer(m));
   state.stopMarkers = [];
@@ -425,7 +424,7 @@ els.loadBtn.addEventListener('click', async () => {
   await loadRouteFromScrapedData();
   redrawAllMarkers();
   renderStopsList();
-});
+};
 
 async function loadRouteFromScrapedData() {
   const key = getRouteKey(state.currentDirection);
@@ -569,8 +568,7 @@ document.getElementById('export-modal').addEventListener('click', e => {
   }
 });
 
-// Load the default initial route if exists
-setTimeout(loadRouteFromScrapedData, 500);
+// Initial setup is handled in Init at the bottom
 
 // Copy
 document.getElementById('copy-btn').addEventListener('click', () => {
@@ -605,6 +603,6 @@ window.copyField = function(id) {
 };
 
 // ===== Init =====
-updateRouteLabel();
-renderStopsList();
+populateRouteDropdown('bus');
+setTimeout(window.handleRouteChange, 100);
 
