@@ -317,17 +317,16 @@ function placeStopMarker(stop, index) {
   const angle = stop.angle !== undefined ? Math.round(stop.angle) : 0;
   const displayAngle = stop.angle !== undefined ? Math.round(stop.angle) : '-';
   
-  // Outer div doesn't rotate. SVG inside it rotates to point the arrow.
-  // The absolute div stays upright to display text.
+  // The group <g> rotates the arrow, while circle and text stay upright
   const svgHTML = `
-    <div style="position: relative; width: 48px; height: 48px; filter: drop-shadow(0 2px 5px rgba(0,0,0,0.4));">
-      <svg width="48" height="48" viewBox="0 0 48 48" style="transform: rotate(${angle}deg);">
-        <path d="M 24 2 L 34 18 L 14 18 Z" fill="#ffffff" stroke="#ef4444" stroke-width="2.5" stroke-linejoin="round"/>
+    <div style="width: 48px; height: 48px; filter: drop-shadow(0 2px 5px rgba(0,0,0,0.4));">
+      <svg width="48" height="48" viewBox="0 0 48 48">
+        <g style="transform: rotate(${angle}deg); transform-origin: 24px 24px;">
+          <path d="M 24 2 L 34 18 L 14 18 Z" fill="#ffffff" stroke="#ef4444" stroke-width="2.5" stroke-linejoin="round"/>
+        </g>
         <circle cx="24" cy="24" r="14" fill="#ffffff" stroke="#ef4444" stroke-width="3" />
+        <text x="24" y="28" font-family="sans-serif" font-size="11" font-weight="bold" fill="#000" text-anchor="middle">${displayAngle}</text>
       </svg>
-      <div style="position: absolute; top: 0; left: 0; width: 48px; height: 48px; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: bold; color: #000; font-family: sans-serif; pointer-events: none;">
-        ${displayAngle}
-      </div>
     </div>
   `;
 
