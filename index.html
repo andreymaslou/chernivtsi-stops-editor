@@ -42,10 +42,10 @@
           </div>
         </div>
         <div class="row-inputs" style="margin-top: 10px;">
-          <select id="route-number" class="input-field select-field" style="width:70px" onchange="loadBtn.click()">
+          <select id="route-number" class="input-field select-field" style="width:70px" onchange="handleRouteChange()">
             <!-- Options populated by JS -->
           </select>
-          <select id="direction" class="input-field select-field" onchange="loadBtn.click()">
+          <select id="direction" class="input-field select-field" onchange="handleRouteChange()">
             <option value="A">Напрямок А ➡</option>
             <option value="B">Напрямок Б ⬅</option>
           </select>
