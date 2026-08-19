@@ -319,13 +319,13 @@ function placeStopMarker(stop, index) {
   
   // The group <g> rotates the arrow, while circle and text stay upright
   const svgHTML = `
-    <div style="width: 48px; height: 48px; filter: drop-shadow(0 2px 5px rgba(0,0,0,0.4));">
-      <svg width="48" height="48" viewBox="0 0 48 48">
-        <g style="transform: rotate(${angle}deg); transform-origin: 24px 24px;">
-          <path d="M 24 2 L 34 18 L 14 18 Z" fill="#ffffff" stroke="#ef4444" stroke-width="2.5" stroke-linejoin="round"/>
+    <div style="width: 64px; height: 64px; filter: drop-shadow(0 3px 6px rgba(0,0,0,0.5));">
+      <svg width="64" height="64" viewBox="0 0 64 64">
+        <g style="transform: rotate(${angle}deg); transform-origin: 32px 32px;">
+          <path d="M 32 2 L 48 24 L 16 24 Z" fill="#ffffff" stroke="#ef4444" stroke-width="2.5" stroke-linejoin="round"/>
         </g>
-        <circle cx="24" cy="24" r="14" fill="#ffffff" stroke="#ef4444" stroke-width="3" />
-        <text x="24" y="28" font-family="sans-serif" font-size="11" font-weight="bold" fill="#000" text-anchor="middle">${displayAngle}</text>
+        <circle cx="32" cy="32" r="16" fill="#ffffff" stroke="#ef4444" stroke-width="3" />
+        <text x="32" y="37" font-family="sans-serif" font-size="13" font-weight="bold" fill="#000" text-anchor="middle">${displayAngle}</text>
       </svg>
     </div>
   `;
@@ -334,8 +334,8 @@ function placeStopMarker(stop, index) {
     icon: L.divIcon({
       className: 'dir-marker',
       html: svgHTML,
-      iconSize: [48, 48],
-      iconAnchor: [24, 24]
+      iconSize: [64, 64],
+      iconAnchor: [32, 32]
     })
   }).addTo(map);
 
@@ -358,8 +358,8 @@ function placeStopMarker(stop, index) {
       state.pendingMarker.setLatLng([stop.lat, stop.lon]);
     } else {
       state.pendingMarker = L.circleMarker([stop.lat, stop.lon], {
-        radius: 20, color: '#ffffff', fillColor: '#1e3a8a',
-        fillOpacity: 1, weight: 3.5,
+        radius: 23, color: '#ffffff', fillColor: '#1e3a8a',
+        fillOpacity: 1, weight: 4,
       }).addTo(map);
     }
   });
@@ -430,8 +430,8 @@ function renderStopsList() {
         state.pendingMarker.setLatLng([stop.lat, stop.lon]);
       } else {
         state.pendingMarker = L.circleMarker([stop.lat, stop.lon], {
-          radius: 20, color: '#ffffff', fillColor: '#1e3a8a',
-          fillOpacity: 1, weight: 3.5,
+          radius: 23, color: '#ffffff', fillColor: '#1e3a8a',
+          fillOpacity: 1, weight: 4,
         }).addTo(map);
       }
 
