@@ -10,15 +10,10 @@
   <link rel="stylesheet" href="style.css" />
   <script>
     (function() {
-      var d = localStorage.getItem('auth');
-      if (d !== 'MTUyMDE1MjA=') {
-        var p = prompt('Введіть пароль для доступу:');
-        if (p && btoa(p) === 'MTUyMDE1MjA=') {
-          localStorage.setItem('auth', 'MTUyMDE1MjA=');
-        } else {
-          alert('Невірний пароль!');
-          document.documentElement.innerHTML = '<h2 style="color:white; font-family:sans-serif; text-align:center; margin-top:50px;">Access Denied</h2>';
-        }
+      var p = prompt('Введіть пароль для доступу:');
+      if (!p || btoa(p) !== 'MTUyMDE1MjA=') {
+        alert('Невірний пароль!');
+        document.documentElement.innerHTML = '<h2 style="color:white; font-family:sans-serif; text-align:center; margin-top:50px;">Access Denied</h2>';
       }
     })();
   </script>
