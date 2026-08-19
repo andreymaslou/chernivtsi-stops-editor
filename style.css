@@ -337,6 +337,12 @@ input[type=number] {
   box-shadow: 0 0 0 1px var(--accent-glow);
 }
 
+.stop-card.active-stop {
+  border-color: #8b85ff;
+  background: rgba(139, 133, 255, 0.1);
+  box-shadow: 0 0 0 1px rgba(139, 133, 255, 0.5);
+}
+
 .stop-card.dragging {
   opacity: 0.5;
   border-style: dashed;
@@ -543,5 +549,4 @@ input[type=number] {
   backdrop-filter: blur(4px);
   box-shadow: 0 2px 8px rgba(0,0,0,0.5);
 }
-. d i r - m a r k e r   {   b a c k g r o u n d :   n o n e ;   b o r d e r :   n o n e ;   }  
- 
+.dir-marker { background: none; border: none; }
