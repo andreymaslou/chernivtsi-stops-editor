@@ -1,12 +1,27 @@
-// ===== State =====
-const state = {
-  routes: {}, // { "23-A": [...stops], "23-B": [...stops] }
-  pendingMarker: null,   // temp marker for new stop
-  stopMarkers: [],       // all placed stop markers on map
-  routeLine: null,       // polyline connecting the stops
+// App State
+let state = {
+  currentTransportType: 'bus',
+  currentRouteNumber: '',
+  currentDirection: '',
+  routes: {},
+  pendingMarker: null,
+  stopMarkers: [],
   dragIndex: null,
-  exportData: { content: '', filename: '' },
+  exportData: { content: '', filename: '' }
 };
+
+const AVAILABLE_TROLLEYS = ["1", "2", "3", "4", "5", "6", "6A", "8"];
+const AVAILABLE_BUSES = ["1", "2", "3", "4", "5", "6", "7", "8", "8А", "9", "9A", "10", "10A", "13", "14", "15", "15К", "19", "20", "21", "23", "24", "25", "26", "27", "29", "30", "31", "32", "33", "34", "35", "35A", "36", "37", "39", "41", "43", "123", "124", "135", "136", "227", "228", "233", "234", "243", "244", "261", "262", "801", "802", "817", "818", "863", "865", "866", "64706469", "64726471", "6473", "6474", "ДніпроБургас", "КиївСонячнийберег"];
+
+// DOM Elements
+const els = {
+  routeNumber: document.getElementById('route-number'),
+  direction: document.getElementById('direction'),
+  loadBtn: document.getElementById('load-route')
+};
+
+// Global polyline ref
+let routePolyline = null;
 
 // ===== Init Map =====
 const map = L.map('map', {
@@ -20,15 +35,12 @@ L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
 }).addTo(map);
 
 // ===== Helpers =====
-function getRouteKey() {
-  const type = document.getElementById('transport-type').value;
-  const num = document.getElementById('route-number').value.trim() || '?';
-  const dir = document.getElementById('direction').value;
-  return `${type}-${num}-${dir}`;
+function getRouteKey(dir) {
+  return `${state.currentTransportType}-${state.currentRouteNumber}-${dir}`;
 }
 
 function getCurrentStops() {
-  const key = getRouteKey();
+  const key = getRouteKey(state.currentDirection);
   if (!state.routes[key]) state.routes[key] = [];
   return state.routes[key];
 }
@@ -42,12 +54,31 @@ function showToast(msg, type = 'default') {
 }
 
 function updateRouteLabel() {
-  const typeEl = document.getElementById('transport-type');
-  const typeText = typeEl.options[typeEl.selectedIndex].text;
-  const num = document.getElementById('route-number').value.trim() || '?';
-  const dir = document.getElementById('direction').value;
-  document.getElementById('route-label').textContent = `${typeText} ${num} / ${dir}`;
+  const typeText = state.currentTransportType === 'bus' ? 'Автобус' : 'Тролейбус';
+  document.getElementById('route-label').textContent = `${typeText} ${state.currentRouteNumber} / ${state.currentDirection}`;
 }
+
+// Populate Route Dropdown
+function populateRouteDropdown(type) {
+  const arr = type === 'trolley' ? AVAILABLE_TROLLEYS : AVAILABLE_BUSES;
+  els.routeNumber.innerHTML = '';
+  arr.forEach(num => {
+    const opt = document.createElement('option');
+    opt.value = num;
+    opt.textContent = num;
+    els.routeNumber.appendChild(opt);
+  });
+}
+
+// Function to handle Transport Type change via UI buttons
+window.setTransportType = function(type) {
+  state.currentTransportType = type;
+  document.getElementById('btn-bus').classList.remove('active');
+  document.getElementById('btn-trolley').classList.remove('active');
+  document.getElementById('btn-' + type).classList.add('active');
+  populateRouteDropdown(type);
+  els.loadBtn.click();
+};
 
 // ===== Map Click =====
 map.on('click', function (e) {
@@ -266,13 +297,13 @@ function placeStopMarker(stop, index) {
 function redrawAllMarkers() {
   state.stopMarkers.forEach(m => map.removeLayer(m));
   state.stopMarkers = [];
-  if (state.routeLine) map.removeLayer(state.routeLine);
+  if (routePolyline) map.removeLayer(routePolyline);
 
   const stops = getCurrentStops();
   const latlngs = stops.map(s => [s.lat, s.lon]);
   
   if (latlngs.length > 1) {
-    state.routeLine = L.polyline(latlngs, {
+    routePolyline = L.polyline(latlngs, {
       color: '#4ade80',
       weight: 3,
       opacity: 0.6,
@@ -382,39 +413,31 @@ function escapeHtml(s) {
 }
 
 // ===== Route change =====
-let routeChangeTimeout;
-document.getElementById('route-number').addEventListener('input', () => {
+els.loadBtn.addEventListener('click', async () => {
+  // Clear map markers before loading new route
+  state.stopMarkers.forEach(m => map.removeLayer(m));
+  state.stopMarkers = [];
+  if (routePolyline) map.removeLayer(routePolyline);
+
+  state.currentRouteNumber = els.routeNumber.value;
+  state.currentDirection = els.direction.value;
   updateRouteLabel();
+  await loadRouteFromScrapedData();
   redrawAllMarkers();
   renderStopsList();
-  
-  clearTimeout(routeChangeTimeout);
-  routeChangeTimeout = setTimeout(loadRouteFromScrapedData, 500);
-});
-document.getElementById('direction').addEventListener('change', () => {
-  updateRouteLabel();
-  redrawAllMarkers();
-  renderStopsList();
-  loadRouteFromScrapedData();
-});
-document.getElementById('transport-type').addEventListener('change', () => {
-  updateRouteLabel();
-  redrawAllMarkers();
-  renderStopsList();
-  loadRouteFromScrapedData();
 });
 
 async function loadRouteFromScrapedData() {
-  const type = document.getElementById('transport-type').value;
-  const num = document.getElementById('route-number').value.trim();
-  const dir = document.getElementById('direction').value;
-  if (!num) return;
-  const key = getRouteKey();
+  const key = getRouteKey(state.currentDirection);
+  const stops = getCurrentStops();
   
   // Don't overwrite if it already has stops loaded
-  if (state.routes[key] && state.routes[key].length > 0) return;
+  if (stops.length > 0) return;
 
   try {
+    const type = state.currentTransportType;
+    const num = state.currentRouteNumber;
+    const dir = state.currentDirection;
     const rawNum = num.replace(/[^a-zA-Z0-9А-Яа-яЄєІіЇїҐґ]/g, '');
     let res = await fetch(`scraped_data/route_${type}_${rawNum}_${dir}.json`);
     
