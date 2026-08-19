@@ -7,6 +7,7 @@ let state = {
   pendingMarker: null,
   stopMarkers: [],
   dragIndex: null,
+  activeStopIndex: null,
   exportData: { content: '', filename: '' }
 };
 
@@ -362,6 +363,7 @@ function placeStopMarker(stop, index) {
         fillOpacity: 1, weight: 4,
       }).addTo(map);
     }
+    if (window.highlightActiveStopInList) window.highlightActiveStopInList(index - 1);
   });
 
   state.stopMarkers.push(marker);
@@ -386,6 +388,16 @@ function redrawAllMarkers() {
 
   stops.forEach((stop, i) => placeStopMarker(stop, i + 1));
 }
+
+window.highlightActiveStopInList = function(index) {
+  state.activeStopIndex = index;
+  const cards = document.querySelectorAll('.stop-card');
+  cards.forEach(card => card.classList.remove('active-stop'));
+  if (index !== null && index !== undefined && cards[index]) {
+    cards[index].classList.add('active-stop');
+    cards[index].scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+};
 
 // ===== Render Stops List =====
 function renderStopsList() {
@@ -439,6 +451,8 @@ function renderStopsList() {
       badge.textContent = i + 1;
       badge.style.display = 'flex';
       badge.style.background = 'linear-gradient(135deg, #6c63ff 0%, #8b85ff 100%)';
+      
+      window.highlightActiveStopInList(i);
     });
 
     // Delete
@@ -504,6 +518,7 @@ window.handleRouteChange = async () => {
 };
 
 async function loadRouteFromScrapedData() {
+  state.activeStopIndex = null;
   const key = getRouteKey(state.currentDirection);
   const stops = getCurrentStops();
   
