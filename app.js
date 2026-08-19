@@ -350,7 +350,7 @@ function placeStopMarker(stop, index) {
     document.getElementById('stop-angle').value = stop.angle !== undefined ? stop.angle : '';
     
     const badge = document.getElementById('current_stop_order');
-    badge.textContent = index + 1;
+    badge.textContent = index;
     badge.style.display = 'flex';
     badge.style.background = 'linear-gradient(135deg, #6c63ff 0%, #8b85ff 100%)';
     
