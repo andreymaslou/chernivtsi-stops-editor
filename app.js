@@ -314,12 +314,24 @@ function addStop() {
 }
 
 function placeStopMarker(stop, index) {
-  const marker = L.circleMarker([stop.lat, stop.lon], {
-    radius: 9,
-    color: '#ffffff',
-    fillColor: '#22c55e',
-    fillOpacity: 1,
-    weight: 2,
+  const angle = stop.angle || 0;
+  // Point UP (North = 0deg). CSS rotates clockwise.
+  const svgHTML = `
+    <div style="transform: rotate(${angle}deg); width: 24px; height: 24px; filter: drop-shadow(0 1px 3px rgba(0,0,0,0.4));">
+      <svg width="24" height="24" viewBox="0 0 24 24">
+        <path d="M 12 1 L 17 9 L 7 9 Z" fill="#22c55e" stroke="#ffffff" stroke-width="1.5" stroke-linejoin="round"/>
+        <circle cx="12" cy="12" r="7" fill="#22c55e" stroke="#ffffff" stroke-width="2" />
+      </svg>
+    </div>
+  `;
+
+  const marker = L.marker([stop.lat, stop.lon], {
+    icon: L.divIcon({
+      className: 'dir-marker',
+      html: svgHTML,
+      iconSize: [24, 24],
+      iconAnchor: [12, 12]
+    })
   }).addTo(map);
 
   marker.bindTooltip(`${index}. ${stop.name}`, {
