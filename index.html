@@ -9,12 +9,16 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="style.css" />
   <script>
-    (function(){
-      var p = prompt("🔑 Введіть пароль для доступу:");
-      // Пароль: 1234 (захист через base64, щоб не читалось в коді)
-      if (btoa(p) !== 'MTIzNA==') {
-        document.documentElement.innerHTML = "<body style='background:#0d0f14;'><h2 style='color:#fff; font-family:sans-serif; text-align:center; padding-top:50px;'>⛔ Доступ заборонено</h2></body>";
-        window.stop();
+    (function() {
+      var d = localStorage.getItem('auth');
+      if (d !== 'MTUyMDE1MjA=') {
+        var p = prompt('Введіть пароль для доступу:');
+        if (p && btoa(p) === 'MTUyMDE1MjA=') {
+          localStorage.setItem('auth', 'MTUyMDE1MjA=');
+        } else {
+          alert('Невірний пароль!');
+          document.documentElement.innerHTML = '<h2 style="color:white; font-family:sans-serif; text-align:center; margin-top:50px;">Access Denied</h2>';
+        }
       }
     })();
   </script>
