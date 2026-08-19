@@ -319,8 +319,8 @@ function placeStopMarker(stop, index) {
   const svgHTML = `
     <div style="transform: rotate(${angle}deg); width: 48px; height: 48px; filter: drop-shadow(0 2px 5px rgba(0,0,0,0.4));">
       <svg width="48" height="48" viewBox="0 0 48 48">
-        <path d="M 24 2 L 34 18 L 14 18 Z" fill="#22c55e" stroke="#ffffff" stroke-width="2.5" stroke-linejoin="round"/>
-        <circle cx="24" cy="24" r="14" fill="#22c55e" stroke="#ffffff" stroke-width="3" />
+        <path d="M 24 2 L 34 18 L 14 18 Z" fill="#ffffff" stroke="#ef4444" stroke-width="2.5" stroke-linejoin="round"/>
+        <circle cx="24" cy="24" r="14" fill="#ffffff" stroke="#ef4444" stroke-width="3" />
       </svg>
     </div>
   `;
@@ -353,7 +353,7 @@ function placeStopMarker(stop, index) {
       state.pendingMarker.setLatLng([stop.lat, stop.lon]);
     } else {
       state.pendingMarker = L.circleMarker([stop.lat, stop.lon], {
-        radius: 20, color: '#ffffff', fillColor: '#8b85ff',
+        radius: 20, color: '#ffffff', fillColor: '#1e3a8a',
         fillOpacity: 1, weight: 3.5,
       }).addTo(map);
     }
@@ -425,7 +425,7 @@ function renderStopsList() {
         state.pendingMarker.setLatLng([stop.lat, stop.lon]);
       } else {
         state.pendingMarker = L.circleMarker([stop.lat, stop.lon], {
-          radius: 20, color: '#ffffff', fillColor: '#8b85ff',
+          radius: 20, color: '#ffffff', fillColor: '#1e3a8a',
           fillOpacity: 1, weight: 3.5,
         }).addTo(map);
       }
