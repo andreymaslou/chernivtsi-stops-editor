@@ -1,0 +1,8 @@
+[out:json][timeout:25];
+area[name="Чернівці"]->.a;
+(
+  node[highway=bus_stop](area.a);
+  node[public_transport=platform](area.a);
+  node[public_transport=stop_position](area.a);
+);
+out count;

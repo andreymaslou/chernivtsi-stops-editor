@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="uk">
+
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -9,7 +10,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="style.css" />
   <script>
-    (function() {
+    (function () {
       var valid = false;
       while (!valid) {
         var p = prompt('Введіть пароль для доступу:');
@@ -27,114 +28,114 @@
     })();
   </script>
 </head>
+
 <body>
   <div class="app">
-    <!-- Sidebar -->
-    <aside class="sidebar">
-      <div class="sidebar-header">
-        <div class="logo">
-          <span class="logo-icon">🚌</span>
-          <div>
-            <div class="logo-title">Транспорт Онлайн</div>
-            <div class="logo-sub">Чернівці — Редактор маршрутів</div>
-          </div>
-        </div>
-      </div>
 
-      <!-- Route selector -->
-      <div class="section">
-        <label class="section-label">Транспорт і маршрут</label>
-        <div class="row-inputs" style="gap: 5px;">
-          <div class="transport-toggle" style="display:flex; background:#2A2A2A; border-radius:12px; padding:2px; flex:1;">
-            <button id="btn-bus" class="type-btn active" onclick="setTransportType('bus')">🚌 Автобус</button>
-            <button id="btn-trolley" class="type-btn" onclick="setTransportType('trolley')">🚎 Тролейбус</button>
+    <!-- LEFT PANEL: Forms -->
+    <aside class="sidebar sidebar-forms">
+
+      <!-- Header: logo + route selector ALL IN ONE ROW -->
+      <div class="sidebar-header" style="padding: 7px 8px;">
+        <div style="display:flex; align-items:center; gap:5px; flex-wrap:wrap;">
+          <span style="font-size:15px; flex-shrink:0;">🚌</span>
+          <div style="display:flex; background:#2A2A2A; border-radius:6px; padding:2px; flex-shrink:0;">
+            <button id="btn-bus" class="type-btn active" onclick="setTransportType('bus')"
+              style="padding:3px 6px; font-size:11px;">🚌</button>
+            <button id="btn-trolley" class="type-btn" onclick="setTransportType('trolley')"
+              style="padding:3px 6px; font-size:11px;">🚎</button>
           </div>
-        </div>
-        <div class="row-inputs" style="margin-top: 10px;">
-          <select id="route-number" class="input-field select-field" style="width:70px" onchange="handleRouteChange()">
+          <select id="route-number" class="input-field select-field"
+            style="width:46px; padding:3px 2px; font-size:12px;" onchange="handleRouteChange()">
             <!-- Options populated by JS -->
           </select>
-          <select id="direction" class="input-field select-field" onchange="handleRouteChange()">
-            <option value="A">Напрямок А ➡</option>
-            <option value="B">Напрямок Б ⬅</option>
+          <select id="direction" class="input-field select-field" style="width:52px; padding:3px 2px; font-size:11px;"
+            onchange="handleRouteChange()">
+            <option value="A">А ➡</option>
+            <option value="B">Б ⬅</option>
           </select>
         </div>
       </div>
 
       <!-- Search -->
-      <div class="section">
-        <label class="section-label">Пошук зупинки</label>
+      <div class="section" style="padding: 6px 8px;">
         <div class="search-wrap">
-          <input type="text" id="search-input" class="input-field" placeholder="Напр: вул. Гагаріна, Чернівці" />
-          <button class="btn btn-secondary" id="search-btn">🔍</button>
+          <input type="text" id="search-input" class="input-field" placeholder="🔍 Пошук зупинки..."
+            style="font-size:11px; padding:5px 6px;" />
+          <button class="btn btn-secondary" id="search-btn" style="padding:5px 7px; font-size:12px;">🔍</button>
         </div>
         <div id="search-results" class="search-results hidden"></div>
       </div>
 
       <!-- Add/Edit stop form -->
-      <div class="section">
-        <label class="section-label">Інфо. про зупинку <span class="hint">(клік по списку/карті)</span></label>
-        
-        <div style="display: flex; gap: 5px; margin-bottom: 10px; align-items: center;">
-          <div class="stop-num" id="current_stop_order" style="display: flex; margin-top: 0;" title="Порядковий номер">+</div>
-          <input type="text" id="stop-name" class="input-field" placeholder="Назва зупинки (укр.)" style="flex: 1;" />
-          <button class="btn-icon" title="Копіювати назву" onclick="copyField('stop-name')">📋</button>
-        </div>
-        
-        <div class="coords-row" style="display: flex; gap: 10px; margin-bottom: 15px;">
-          <div style="display: flex; gap: 5px; flex: 1;">
-            <input type="number" id="stop-lat" class="input-field coord-input" placeholder="Широта" step="0.000001" style="flex: 1;" />
-            <button class="btn-icon" title="Копіювати широту" onclick="copyField('stop-lat')">📋</button>
+      <div class="section" style="padding: 6px 8px;">
+        <div style="display:flex; gap:4px; margin-bottom:5px; align-items:center;">
+          <div class="stop-num" id="current_stop_order"
+            style="display:flex; margin-top:0; min-width:26px; height:26px; font-size:11px;" title="Порядковий номер">+
           </div>
-          <div style="display: flex; gap: 5px; flex: 1;">
-            <input type="number" id="stop-lon" class="input-field coord-input" placeholder="Довгота" step="0.000001" style="flex: 1;" />
-            <button class="btn-icon" title="Копіювати довготу" onclick="copyField('stop-lon')">📋</button>
+          <input type="text" id="stop-name" class="input-field" placeholder="Назва зупинки"
+            style="flex:1; font-size:11px; padding:5px 6px;" />
+        </div>
+        <div style="display:flex; flex-direction:column; gap:4px; margin-bottom:6px;">
+          <div style="display:flex; gap:4px; align-items:center;">
+            <input type="number" id="stop-lat" class="input-field coord-input" placeholder="Широта" step="0.000001"
+              style="padding:4px 6px; font-size:10px;" />
+            <button class="btn-icon copy-mini" onclick="copyField('stop-lat')" title="Копіювати широту"
+              style="width:24px; height:24px; font-size:11px; flex-shrink:0;">📋</button>
+          </div>
+          <div style="display:flex; gap:4px; align-items:center;">
+            <input type="number" id="stop-lon" class="input-field coord-input" placeholder="Довгота" step="0.000001"
+              style="padding:4px 6px; font-size:10px;" />
+            <button class="btn-icon copy-mini" onclick="copyField('stop-lon')" title="Копіювати довготу"
+              style="width:24px; height:24px; font-size:11px; flex-shrink:0;">📋</button>
+          </div>
+          <div style="display:flex; gap:4px; align-items:center;">
+            <input type="number" id="stop-angle" class="input-field coord-input" placeholder="Кут °" step="1"
+              style="padding:4px 6px; font-size:10px;" />
+            <button class="btn-icon copy-mini" onclick="copyField('stop-angle')" title="Копіювати кут"
+              style="width:24px; height:24px; font-size:11px; flex-shrink:0;">📋</button>
           </div>
         </div>
-
-        <div class="coords-row" style="display: flex; gap: 10px; margin-bottom: 15px;">
-          <div style="display: flex; gap: 5px; flex: 1;">
-            <input type="number" id="stop-angle" class="input-field coord-input" placeholder="Кут (°)" step="1" style="flex: 1;" />
-            <button class="btn-icon" title="Копіювати кут" onclick="copyField('stop-angle')">📋</button>
-          </div>
-          <div style="display: flex; gap: 5px; flex: 1;">
-            <!-- empty space for layout balance -->
-          </div>
-        </div>
-        
-        <div style="display: flex; gap: 10px;">
-          <button class="btn btn-primary" id="add-stop-btn" style="flex: 1;">＋ Додати / Оновити</button>
-        </div>
+        <button class="btn btn-primary" id="add-stop-btn"
+          style="width:60%; padding:5px; font-size:11px; margin:0 auto; display:block;">+
+          Додати</button>
       </div>
 
-      <!-- Stops list -->
-      <div class="section stops-section">
-        <div class="stops-header">
-          <label class="section-label">
-            Зупинки маршруту <span id="route-label">23 / А</span>
-            <span class="badge" id="stop-count">0</span>
-          </label>
-          <div class="stops-actions">
-            <button class="btn-icon" id="clear-btn" title="Очистити список">🗑</button>
-            <input type="file" id="import-file-input" accept=".json" style="display:none;" />
-            <button class="btn-icon" id="import-json-btn" title="Імпорт JSON">⬆️</button>
-            <button class="btn-icon" id="export-csv-btn" title="Експорт CSV">📥</button>
-            <button class="btn-icon" id="export-json-btn" title="Експорт JSON">{ }</button>
-          </div>
+    </aside>
+
+    <!-- MIDDLE PANEL: Stops List (glued to forms, before map) -->
+    <aside class="sidebar sidebar-list">
+      <div class="stops-header" style="padding:6px 8px; border-bottom:1px solid var(--border); flex-shrink:0;">
+        <div style="display:flex; align-items:center; gap:3px; flex-wrap:wrap;">
+          <span style="font-size:10px; color:var(--text-secondary); white-space:nowrap; flex:1;">
+            Зупинки <span id="route-label" style="color:var(--accent-light);">/ А</span>
+            <span class="badge" id="stop-count" style="margin-left:2px;">0</span>
+          </span>
+          <button class="btn-icon" id="clear-btn" title="Очистити" style="font-size:11px; padding:2px 3px;">🗑</button>
+          <input type="file" id="import-file-input" accept=".json" style="display:none;" />
+          <button class="btn-icon" id="import-json-btn" title="Імпорт JSON"
+            style="font-size:11px; padding:2px 3px;">⬆️</button>
+          <button class="btn-icon" id="export-csv-btn" title="Експорт CSV"
+            style="font-size:11px; padding:2px 3px;">📥</button>
+          <button class="btn-icon" id="export-json-btn" title="Експорт JSON" style="font-size:11px; padding:2px 3px;">{
+            }</button>
+          <button class="btn-icon" id="btn-osm" title="Показати OSM зупинки" onclick="toggleOsmStops()"
+            style="font-size:11px; padding:2px 3px;">🗺</button>
         </div>
-        <div id="stops-list" class="stops-list">
-          <div class="empty-state">Клікніть на карті щоб додати першу зупинку</div>
-        </div>
+      </div>
+      <div id="stops-list" class="stops-list" style="flex:1; overflow-y:auto;">
+        <div class="empty-state">Клікніть на карті щоб додати першу зупинку</div>
       </div>
     </aside>
 
-    <!-- Map -->
+    <!-- RIGHT: Map fills remaining space -->
     <main class="map-container">
       <div id="map"></div>
       <div class="map-hint">
         <span>🖱 Клік на карті — встановлює координати нової зупинки</span>
       </div>
     </main>
+
   </div>
 
   <!-- Toast -->
@@ -158,4 +159,5 @@
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="app.js"></script>
 </body>
+
 </html>
