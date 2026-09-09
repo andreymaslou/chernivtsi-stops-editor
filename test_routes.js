@@ -1,0 +1,1 @@
+﻿const fs = require('fs'); const d = JSON.parse(fs.readFileSync('аршрути/routes.txt')); for (const p in d.routes) { const r = d.routes[p]; if (r.rn === '7' || r.rn === '8' || r.rn === '6') { console.log(r.rn, '->', r.ri, r.tn, r.s, r.f); } }
