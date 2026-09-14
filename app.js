@@ -8,7 +8,10 @@ let state = {
   stopMarkers: [],
   dragIndex: null,
   activeStopIndex: null,
-  exportData: { content: '', filename: '' }
+  exportData: { content: '', filename: '' },
+  osmStops: [],
+  osmLayer: null,
+  osmVisible: false,
 };
 
 const AVAILABLE_TROLLEYS = ["1", "2", "3", "4", "5", "6", "6A", "8"];
@@ -30,9 +33,24 @@ const map = L.map('map', {
   zoomControl: true,
 });
 
-L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-  maxZoom: 19,
-}).addTo(map);
+// азові шари карти
+const baseLayers = {
+  'OSM — нові назви вулиць (актуально)': L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '© OpenStreetMap contributors'
+  }),
+  'CARTO Light (як було)': L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+    maxZoom: 19,
+    attribution: '© CARTO'
+  }),
+  'Супутник (Esri)': L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+    maxZoom: 19,
+    attribution: '© Esri'
+  })
+};
+
+baseLayers['OSM — нові назви вулиць (актуально)'].addTo(map);
+L.control.layers(baseLayers, null, { position: 'topright' }).addTo(map);
 
 // ===== Helpers =====
 function getRouteKey(dir) {
@@ -101,13 +119,95 @@ function populateRouteDropdown(type) {
 }
 
 // Function to handle Transport Type change via UI buttons
-window.setTransportType = function(type) {
+window.setTransportType = function (type) {
   state.currentTransportType = type;
   document.getElementById('btn-bus').classList.remove('active');
   document.getElementById('btn-trolley').classList.remove('active');
   document.getElementById('btn-' + type).classList.add('active');
   populateRouteDropdown(type);
   window.handleRouteChange();
+};
+
+// ===== OSM Stops Layer =====
+async function loadOsmStops() {
+  try {
+    const res = await fetch('osm_stops.json');
+    if (!res.ok) return;
+    state.osmStops = await res.json();
+    console.log(`OSM: завантажено ${state.osmStops.length} зупинок`);
+  } catch (e) {
+    console.log('OSM stops not available');
+  }
+}
+
+function findNearestOsmStop(lat, lon) {
+  if (!state.osmStops.length) return null;
+  let nearest = null;
+  let minDist = Infinity;
+  for (const s of state.osmStops) {
+    const dx = s.lat - lat;
+    const dy = s.lon - lon;
+    const d = dx * dx + dy * dy;
+    if (d < minDist) {
+      minDist = d;
+      nearest = s;
+    }
+  }
+  return nearest;
+}
+
+window.toggleOsmStops = function () {
+  if (state.osmVisible) {
+    if (state.osmLayer) {
+      map.removeLayer(state.osmLayer);
+      state.osmLayer = null;
+    }
+    state.osmVisible = false;
+    document.getElementById('btn-osm').classList.remove('active');
+    showToast('OSM зупинки приховано');
+  } else {
+    if (!state.osmStops.length) {
+      showToast('⚠ OSM зупинки не завантажено', 'error');
+      return;
+    }
+    state.osmLayer = L.layerGroup();
+    state.osmStops.forEach((s) => {
+      L.circleMarker([s.lat, s.lon], {
+        radius: 5,
+        color: '#2563eb',
+        fillColor: '#3b82f6',
+        fillOpacity: 0.7,
+        weight: 1.5,
+      })
+        .bindTooltip(s.name, { permanent: false, direction: 'top', className: 'osm-stop-label' })
+        .on('click', () => {
+          document.getElementById('stop-name').value = s.name;
+          document.getElementById('stop-lat').value = s.lat.toFixed(6);
+          document.getElementById('stop-lon').value = s.lon.toFixed(6);
+          const stops = getCurrentStops();
+          const badge = document.getElementById('current_stop_order');
+          badge.textContent = stops.length + 1;
+          badge.style.display = 'flex';
+          badge.style.background = '#4ade80';
+          if (state.pendingMarker) {
+            state.pendingMarker.setLatLng([s.lat, s.lon]);
+          } else {
+            state.pendingMarker = L.circleMarker([s.lat, s.lon], {
+              radius: 11, color: '#ffffff', fillColor: '#8b85ff',
+              fillOpacity: 1, weight: 2.5,
+            }).addTo(map);
+            state.pendingMarker.bindTooltip('Нова зупинка', {
+              permanent: true, direction: 'top', className: 'stop-marker-label',
+            }).openTooltip();
+          }
+        })
+        .addTo(state.osmLayer);
+    });
+    state.osmLayer.addTo(map);
+    state.osmVisible = true;
+    document.getElementById('btn-osm').classList.add('active');
+    showToast(`Показано ${state.osmStops.length} OSM зупинок`, 'success');
+  }
 };
 
 // ===== Map Click =====
@@ -136,6 +236,21 @@ map.on('click', function (e) {
     state.pendingMarker.bindTooltip('Нова зупинка', {
       permanent: true, direction: 'top', className: 'stop-marker-label',
     }).openTooltip();
+  }
+
+  // Try to suggest name from nearest OSM stop first
+  const nearest = findNearestOsmStop(lat, lng);
+  const nameInput = document.getElementById('stop-name');
+  if (nearest && !nameInput.value) {
+    // Only suggest if within ~50 meters (rough check: 0.0005 deg ≈ 50m)
+    const dx = nearest.lat - lat;
+    const dy = nearest.lon - lng;
+    if (Math.abs(dx) < 0.0005 && Math.abs(dy) < 0.0005) {
+      nameInput.value = nearest.name;
+      nameInput.style.borderColor = '#2563eb';
+      setTimeout(() => nameInput.style.borderColor = '', 1200);
+      return; // Skip Nominatim if OSM stop found
+    }
   }
 
   // Try reverse geocode for auto-name suggestion
@@ -271,9 +386,9 @@ function addStop() {
 
   const stops = getCurrentStops();
   const badgeText = document.getElementById('current_stop_order').textContent;
-  
+
   let newObj = { name, lat, lon };
-  
+
   // Angle parsing
   if (angleInput.trim() !== '') {
     newObj.angle = parseInt(angleInput);
@@ -299,7 +414,7 @@ function addStop() {
     map.removeLayer(state.pendingMarker);
     state.pendingMarker = null;
   }
-  
+
   recalculateAllAngles();
   redrawAllMarkers();
   renderStopsList();
@@ -317,7 +432,7 @@ function addStop() {
 function placeStopMarker(stop, index) {
   const angle = stop.angle !== undefined ? Math.round(stop.angle) : 0;
   const displayAngle = stop.angle !== undefined ? Math.round(stop.angle) : '-';
-  
+
   // The group <g> rotates the arrow, while circle and text stay upright
   const svgHTML = `
     <div style="width: 64px; height: 64px; filter: drop-shadow(0 3px 6px rgba(0,0,0,0.5));">
@@ -349,12 +464,12 @@ function placeStopMarker(stop, index) {
     document.getElementById('stop-lat').value = stop.lat.toFixed(6);
     document.getElementById('stop-lon').value = stop.lon.toFixed(6);
     document.getElementById('stop-angle').value = stop.angle !== undefined ? stop.angle : '';
-    
+
     const badge = document.getElementById('current_stop_order');
     badge.textContent = index;
     badge.style.display = 'flex';
     badge.style.background = 'linear-gradient(135deg, #6c63ff 0%, #8b85ff 100%)';
-    
+
     if (state.pendingMarker) {
       state.pendingMarker.setLatLng([stop.lat, stop.lon]);
     } else {
@@ -376,7 +491,7 @@ function redrawAllMarkers() {
 
   const stops = getCurrentStops();
   const latlngs = stops.map(s => [s.lat, s.lon]);
-  
+
   if (latlngs.length > 1) {
     routePolyline = L.polyline(latlngs, {
       color: '#4ade80',
@@ -389,7 +504,7 @@ function redrawAllMarkers() {
   stops.forEach((stop, i) => placeStopMarker(stop, i + 1));
 }
 
-window.highlightActiveStopInList = function(index) {
+window.highlightActiveStopInList = function (index) {
   state.activeStopIndex = index;
   const cards = document.querySelectorAll('.stop-card');
   cards.forEach(card => card.classList.remove('active-stop'));
@@ -421,7 +536,7 @@ function renderStopsList() {
       <div class="stop-num">${i + 1}</div>
       <div class="stop-info">
         <div class="stop-name-text">${escapeHtml(stop.name)}</div>
-        <div class="stop-coords">${stop.lat.toFixed(6)}, ${stop.lon.toFixed(6)} <span style="background:#555; padding:2px 6px; border-radius:4px; margin-left:5px; font-size: 10px;">∠ ${stop.angle !== undefined ? stop.angle : 0}°</span></div>
+        <div class="stop-coords"><span style="background:#555; padding:1px 5px; border-radius:4px; font-size:10px;">∠ ${stop.angle !== undefined ? stop.angle : 0}°</span></div>
       </div>
       <button class="stop-del" data-index="${i}" title="Видалити">✕</button>
     `;
@@ -430,13 +545,13 @@ function renderStopsList() {
     card.addEventListener('click', (e) => {
       if (e.target.classList.contains('stop-del')) return;
       map.flyTo([stop.lat, stop.lon], 17, { animate: true, duration: 0.8 });
-      
+
       // Populate inputs for easy copying to admin panel
       document.getElementById('stop-name').value = stop.name;
       document.getElementById('stop-lat').value = stop.lat.toFixed(6);
       document.getElementById('stop-lon').value = stop.lon.toFixed(6);
       document.getElementById('stop-angle').value = stop.angle !== undefined ? stop.angle : '';
-      
+
       // Move temp pending marker to highlight selection
       if (state.pendingMarker) {
         state.pendingMarker.setLatLng([stop.lat, stop.lon]);
@@ -451,7 +566,7 @@ function renderStopsList() {
       badge.textContent = i + 1;
       badge.style.display = 'flex';
       badge.style.background = 'linear-gradient(135deg, #6c63ff 0%, #8b85ff 100%)';
-      
+
       window.highlightActiveStopInList(i);
     });
 
@@ -499,7 +614,7 @@ function renderStopsList() {
 }
 
 function escapeHtml(s) {
-  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 // ===== Route change =====
@@ -521,7 +636,7 @@ async function loadRouteFromScrapedData() {
   state.activeStopIndex = null;
   const key = getRouteKey(state.currentDirection);
   const stops = getCurrentStops();
-  
+
   // Don't overwrite if it already has stops loaded
   if (stops.length > 0) return;
 
@@ -531,7 +646,7 @@ async function loadRouteFromScrapedData() {
     const dir = state.currentDirection;
     const rawNum = num.replace(/[^a-zA-Z0-9А-Яа-яЄєІіЇїҐґ]/g, '');
     let res = await fetch(`scraped_data/route_${type}_${rawNum}_${dir}.json`);
-    
+
     // Fallback to old format
     if (!res.ok) {
       res = await fetch(`scraped_data/route_${rawNum}_${dir}.json`);
@@ -629,7 +744,7 @@ document.getElementById('import-file-input').addEventListener('change', (e) => {
     try {
       const data = JSON.parse(ev.target.result);
       if (!Array.isArray(data)) throw new Error("JSON format error");
-      
+
       const stops = data.map(s => ({
         name: s.name,
         lat: s.lat,
@@ -637,17 +752,17 @@ document.getElementById('import-file-input').addEventListener('change', (e) => {
         angle: s.angle || 0,
         customAngle: s.angle !== undefined,
       }));
-      
+
       const key = getRouteKey();
       state.routes[key] = stops;
-      
+
       recalculateAllAngles();
       updateRouteLabel();
       redrawAllMarkers();
       renderStopsList();
 
       if (stops.length > 0) {
-          map.flyTo([stops[0].lat, stops[0].lon], 14);
+        map.flyTo([stops[0].lat, stops[0].lon], 14);
       }
 
       showToast('✅ Дані успішно імпортовано', 'success');
@@ -691,7 +806,7 @@ document.getElementById('download-btn').addEventListener('click', () => {
 });
 
 // ===== Copy Helper =====
-window.copyField = function(id) {
+window.copyField = function (id) {
   const el = document.getElementById(id);
   if (!el.value) return;
   navigator.clipboard.writeText(el.value).then(() => {
@@ -705,5 +820,6 @@ window.copyField = function(id) {
 
 // ===== Init =====
 populateRouteDropdown('bus');
+loadOsmStops();
 setTimeout(window.handleRouteChange, 100);
 
