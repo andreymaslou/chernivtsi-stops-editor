@@ -12,19 +12,34 @@ let state = {
   osmStops: [],
   osmLayer: null,
   osmVisible: false,
+  routeColors: {},
+  // Вибрані маршрути окремо для автобусів і тролейбусів + посилання на полілінії
+  selectedByType: { bus: [], trolley: [] },
+  stopsVisibleByType: { bus: [], trolley: [] },
+  staticStopMarkers: [],
+  routePolylines: {},
 };
+
+// Палитра цветов для маршрутов
+const ROUTE_COLORS = [
+  '#1e3a8a', '#2563eb', '#16a34a', '#dc2626', '#d97706',
+  '#7c3aed', '#0d9488', '#db2777', '#65a30d', '#a16207',
+  '#334155', '#be185d'
+];
+
+// Цвет по умолчанию (если у маршрута ещё не выбран свой)
+const DEFAULT_ROUTE_COLOR = '#1e3a8a';
 
 const AVAILABLE_TROLLEYS = ["1", "2", "3", "4", "5", "6", "6A", "8"];
 const AVAILABLE_BUSES = ["1", "3", "4", "5", "6", "7", "8", "8А", "9", "9A", "10", "10A", "13", "15", "15К", "19", "20", "21", "23", "24", "25", "26", "27", "29", "33", "34", "36", "37", "39", "43"];
 
 // DOM Elements
 const els = {
-  routeNumber: document.getElementById('route-number'),
   direction: document.getElementById('direction')
 };
 
 // Global polyline ref
-let routePolyline = null;
+// (використовується state.routePolylines — окремо для кожного маршруту)
 
 // ===== Init Map =====
 const map = L.map('map', {
@@ -76,7 +91,11 @@ function getRouteBearing(lat1, lon1, lat2, lon2) {
 }
 
 function recalculateAllAngles() {
-  const stops = getCurrentStops();
+  recalculateAllAnglesFor(state.currentTransportType, state.currentRouteNumber, state.currentDirection);
+}
+
+function recalculateAllAnglesFor(type, num, dir) {
+  const stops = state.routes[`${type}-${num}-${dir}`];
   if (!stops || stops.length === 0) return;
   for (let i = 0; i < stops.length; i++) {
     if (stops[i].customAngle) continue;
@@ -106,15 +125,183 @@ function updateRouteLabel() {
   document.getElementById('route-label').textContent = `${typeText} ${state.currentRouteNumber} / ${state.currentDirection}`;
 }
 
-// Populate Route Dropdown
+// Populate Route checkboxes
 function populateRouteDropdown(type) {
   const arr = type === 'trolley' ? AVAILABLE_TROLLEYS : AVAILABLE_BUSES;
-  els.routeNumber.innerHTML = '';
+  const container = document.getElementById('routes-checkboxes');
+  if (!container) return;
+
+  // Гарантируємо хоча б один обраний маршрут
+  if (!state.selectedByType[type]) state.selectedByType[type] = [];
+  if (state.selectedByType[type].length === 0) state.selectedByType[type] = [arr[0] || '1'];
+
+  container.innerHTML = '';
   arr.forEach(num => {
-    const opt = document.createElement('option');
-    opt.value = num;
-    opt.textContent = num;
-    els.routeNumber.appendChild(opt);
+    const row = document.createElement('div');
+    row.className = 'route-check-item' + (num === state.currentRouteNumber ? ' sel-active' : '');
+    row.title = `Маршрут ${num}`;
+
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.className = 'route-line-cb';
+    cb.checked = state.selectedByType[type].includes(num);
+    cb.dataset.num = num;
+    cb.onchange = () => window.toggleRoute(num, cb.checked);
+
+    const span = document.createElement('span');
+    span.className = 'route-check-num';
+    span.textContent = num;
+
+    // Галочка "показати зупинки" окремо для цього маршруту
+    const stopsWrap = document.createElement('label');
+    stopsWrap.className = 'stops-cb-wrap';
+    stopsWrap.title = 'Показати зупинки цього маршруту';
+    stopsWrap.onclick = (e) => e.stopPropagation();
+
+    const stopsCb = document.createElement('input');
+    stopsCb.type = 'checkbox';
+    stopsCb.className = 'route-stops-cb';
+    stopsCb.checked = (state.stopsVisibleByType[type] || []).includes(num);
+    stopsCb.onchange = () => window.toggleStops(num, stopsCb.checked);
+    stopsWrap.appendChild(stopsCb);
+
+    row.appendChild(cb);
+    row.appendChild(span);
+    row.appendChild(stopsWrap);
+    container.appendChild(row);
+  });
+
+  updateRoutesBtnLabel(type);
+}
+
+// Перемикання показу зупинок для конкретного маршруту
+window.toggleStops = function (num, checked) {
+  const type = state.currentTransportType;
+  if (!state.stopsVisibleByType[type]) state.stopsVisibleByType[type] = [];
+  const idx = state.stopsVisibleByType[type].indexOf(num);
+  if (checked && idx === -1) state.stopsVisibleByType[type].push(num);
+  if (!checked && idx !== -1) state.stopsVisibleByType[type].splice(idx, 1);
+  // Просто перемальовуємо маркери (лінії не чіпаємо)
+  redrawAllMarkers();
+};
+
+// Відкрити/закрити панель маршрутів
+window.toggleRoutesDropdown = function (event) {
+  if (event) event.stopPropagation();
+  const panel = document.getElementById('routes-panel');
+  if (!panel) return;
+  panel.classList.toggle('hidden');
+};
+
+document.addEventListener('click', (e) => {
+  const panel = document.getElementById('routes-panel');
+  const btn = document.getElementById('routes-btn');
+  if (panel && btn && !panel.contains(e.target) && !btn.contains(e.target)) {
+    panel.classList.add('hidden');
+  }
+});
+
+// Надпис на кнопці з кількістю обраних маршрутів
+function updateRoutesBtnLabel(type) {
+  const sel = state.selectedByType[type] || [];
+  const labelEl = document.getElementById('routes-btn-label');
+  const btn = document.getElementById('routes-btn');
+  if (labelEl) labelEl.textContent = sel.length;
+  if (btn) btn.title = sel.length ? `Обрані маршрути: ${sel.join(', ')}` : 'Оберіть маршрути';
+}
+
+// Перемикання галочки маршруту
+window.toggleRoute = function (num, checked) {
+  const type = state.currentTransportType;
+  if (!state.selectedByType[type]) state.selectedByType[type] = [];
+  const idx = state.selectedByType[type].indexOf(num);
+
+  if (checked && idx === -1) state.selectedByType[type].push(num);
+  if (!checked && idx !== -1) state.selectedByType[type].splice(idx, 1);
+
+  // Активний (редактований) маршрут — останній відмічений
+  if (checked) {
+    state.currentRouteNumber = num;
+    // Активний маршрут автоматично показує зупинки
+    if (!state.stopsVisibleByType[type]) state.stopsVisibleByType[type] = [];
+    if (!state.stopsVisibleByType[type].includes(num)) state.stopsVisibleByType[type].push(num);
+  } else if (state.currentRouteNumber === num) {
+    state.currentRouteNumber = state.selectedByType[type][0] || num;
+  }
+
+  updateRoutesBtnLabel(type);
+
+  // Підсвітити активний маршрут у списку
+  const items = document.querySelectorAll('#routes-checkboxes .route-check-item');
+  items.forEach(item => {
+    const cb = item.querySelector('input[type="checkbox"].route-line-cb');
+    if (cb && cb.dataset.num) {
+      item.classList.toggle('sel-active', cb.dataset.num === state.currentRouteNumber);
+      cb.checked = state.selectedByType[type].includes(cb.dataset.num);
+      const stopsCb = item.querySelector('.route-stops-cb');
+      if (stopsCb) stopsCb.checked = (state.stopsVisibleByType[type] || []).includes(cb.dataset.num);
+    }
+  });
+
+  window.handleRouteChange();
+};
+
+// ---- Route color palette ----
+function getRouteColorKey() {
+  return `${state.currentTransportType}-${state.currentRouteNumber}`;
+}
+
+function getRouteColor() {
+  return state.routeColors[getRouteColorKey()] || DEFAULT_ROUTE_COLOR;
+}
+
+function saveRouteColors() {
+  try { localStorage.setItem('routeColors', JSON.stringify(state.routeColors)); } catch (e) { /* ignore */ }
+}
+
+function loadRouteColors() {
+  try {
+    const raw = localStorage.getItem('routeColors');
+    if (raw) state.routeColors = JSON.parse(raw) || {};
+  } catch (e) { state.routeColors = {}; }
+}
+
+// Перерисовуємо полілінію поточного маршруту обраним кольором
+function applyRouteColor() {
+  const key = getRouteColorKey();
+  const pl = state.routePolylines[key];
+  if (pl) pl.setStyle({ color: getRouteColor() });
+  updatePaletteActive();
+}
+
+function buildColorPalette() {
+  const container = document.getElementById('color-palette');
+  if (!container) return;
+  ROUTE_COLORS.forEach(hex => {
+    const dot = document.createElement('button');
+    dot.type = 'button';
+    dot.style.cssText = `width:20px;height:20px;border-radius:50%;background:${hex};` +
+      'border:2px solid #555;cursor:pointer;padding:0;flex-shrink:0;transition:transform .1s;';
+    dot.title = hex;
+    dot.onclick = () => {
+      state.routeColors[getRouteColorKey()] = hex;
+      saveRouteColors();
+      applyRouteColor();
+    };
+    container.appendChild(dot);
+  });
+}
+
+function updatePaletteActive() {
+  const container = document.getElementById('color-palette');
+  if (!container) return;
+  const current = getRouteColor();
+  const dots = container.querySelectorAll('button');
+  dots.forEach(d => {
+    const isActive = (d.title === current);
+    d.style.border = isActive ? '3px solid #fff' : '2px solid #555';
+    d.style.transform = isActive ? 'scale(1.15)' : 'scale(1)';
+    d.style.boxShadow = isActive ? '0 0 6px rgba(255,255,255,0.6)' : 'none';
   });
 }
 
@@ -125,6 +312,11 @@ window.setTransportType = function (type) {
   document.getElementById('btn-trolley').classList.remove('active');
   document.getElementById('btn-' + type).classList.add('active');
   populateRouteDropdown(type);
+  // Активний маршрут — перший обраний маршрут нового типу
+  const sel = state.selectedByType[type] || [];
+  if (sel.length > 0 && !sel.includes(state.currentRouteNumber)) {
+    state.currentRouteNumber = sel[0];
+  }
   window.handleRouteChange();
 };
 
@@ -485,23 +677,68 @@ function placeStopMarker(stop, index) {
 }
 
 function redrawAllMarkers() {
+  // Прибрати всі полілінії
+  Object.values(state.routePolylines).forEach(pl => map.removeLayer(pl));
+  state.routePolylines = {};
+
+  // Прибрати маркери зупинок
   state.stopMarkers.forEach(m => map.removeLayer(m));
   state.stopMarkers = [];
-  if (routePolyline) map.removeLayer(routePolyline);
+  state.staticStopMarkers.forEach(m => map.removeLayer(m));
+  state.staticStopMarkers = [];
 
-  const stops = getCurrentStops();
-  const latlngs = stops.map(s => [s.lat, s.lon]);
+  // Намалювати лінії для ВСІХ обраних маршрутів
+  const type = state.currentTransportType;
+  const dir = state.currentDirection;
+  const selected = state.selectedByType[type] || [];
+  selected.forEach(num => {
+    const dataKey = `${type}-${num}-${dir}`;
+    const stops = state.routes[dataKey] || [];
+    const latlngs = stops.map(s => [s.lat, s.lon]);
+    if (latlngs.length > 1) {
+      const colorKey = `${type}-${num}`;
+      const pl = L.polyline(latlngs, {
+        color: state.routeColors[colorKey] || DEFAULT_ROUTE_COLOR,
+        weight: 6,
+        opacity: 1,
+        lineJoin: 'round'
+      }).addTo(map);
+      state.routePolylines[colorKey] = pl;
+    }
+  });
 
-  if (latlngs.length > 1) {
-    routePolyline = L.polyline(latlngs, {
-      color: '#4ade80',
-      weight: 3,
-      opacity: 0.6,
-      dashArray: '5, 8'
-    }).addTo(map);
-  }
+  // Маркери зупинок — для маршрутів з галочкою "зуп"
+  const stopsVisible = state.stopsVisibleByType[type] || [];
+  selected.forEach(num => {
+    if (!stopsVisible.includes(num)) return;
+    const dataKey = `${type}-${num}-${dir}`;
+    const stops = state.routes[dataKey] || [];
+    const colorKey = `${type}-${num}`;
+    const color = state.routeColors[colorKey] || DEFAULT_ROUTE_COLOR;
 
-  stops.forEach((stop, i) => placeStopMarker(stop, i + 1));
+    if (num === state.currentRouteNumber) {
+      // Активний маршрут — інтерактивні маркери (редагування)
+      stops.forEach((stop, i) => placeStopMarker(stop, i + 1));
+    } else {
+      // Інші маршрути — прості кружки в колір маршруту
+      stops.forEach((stop, i) => placeStaticStopMarker(stop, i + 1, color));
+    }
+  });
+}
+
+// Простий (неклікабельний) маркер зупинки для додаткових маршрутів
+function placeStaticStopMarker(stop, index, color) {
+  const marker = L.circleMarker([stop.lat, stop.lon], {
+    radius: 6,
+    color: '#ffffff',
+    weight: 1.5,
+    fillColor: color,
+    fillOpacity: 0.95,
+  }).addTo(map);
+  marker.bindTooltip(`${index}. ${stop.name}`, {
+    permanent: false, direction: 'top', className: 'stop-marker-label',
+  });
+  state.staticStopMarkers.push(marker);
 }
 
 window.highlightActiveStopInList = function (index) {
@@ -619,31 +856,46 @@ function escapeHtml(s) {
 
 // ===== Route change =====
 window.handleRouteChange = async () => {
-  // Clear map markers before loading new route
-  state.stopMarkers.forEach(m => map.removeLayer(m));
-  state.stopMarkers = [];
-  if (routePolyline) map.removeLayer(routePolyline);
-
-  state.currentRouteNumber = els.routeNumber.value;
-  state.currentDirection = els.direction.value;
+  state.currentDirection = els.direction ? els.direction.value : state.currentDirection;
+  const type = state.currentTransportType;
+  const sel = state.selectedByType[type] || [];
+  if (!sel.includes(state.currentRouteNumber)) {
+    state.currentRouteNumber = sel[0] || state.currentRouteNumber;
+  }
+  // Активний маршрут завжди показує свої зупинки (можна вимкнути галочкою)
+  if (!state.stopsVisibleByType[type]) state.stopsVisibleByType[type] = [];
+  if (!state.stopsVisibleByType[type].includes(state.currentRouteNumber)) {
+    state.stopsVisibleByType[type].push(state.currentRouteNumber);
+  }
   updateRouteLabel();
-  await loadRouteFromScrapedData();
-  redrawAllMarkers();
-  renderStopsList();
+  await loadRoutesForSelected();
 };
 
-async function loadRouteFromScrapedData() {
+// Завантажити дані для ВСІХ обраних маршрутів поточного типу
+async function loadRoutesForSelected() {
+  const type = state.currentTransportType;
+  const dir = state.currentDirection;
+  const selected = state.selectedByType[type] || [];
+  if (!selected.length) {
+    redrawAllMarkers();
+    renderStopsList();
+    updatePaletteActive();
+    return;
+  }
   state.activeStopIndex = null;
-  const key = getRouteKey(state.currentDirection);
-  const stops = getCurrentStops();
+  await Promise.all(selected.map(num => loadRouteDataSet(type, num, dir, num === state.currentRouteNumber)));
+  redrawAllMarkers();
+  renderStopsList();
+  updatePaletteActive();
+}
 
-  // Don't overwrite if it already has stops loaded
-  if (stops.length > 0) return;
+async function loadRouteDataSet(type, num, dir, notify = false) {
+  const key = `${type}-${num}-${dir}`;
+  const stops = state.routes[key];
+  // Не перезаписуємо, якщо маршрут вже завантажений
+  if (stops && stops.length > 0) return;
 
   try {
-    const type = state.currentTransportType;
-    const num = state.currentRouteNumber;
-    const dir = state.currentDirection;
     const rawNum = num.replace(/[^a-zA-Z0-9А-Яа-яЄєІіЇїҐґ]/g, '');
     let res = await fetch(`scraped_data/route_${type}_${rawNum}_${dir}.json`);
 
@@ -662,12 +914,12 @@ async function loadRouteFromScrapedData() {
         angle: s.angle || 0,
         customAngle: s.angle !== undefined
       }));
-      recalculateAllAngles();
-      showToast(`✅ Завантажено маршрут ${num} (${dir})`, 'success');
-      redrawAllMarkers();
-      renderStopsList();
-      if (state.routes[key][0]) {
-        map.flyTo([state.routes[key][0].lat, state.routes[key][0].lon], 13);
+      recalculateAllAnglesFor(type, num, dir);
+      if (notify) {
+        showToast(`✅ Завантажено маршрут ${num} (${dir})`, 'success');
+        if (state.routes[key][0]) {
+          map.flyTo([state.routes[key][0].lat, state.routes[key][0].lon], 13);
+        }
       }
     }
   } catch (e) {
@@ -691,7 +943,7 @@ document.getElementById('export-csv-btn').addEventListener('click', () => {
   const stops = getCurrentStops();
   if (!stops.length) { showToast('⚠ Список зупинок порожній', 'error'); return; }
 
-  const num = document.getElementById('route-number').value.trim();
+  const num = state.currentRouteNumber;
   const dir = document.getElementById('direction').value;
   const dirNum = dir === 'A' ? 1 : 2;
 
@@ -710,7 +962,7 @@ document.getElementById('export-json-btn').addEventListener('click', () => {
   const stops = getCurrentStops();
   if (!stops.length) { showToast('⚠ Список зупинок порожній', 'error'); return; }
 
-  const num = document.getElementById('route-number').value.trim();
+  const num = state.currentRouteNumber;
   const dir = document.getElementById('direction').value;
   const dirNum = dir === 'A' ? 1 : 2;
 
@@ -819,6 +1071,8 @@ window.copyField = function (id) {
 };
 
 // ===== Init =====
+loadRouteColors();
+buildColorPalette();
 populateRouteDropdown('bus');
 loadOsmStops();
 setTimeout(window.handleRouteChange, 100);

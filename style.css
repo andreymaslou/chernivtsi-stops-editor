@@ -30,6 +30,74 @@
   --font: 'Inter', sans-serif;
 }
 
+/* ===== Routes multi-select panel ===== */
+.routes-panel {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 2px;
+  max-height: 200px;
+  overflow-y: auto;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 4px;
+  scrollbar-width: thin;
+}
+
+.routes-panel.hidden {
+  display: none;
+}
+
+.route-check-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 5px;
+  font-size: 11px;
+  cursor: pointer;
+  border-radius: 4px;
+  color: var(--text-primary);
+  user-select: none;
+  white-space: nowrap;
+}
+
+.route-check-item:hover {
+  background: var(--bg-card-hover);
+}
+
+.route-check-item input[type="checkbox"] {
+  accent-color: var(--accent);
+  cursor: pointer;
+  margin: 0;
+}
+
+.route-check-item.sel-active .route-check-num {
+  color: var(--accent-light);
+  font-weight: 700;
+}
+
+.route-check-item input[type="checkbox"].route-stops-cb {
+  margin-left: auto;
+  width: 14px;
+  height: 14px;
+  accent-color: var(--success);
+  opacity: 0.75;
+}
+
+.route-check-item input[type="checkbox"].route-stops-cb:hover {
+  opacity: 1;
+}
+
+.route-check-item .stops-cb-wrap {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--text-secondary);
+  font-size: 9px;
+  white-space: nowrap;
+}
+
 html,
 body {
   height: 100%;

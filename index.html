@@ -45,15 +45,32 @@
             <button id="btn-trolley" class="type-btn" onclick="setTransportType('trolley')"
               style="padding:3px 6px; font-size:11px;">🚎</button>
           </div>
-          <select id="route-number" class="input-field select-field"
-            style="width:46px; padding:3px 2px; font-size:12px;" onchange="handleRouteChange()">
-            <!-- Options populated by JS -->
-          </select>
+          <div style="flex-shrink:0;">
+            <button id="routes-btn" type="button" class="input-field select-field"
+              onclick="toggleRoutesDropdown(event)"
+              style="width:64px; padding:3px 2px; font-size:12px; cursor:pointer; display:flex; align-items:center; gap:3px; justify-content:center;">
+              <span id="routes-btn-label">0</span><span>☑</span>
+            </button>
+          </div>
           <select id="direction" class="input-field select-field" style="width:52px; padding:3px 2px; font-size:11px;"
             onchange="handleRouteChange()">
             <option value="A">А ➡</option>
             <option value="B">Б ⬅</option>
           </select>
+        </div>
+      </div>
+
+      <!-- Routes multi-select (розкривається в потоці, не накриває решту) -->
+      <div class="section" style="padding: 3px 8px;">
+        <div id="routes-panel" class="routes-panel hidden">
+          <div id="routes-checkboxes"></div>
+        </div>
+      </div>
+
+      <!-- Route color palette -->
+      <div class="section" style="padding: 5px 8px;">
+        <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;" id="color-palette">
+          <span style="font-size:10px; color:#aaa; white-space:nowrap;">🎨 Колір:</span>
         </div>
       </div>
 
