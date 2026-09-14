@@ -1,0 +1,23 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.venv
+venv
+env
+
+# Секреты и окружение
+.env
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Служебные / временные файлы
+*.log

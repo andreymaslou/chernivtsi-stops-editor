@@ -1,0 +1,9 @@
+services:
+  api_router:
+    build: .
+    container_name: api_router
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    restart: always
