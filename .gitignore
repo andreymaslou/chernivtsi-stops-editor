@@ -15,3 +15,6 @@ __pycache__/
 data/
 !data/.gitkeep
 
+# Логи локального запуска uvicorn (пишутся при запуске сервера на машине)
+_server_*.log
+
