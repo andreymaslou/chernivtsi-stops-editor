@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="uk">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Адмінка — сленг і скарги</title>
+  <style>
+    :root {
+      --bg: #14161a;
+      --panel: #1e2126;
+      --panel2: #262a31;
+      --text: #e8eaed;
+      --muted: #9aa0a6;
+      --accent: #4f8cff;
+      --danger: #ff5c5c;
+      --ok: #43c463;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 15px/1.45 -apple-system, "Segoe UI", Roboto, sans-serif;
+      padding: 12px;
+    }
+
+    a { color: var(--accent); }
+
+    h1 { font-size: 18px; margin: 0 0 4px; }
+    .hint { color: var(--muted); font-size: 13px; margin-bottom: 12px; }
+
+    .tabs { display: flex; gap: 6px; margin-bottom: 12px; }
+
+    .tab {
+      background: var(--panel2);
+      border: 1px solid #333941;
+      border-radius: 8px;
+      padding: 7px 13px;
+      cursor: pointer;
+      color: var(--text);
+      font: inherit;
+    }
+
+    .tab.active { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+
+    input[type="text"], input[type="search"], textarea, select {
+      background: var(--panel2);
+      color: var(--text);
+      border: 1px solid #333941;
+      border-radius: 7px;
+      padding: 6px 8px;
+      font: inherit;
+      width: 100%;
+    }
+
+    button {
+      font: inherit;
+      border: 0;
+      border-radius: 7px;
+      padding: 6px 11px;
+      background: var(--accent);
+      color: #fff;
+      cursor: pointer;
+      font-weight: 600;
+    }
+
+    button.secondary { background: var(--panel2); color: var(--text); border: 1px solid #333941; }
+    button.danger { background: var(--danger); }
+    button:disabled { opacity: .45; cursor: not-allowed; }
+
+    .toolbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
+    .toolbar .grow { flex: 1; min-width: 180px; }
+
+    .stat {
+      background: var(--panel);
+      border-radius: 8px;
+      padding: 8px 10px;
+      font-size: 13px;
+      color: var(--muted);
+      margin-bottom: 10px;
+    }
+
+    .stat b { color: var(--text); }
+
+    .card {
+      background: var(--panel);
+      border: 1px solid #2c3138;
+      border-radius: 9px;
+      padding: 10px;
+      margin-bottom: 10px;
+    }
+
+    .stop-grid {
+      display: grid;
+      grid-template-columns: 1.2fr 1.4fr 1.2fr auto;
+      gap: 8px;
+      align-items: start;
+    }
+
+    .stop-name { font-weight: 600; }
+    .stop-meta { color: var(--muted); font-size: 12px; }
+    .row-actions { display: flex; gap: 6px; align-items: center; }
+    .generic { display: flex; gap: 5px; align-items: center; color: var(--muted); font-size: 12px; white-space: nowrap; }
+
+    .kind { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 12px; background: #3a3320; color: #ffd88a; }
+    .kind.danger { background: #4a2020; color: #ff9a9a; }
+
+    details { margin-top: 8px; }
+    summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+    pre { background: #101216; padding: 8px; border-radius: 6px; overflow: auto; font-size: 12px; }
+
+    .hidden { display: none !important; }
+    .saved { color: var(--ok); font-size: 12px; }
+  </style>
+</head>
+
+<body>
+  <h1>⚙️ Адмінка емелятора</h1>
+  <div class="hint">
+    Тут правляться сленгові псевдоніми й перейменування зупинок (впливає на розпізнавання фраз одразу),
+    а також лежать скарги «це бред» із емулятора.
+    · <a href="/ui/emulator.html">← до емулятора</a>
+  </div>
+
+  <div class="tabs">
+    <button class="tab active" id="tab-slang">🗣 Сленг</button>
+    <button class="tab" id="tab-feedback">🚩 Скарги</button>
+  </div>
+
+  <!-- ===================== СЛЕНГ ===================== -->
+  <section id="view-slang">
+    <div class="stat" id="slang-stats">завантажую...</div>
+
+    <div class="toolbar">
+      <input type="search" id="slang-search" class="grow" placeholder="Пошук за назвою або псевдонімом (напр. собор, тралка, універ)" />
+      <button class="secondary" id="slang-reload">Оновити</button>
+    </div>
+
+    <div id="slang-list"></div>
+  </section>
+
+  <!-- ===================== СКАРГИ ===================== -->
+  <section id="view-feedback" class="hidden">
+    <div class="stat" id="feedback-stats">завантажую...</div>
+
+    <div class="toolbar">
+      <select id="feedback-kind" style="max-width:220px;">
+        <option value="">усі типи</option>
+        <option value="nonsense">Повна нісенітниця</option>
+        <option value="wrong_route">Не той маршрут</option>
+        <option value="wrong_stop">Не та зупинка</option>
+        <option value="wrong_time">Не той час</option>
+        <option value="other">Інше</option>
+      </select>
+      <button class="secondary" id="feedback-reload">Оновити</button>
+      <span class="hint" id="feedback-note" style="margin:0;"></span>
+    </div>
+
+    <div id="feedback-list"></div>
+  </section>
+
+  <script src="admin.js"></script>
+</body>
+
+</html>

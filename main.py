@@ -23,13 +23,24 @@ import os
 import re
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
+from fastapi.staticfiles import StaticFiles
 from openai import OpenAI
 from pydantic import BaseModel
 from rapidfuzz import fuzz, process
+
+from feedback_store import feedback_stats, list_feedback, save_feedback
+from live_layer import LiveTracker
+from slang_store import (
+    apply_overrides,
+    delete_stop,
+    load_overrides,
+    overrides_stats,
+    upsert_stop,
+)
 
 # ---------------------------------------------------------------------------
 # Инициализация окружения и логирования
@@ -481,7 +492,7 @@ def _parse_llm_json(raw_content: str) -> Optional[Dict]:
 # Глобальное хранилище "загруженных при старте" данных. Инициализируется
 # в lifespan-обработчике ниже, чтобы файлы читались один раз при поднятии
 # сервера, а не на каждый запрос.
-app_state: Dict[str, object] = {"locator": None}
+app_state: Dict[str, object] = {"locator": None, "live": None}
 
 
 @asynccontextmanager
@@ -492,13 +503,27 @@ async def lifespan(app: FastAPI):
     единственный экземпляр Locator на всё время жизни приложения.
     """
     logger.info("Инициализация сервера: загрузка stops.json и streets.json...")
-    stops = load_stops(STOPS_PATH)
     streets = load_streets_geojson(STREETS_PATH)
+    # Сленговые правки (data/slang_overrides.json) применяем сразу: псевдонимы
+    # вида «Соборка»/«Тралка» и переименование безымянных остановок должны
+    # работать и в /api/route, и в эмуляторе, и после перезапуска контейнера.
+    stops = apply_overrides(load_stops(STOPS_PATH))
+    app_state["streets"] = streets
     app_state["locator"] = Locator(stops=stops, streets=streets)
     logger.info(
-        "Locator готов: %d остановок, %d улиц.", len(stops), len(streets)
+        "Locator готов: %d остановок (после правок сленга), %d улиц.", len(stops), len(streets)
     )
+
+    # Живой GPS-слой (trans-gps.cv.ua): фоновый опрос ТС раз в 5 секунд.
+    # Источник внешний и нестабильный, поэтому его падение не должно мешать
+    # поднятию API — LiveTracker.start() не пробрасывает ошибки наружу.
+    live = LiveTracker()
+    app_state["live"] = live
+    await live.start()
+
     yield
+
+    await live.stop()
     logger.info("Остановка сервера.")
 
 
@@ -537,12 +562,15 @@ class RouteResponse(BaseModel):
 
 @app.get("/health")
 def health_check():
-    """Простой health-check: подтверждает, что данные успешно загружены."""
+    """Простой health-check: данные локатора + состояние живого GPS-слоя."""
     locator: Locator = app_state["locator"]
+    live: Optional[LiveTracker] = app_state.get("live")
     return {
         "status": "ok",
         "stops_loaded": len(locator.stops) if locator else 0,
         "streets_loaded": len(locator.streets) if locator else 0,
+        "live_routes_loaded": live.route_count if live else 0,
+        "live_polls_done": live.poll_count if live else 0,
     }
 
 
@@ -598,6 +626,263 @@ def get_route(request: RouteRequest):
             to_query=to_query,
         ),
     )
+
+
+# ---------------------------------------------------------------------------
+# Справочник остановок для UI и будущего RN-клиента
+# ---------------------------------------------------------------------------
+
+@app.get("/api/stops")
+def get_stops(q: Optional[str] = Query(None, description="Подстрока названия или псевдонима")):
+    """
+    Отдаёт остановки: id, название, координаты, псевдонимы.
+
+    Названия и псевдонимы — уже ПОСЛЕ правок сленга, чтобы эмулятор рисовал
+    и искал ровно то же, что возвращает Locator (иначе «Соборка» в подсказке
+    и «пл. Соборна» на карте выглядели бы как разные места).
+    """
+    locator: Optional[Locator] = app_state.get("locator")
+    if locator is None:
+        raise HTTPException(status_code=503, detail="Locator is not initialized yet")
+
+    stops = locator.stops
+    if q:
+        needle = q.strip().lower()
+        stops = [
+            stop for stop in stops
+            if needle in str(stop.get("name", "")).lower()
+            or any(needle in str(alias).lower() for alias in (stop.get("aliases") or []))
+        ]
+
+    return {
+        "count": len(stops),
+        "stops": [
+            {
+                "id": stop["id"],
+                "name": stop["name"],
+                "lat": stop["lat"],
+                "lon": stop["lon"],
+                "aliases": stop.get("aliases") or [],
+            }
+            for stop in stops
+        ],
+    }
+
+
+# ---------------------------------------------------------------------------
+# Живой GPS-слой (trans-gps.cv.ua)
+# ---------------------------------------------------------------------------
+
+def _parse_id_list(raw: Optional[str]) -> Optional[List[int]]:
+    """
+    Разбирает список routeId из query-параметра.
+
+    Формат совместим с сайтом перевозчика (id через подчёркивание):
+        ?routes=6_9_12   |   ?routes=6,9,12
+    None или пустая строка означают «без ограничения по маршрутам».
+    """
+    if not raw:
+        return None
+    ids = [int(part) for part in re.split(r"[^0-9]+", raw) if part]
+    return ids or None
+
+
+def _parse_type_list(raw: Optional[str]) -> Optional[List[str]]:
+    """Разбирает список типов ТС: ?vehicle_types=bus,trolley"""
+    if not raw:
+        return None
+    types = [part.strip().lower() for part in re.split(r"[^A-Za-z]+", raw) if part.strip()]
+    return types or None
+
+
+@app.get("/api/live")
+def get_live_vehicles(
+    only_fresh: bool = Query(
+        True,
+        description="Только ТС со свежим GPS-треком (<= 5 мин) и не в депо",
+    ),
+    include_depo: bool = Query(False, description="Включать ТС, стоящие в депо"),
+    routes: Optional[str] = Query(
+        None, description="Фильтр по routeId источника, напр. 6_9_12 или 6,9,12"
+    ),
+    vehicle_types: Optional[str] = Query(
+        None, description="Фильтр по типу ТС: bus, trolley"
+    ),
+):
+    """
+    Живой GPS-слой: текущее положение транспорта Черновцов.
+
+    Данные берутся с открытого сайта перевозчика trans-gps.cv.ua
+    (/map/tracker/), опрашиваются фоновой задачей раз в 5 секунд и
+    отдаются уже нормализованными:
+
+        speed / orientation -> float (в источнике это строки "000.0");
+        gpstime             -> плюс age_seconds и status (live/stale/depo);
+        routeId             -> подпись и цвет маршрута из /map/routes/1|2;
+        routeColour         -> CSS-имя, продублировано в hex для RN-клиента.
+
+    Поле counts считается ДО фильтров, поэтому клиент может показать
+    «живих: 12 із 26 машин». Промежуточного кэша нет: срез уже лежит
+    в памяти процесса и обновляется фоновым поллером.
+    """
+    live: Optional[LiveTracker] = app_state.get("live")
+    if live is None:
+        raise HTTPException(status_code=503, detail="Live layer is not initialized yet")
+
+    return live.snapshot(
+        only_fresh=only_fresh,
+        include_depo=include_depo,
+        route_ids=_parse_id_list(routes),
+        vehicle_types=_parse_type_list(vehicle_types),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Сленг: псевдонимы и переименование остановок (админка)
+# ---------------------------------------------------------------------------
+
+class SlangStopRequest(BaseModel):
+    """Правка одной остановки. None = «это поле не трогать»."""
+
+    stop_id: int
+    aliases: Optional[List[str]] = None
+    name: Optional[str] = None
+    generic: Optional[bool] = None
+    comment: Optional[str] = None
+
+
+def _rebuild_locator() -> Locator:
+    """
+    Пересобирает Locator после правок сленга.
+
+    Перечитываем stops.json и применяем свежие правки — это десятки
+    миллисекунд, зато изменения из админки действуют сразу, без перезапуска
+    контейнера (на телефоне это важно: правишь сленг и тут же проверяешь).
+    """
+    streets = app_state.get("streets") or []
+    stops = apply_overrides(load_stops(STOPS_PATH))
+    locator = Locator(stops=stops, streets=streets)
+    app_state["locator"] = locator
+    logger.info("Locator пересобран после правок сленга: %d остановок.", len(stops))
+    return locator
+
+
+@app.get("/api/slang")
+def get_slang(
+    include_stops: bool = Query(True, description="Отдать полный список остановок с псевдонимами"),
+):
+    """
+    Отдаёт правки сленга и (по желанию) полный список остановок.
+
+    Админке нужен именно полный список: чтобы дописать псевдоним, надо видеть
+    названия и текущие alias'ы всех остановок города.
+    """
+    payload: Dict[str, Any] = {
+        "overrides": load_overrides(),
+        "stats": overrides_stats(),
+    }
+    if include_stops:
+        payload["stops"] = [
+            {
+                "id": stop["id"],
+                "name": stop["name"],
+                "lat": stop.get("lat"),
+                "lon": stop.get("lon"),
+                "aliases": stop.get("aliases") or [],
+                "generic": bool(stop.get("generic")),
+            }
+            for stop in apply_overrides(load_stops(STOPS_PATH), keep_generic=True)
+        ]
+    return payload
+
+
+@app.post("/api/slang")
+def save_slang(request: SlangStopRequest):
+    """Добавляет или обновляет правку остановки и сразу пересобирает Locator."""
+    raw_stops = load_stops(STOPS_PATH)
+    if not any(str(stop.get("id")) == str(request.stop_id) for stop in raw_stops):
+        raise HTTPException(
+            status_code=404,
+            detail=f"Остановка {request.stop_id} не найдена в stops.json",
+        )
+
+    entry = upsert_stop(
+        request.stop_id,
+        aliases=request.aliases,
+        name=request.name,
+        generic=request.generic,
+        comment=request.comment,
+    )
+    _rebuild_locator()
+    return {"saved": entry, "stop_id": request.stop_id, "stats": overrides_stats()}
+
+
+@app.delete("/api/slang/{stop_id}")
+def remove_slang(stop_id: int):
+    """Убирает правку остановки (возврат к данным stops.json)."""
+    removed = delete_stop(stop_id)
+    _rebuild_locator()
+    return {"removed": removed, "stop_id": stop_id, "stats": overrides_stats()}
+
+
+# ---------------------------------------------------------------------------
+# Жалобы на ответы эмулятора («це бред») — на разбор
+# ---------------------------------------------------------------------------
+
+class FeedbackRequest(BaseModel):
+    """Жалоба из эмулятора: что спросили, что показали, что не так."""
+
+    kind: str = "other"
+    comment: Optional[str] = None
+    user_text: Optional[str] = None
+    response: Optional[Dict[str, Any]] = None
+    client: Optional[Dict[str, Any]] = None
+
+
+@app.post("/api/feedback")
+def create_feedback(request: FeedbackRequest):
+    """
+    Принимает жалобу и складывает её в data/feedback.
+
+    Пишем и одиночный JSON (удобно открыть один кейс), и строку в дневном
+    JSONL (удобно посмотреть списком) — детали в feedback_store.
+    """
+    if not (request.comment or request.user_text):
+        raise HTTPException(
+            status_code=400,
+            detail="Нужен хотя бы комментарий или исходный текст запроса",
+        )
+
+    payload = request.model_dump() if hasattr(request, "model_dump") else request.dict()
+    record = save_feedback(payload)
+    return {
+        "saved": True,
+        "id": record["id"],
+        "created_at": record["created_at"],
+        "kind": record["kind"],
+    }
+
+
+@app.get("/api/feedback")
+def get_feedback(
+    limit: int = Query(50, ge=1, le=500),
+    day: Optional[str] = Query(None, description="Только за конкретный день, формат YYYY-MM-DD"),
+):
+    """Отдаёт последние жалобы и сводку по типам (для админки)."""
+    return {"stats": feedback_stats(), "items": list_feedback(limit=limit, day=day)}
+
+
+# ---------------------------------------------------------------------------
+# UI эмулятора отдаётся тем же контейнером
+# ---------------------------------------------------------------------------
+
+# Наружу открываем ТОЛЬКО папку web: в корне репозитория лежит .env, и монтаж
+# корня как статики выставил бы его в открытый доступ.
+WEB_DIR = BASE_DIR / "web"
+if WEB_DIR.is_dir():
+    app.mount("/ui", StaticFiles(directory=WEB_DIR, html=True), name="ui")
+else:
+    logger.warning("Папка %s не найдена — UI эмулятора будет недоступен", WEB_DIR)
 
 
 if __name__ == "__main__":

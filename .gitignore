@@ -9,3 +9,9 @@ download_globals.js
 .env
 __pycache__/
 *.pyc
+
+# Данные эмулятора: сленговые правки и логи жалоб живут на сервере,
+# в репозиторий не попадают (в Docker монтируются томом ./data:/app/data).
+data/
+!data/.gitkeep
+

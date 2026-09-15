@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="uk">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>AI-емулятор — Транспорт Чернівці</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    :root {
+      --bg: #14161a;
+      --panel: #1e2126;
+      --panel2: #262a31;
+      --text: #e8eaed;
+      --muted: #9aa0a6;
+      --accent: #4f8cff;
+      --danger: #ff5c5c;
+      --ok: #43c463;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 15px/1.45 -apple-system, "Segoe UI", Roboto, sans-serif;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .panel {
+      background: var(--panel);
+      padding: 10px;
+      border-bottom: 1px solid #000;
+      z-index: 1000;
+    }
+
+    .head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 8px;
+      font-weight: 600;
+    }
+
+    .head a { color: var(--accent); text-decoration: none; font-size: 13px; font-weight: 500; }
+
+    textarea {
+      width: 100%;
+      min-height: 58px;
+      resize: vertical;
+      background: var(--panel2);
+      color: var(--text);
+      border: 1px solid #333941;
+      border-radius: 8px;
+      padding: 8px 10px;
+      font: inherit;
+    }
+
+    .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+
+    .chip {
+      background: var(--panel2);
+      border: 1px solid #333941;
+      border-radius: 14px;
+      padding: 3px 9px;
+      font-size: 12px;
+      color: var(--muted);
+      cursor: pointer;
+    }
+
+    .row { display: flex; gap: 8px; flex-wrap: wrap; }
+
+    button {
+      font: inherit;
+      border: 0;
+      border-radius: 8px;
+      padding: 9px 14px;
+      cursor: pointer;
+      background: var(--accent);
+      color: #fff;
+      font-weight: 600;
+    }
+
+    button.secondary { background: var(--panel2); color: var(--text); border: 1px solid #333941; }
+    button.danger { background: var(--danger); }
+    button:disabled { opacity: .45; cursor: not-allowed; }
+
+    .status { margin-top: 8px; font-size: 13px; color: var(--muted); }
+    .status.error { color: var(--danger); }
+    .status.ok { color: var(--ok); }
+
+    .answer {
+      margin-top: 8px;
+      background: var(--panel2);
+      border-radius: 8px;
+      padding: 8px 10px;
+      font-size: 14px;
+      display: none;
+      white-space: pre-wrap;
+    }
+
+    .badge { display: inline-block; padding: 1px 7px; border-radius: 10px; font-size: 12px; margin-right: 6px; }
+    .badge.live { background: #1e4620; color: #9ae6a8; }
+    .badge.plan { background: #3a3320; color: #ffd88a; }
+
+    .map { flex: 1; min-height: 45vh; }
+
+    .hidden { display: none !important; }
+
+    @media (max-width: 760px) {
+      .panel { max-height: 62vh; overflow: auto; }
+      .map { min-height: 38vh; }
+    }
+  </style>
+</head>
+
+<body>
+  <div class="panel">
+    <div class="head">
+      <span>🚌 AI-емулятор маршруту</span>
+      <span>
+        <a href="/ui/admin.html">⚙️ Сленг і скарги</a>
+        <a href="/docs" style="margin-left:10px;">API</a>
+      </span>
+    </div>
+
+    <textarea id="ask-text" placeholder="Наприклад: Я на Соборці, треба на Гравітон"></textarea>
+
+    <div class="chips" id="chips"></div>
+
+    <div class="row">
+      <button id="ask-btn">🤖 AI, запитай мене</button>
+      <button id="report-btn" class="danger" disabled>🚩 Це бред</button>
+      <button id="clear-btn" class="secondary">Очистити карту</button>
+    </div>
+
+    <div id="status" class="status">готовий до роботи</div>
+    <div id="answer" class="answer"></div>
+
+    <!-- Форма скарги: відкривається кнопкою «Це бред» -->
+    <div id="report-form" class="hidden" style="margin-top:10px;">
+      <div class="row" style="margin-bottom:6px;">
+        <select id="report-kind" style="flex:1; background:var(--panel2); color:var(--text); border:1px solid #333941; border-radius:8px; padding:7px;">
+          <option value="nonsense">Повна нісенітниця</option>
+          <option value="wrong_route">Не той маршрут</option>
+          <option value="wrong_stop">Не та зупинка</option>
+          <option value="wrong_time">Не той час / очікування</option>
+          <option value="other">Інше</option>
+        </select>
+      </div>
+      <textarea id="report-comment" placeholder="Що саме не так? (необов'язково)"></textarea>
+      <div class="row" style="margin-top:6px;">
+        <button id="report-send" class="danger">Надіслати в логи</button>
+        <button id="report-cancel" class="secondary">Скасувати</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="map" class="map"></div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="emulator.js"></script>
+</body>
+
+</html>
