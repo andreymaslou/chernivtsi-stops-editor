@@ -22,6 +22,7 @@ import math
 import os
 import re
 from contextlib import asynccontextmanager
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -34,6 +35,7 @@ from rapidfuzz import fuzz, process
 
 from feedback_store import feedback_stats, list_feedback, save_feedback
 from live_layer import LiveTracker
+from router_layer import TransitRouter
 from slang_store import (
     apply_overrides,
     delete_stop,
@@ -54,6 +56,8 @@ logger = logging.getLogger("transgps-voice-api")
 BASE_DIR = Path(__file__).resolve().parent
 STOPS_PATH = BASE_DIR / "stops.json"
 STREETS_PATH = BASE_DIR / "streets.json"
+GRAPH_PATH = BASE_DIR / "graph.json"
+SCHEDULE_PATH = BASE_DIR / "routes_schedule.json"
 
 # Порог уверенности (в процентах) для срабатывания Уровня 1 (остановки).
 # Если совпадение по остановкам ниже этого порога — алгоритм переходит
@@ -393,9 +397,13 @@ if not OPENROUTER_API_KEY:
 # используем плейсхолдер вместо ключа: свежие версии openai SDK требуют
 # непустую строку при инициализации клиента, а реальный запрос всё равно
 # провалится на этапе HTTP-вызова (и будет корректно обработан как 502).
+# Таймаут и max_retries ставим явно: дефолт openai SDK — 10 минут и 2 повтора,
+# а для живого голосового ассистента запрос дольше ~15 секунд бесполезен.
 llm_client = OpenAI(
     base_url=OPENROUTER_BASE_URL,
     api_key=OPENROUTER_API_KEY or "not-set",
+    timeout=30.0,
+    max_retries=1,
 )
 
 # Системный промпт для LLM. Жёстко требуем ТОЛЬКО JSON без каких-либо
@@ -422,15 +430,32 @@ SYSTEM_PROMPT = """\
 """
 
 
+# Небольшой кэш разбора фраз в памяти процесса: одна и та же фраза не должна
+# бить по OpenRouter (и по балансу $0.20) на каждый чих — Locator/роутер
+# каждый раз считаются заново, но LLM отвечает одинаково (temperature=0).
+_llm_cache: Dict[str, Dict[str, str]] = {}
+LLM_CACHE_MAX = 512
+
+
+def _normalize_cache_key(user_text: str) -> str:
+    return " ".join(user_text.lower().split())
+
+
 def call_llm_extract_locations(user_text: str) -> Dict[str, str]:
     """
     Отправляет текст пользователя в LLM (через OpenRouter) и возвращает
     разобранный JSON вида {"from": "...", "to": "..."}.
 
-    В случае любой ошибки (сеть, невалидный JSON от модели, отсутствие
-    API-ключа) выбрасывает HTTPException(502), чтобы вызывающий эндпоинт
-    мог корректно сообщить об этом клиенту.
+    Ответы кэшируются по нормализованной фразе (LRU-подобный сброс, простой
+    cutoff при переполнении). В случае любой ошибки (сеть, невалидный JSON от
+    модели, отсутствие API-ключа) выбрасывает HTTPException(502), чтобы
+    вызывающий эндпоинт мог корректно сообщить об этом клиенту.
     """
+    cache_key = _normalize_cache_key(user_text)
+    cached = _llm_cache.get(cache_key)
+    if cached is not None:
+        return dict(cached)
+
     try:
         response = llm_client.chat.completions.create(
             model=OPENROUTER_MODEL,
@@ -439,6 +464,7 @@ def call_llm_extract_locations(user_text: str) -> Dict[str, str]:
                 {"role": "user", "content": user_text},
             ],
             temperature=0.0,  # детерминированный разбор, без "творчества"
+            max_tokens=120,   # хватит на {"from": "...", "to": "..."}
         )
         raw_content = response.choices[0].message.content or ""
     except Exception as exc:  # сетевые ошибки, ошибки авторизации и т.п.
@@ -453,10 +479,15 @@ def call_llm_extract_locations(user_text: str) -> Dict[str, str]:
             detail="LLM returned a response that could not be parsed as JSON",
         )
 
-    return {
+    result = {
         "from": str(parsed.get("from") or "").strip(),
         "to": str(parsed.get("to") or "").strip(),
     }
+    # Простейший LRU-подобный сброс при переполнении.
+    if cache_key not in _llm_cache and len(_llm_cache) >= LLM_CACHE_MAX:
+        _llm_cache.pop(next(iter(_llm_cache)))
+    _llm_cache[cache_key] = result
+    return dict(result)
 
 
 def _parse_llm_json(raw_content: str) -> Optional[Dict]:
@@ -492,7 +523,7 @@ def _parse_llm_json(raw_content: str) -> Optional[Dict]:
 # Глобальное хранилище "загруженных при старте" данных. Инициализируется
 # в lifespan-обработчике ниже, чтобы файлы читались один раз при поднятии
 # сервера, а не на каждый запрос.
-app_state: Dict[str, object] = {"locator": None, "live": None}
+app_state: Dict[str, object] = {"locator": None, "live": None, "router": None}
 
 
 @asynccontextmanager
@@ -513,6 +544,29 @@ async def lifespan(app: FastAPI):
     logger.info(
         "Locator готов: %d остановок (после правок сленга), %d улиц.", len(stops), len(streets)
     )
+
+    # Граф маршрутов и расписание — для роутера (/api/plan).
+    # graph.json собирается скриптом graph_layer (коммитится в репозиторий),
+    # поэтому тут только читаем его. Падение файлов не роняет сервер:
+    # /api/plan вернёт 503, а остальные эндпоинты продолжат работать.
+    router: Optional[TransitRouter] = None
+    try:
+        graph = json.loads(GRAPH_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.warning("Роутер не готов: graph.json не прочитан (%s).", exc)
+        graph = None
+    if graph is not None:
+        try:
+            schedule = json.loads(SCHEDULE_PATH.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            logger.warning("Расписание не прочитано (%s) — роутер без расписания.", exc)
+            schedule = {}
+        router = TransitRouter(graph, schedule, stops=app_state["locator"].stops)
+        logger.info(
+            "Роутер готов: %d направлений, %d узлов графа.",
+            len(router.routes), len(router.nodes),
+        )
+    app_state["router"] = router
 
     # Живой GPS-слой (trans-gps.cv.ua): фоновый опрос ТС раз в 5 секунд.
     # Источник внешний и нестабильный, поэтому его падение не должно мешать
@@ -626,6 +680,164 @@ def get_route(request: RouteRequest):
             to_query=to_query,
         ),
     )
+
+
+# ---------------------------------------------------------------------------
+# Маршрутизация: полный план поездки (роутер на графе остановок)
+# ---------------------------------------------------------------------------
+
+class PlanRequest(BaseModel):
+    text: str
+    # Необязательное «модельное время» для тестов/демо: пересчитать план так,
+    # как будто сейчас это время (ISO-8601). Пользователь из приложения это
+    # поле не шлёт — маршрут всегда считается по фактическому времени.
+    now: Optional[str] = None
+
+
+@app.post("/api/plan")
+def get_plan(request: PlanRequest):
+    """
+    Полный план поездки: разбор фразы LLM + геопоиск + маршрутизация.
+
+    Ответ — один из режимов:
+        "plan"     — маршрут построен: legs, total_min, price_grn, vehicles;
+        "clarify"  — геопоиск неуверен (low_confidence) либо точки не найдены —
+                     нужно уточнить у пользователя (reask=true);
+        "no_route" — точки найдены, но в пределах двух пересадок маршрут не
+                     строится (обычно ночью, когда маршруты не ходят).
+
+    Эмулятор уже умеет рисовать "plan"-режим (legs c path и ТС), а clarify
+    показывается подсказкой с просьбой переформулировать фразу.
+    """
+    locator: Optional[Locator] = app_state.get("locator")
+    if locator is None:
+        raise HTTPException(status_code=503, detail="Locator is not initialized yet")
+
+    if not request.text or not request.text.strip():
+        raise HTTPException(status_code=400, detail="Field 'text' must not be empty")
+
+    # Шаг 1 и 2 — ровно как в /api/route: LLM вытаскивает точки, Locator
+    # превращает их в stop_id.
+    locations = call_llm_extract_locations(request.text)
+    from_query, to_query = locations["from"], locations["to"]
+    from_stop_id, from_type = locator.locate(from_query)
+    to_stop_id, to_type = locator.locate(to_query)
+
+    logger.info(
+        "План: %r -> from=%r(%s,id=%s) to=%r(%s,id=%s)",
+        request.text, from_query, from_type, from_stop_id,
+        to_query, to_type, to_stop_id,
+    )
+
+    debug = {
+        "from_type": from_type,
+        "to_type": to_type,
+        "from_query": from_query,
+        "to_query": to_query,
+    }
+
+    # Locator подтвердил проблему из реальных кейсов: он возвращает какое-то
+    # совпадение даже на «абракадабру» (low_confidence). Глупо предлагать
+    # маршрут от случайной остановки — лучше переспросить.
+    if from_stop_id is None or to_stop_id is None or "low_confidence" in (from_type, to_type):
+        return _clarify_response(request, debug, from_stop_id, to_stop_id)
+
+    router: Optional[TransitRouter] = app_state.get("router")
+    if router is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Router is not initialized (graph.json не загружен)",
+        )
+
+    # Живой GPS (если поллер успел накопить данные) уточняет ожидание и
+    # «перший потрібний ТС» для каждой ноги плана.
+    live: Optional[LiveTracker] = app_state.get("live")
+    if live is not None:
+        try:
+            router.set_live(live.snapshot(only_fresh=True).get("vehicles", []))
+        except Exception:
+            router.set_live([])
+
+    # «Модельное время» умеет только сервер (тесты/демо); приложение не шлёт.
+    plan_now: Optional[datetime] = None
+    if request.now:
+        try:
+            raw_now = request.now.replace("Z", "+00:00")
+            plan_now = datetime.fromisoformat(raw_now)
+            if plan_now.tzinfo is not None:
+                plan_now = plan_now.replace(tzinfo=None)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=f"Field 'now' is not ISO-8601: {exc}")
+
+    plan = router.plan(from_stop_id, to_stop_id, now=plan_now)
+    if plan is None:
+        stop_by_id = {str(stop["id"]): stop for stop in locator.stops}
+        from_name = stop_by_id.get(str(from_stop_id), {}).get("name")
+        to_name = stop_by_id.get(str(to_stop_id), {}).get("name")
+
+        # Вночі все стоїть: чесно кажемо, коли перший рейс (за розкладом).
+        firsts = [
+            router.earliest_service_minutes(from_stop_id),
+            router.earliest_service_minutes(to_stop_id),
+        ]
+        firsts = [value for value in firsts if value is not None]
+        if firsts:
+            next_minutes = min(firsts)
+            first_hour, first_minute = divmod(int(next_minutes), 60)
+            note = f"На цьому напрямку зараз нічого не їде — перший рейс орієнтовно о {first_hour:02d}:{first_minute:02d}."
+        else:
+            note = "На цьому напрямку зараз нічого не їде — спробуйте пізніше."
+
+        return {
+            "mode": "no_route",
+            "user_text": request.text,
+            "debug_info": debug,
+            "from_stop_id": from_stop_id,
+            "to_stop_id": to_stop_id,
+            "from_name": from_name,
+            "to_name": to_name,
+            "note": note,
+        }
+
+    plan["user_text"] = request.text
+    plan["debug_info"] = debug
+    plan["reask"] = False
+    return plan
+
+
+def _clarify_response(
+    request: PlanRequest,
+    debug: Dict[str, str],
+    from_stop_id: Optional[int],
+    to_stop_id: Optional[int],
+) -> Dict[str, Any]:
+    """
+    Ответ-переспрос, когда фраза распознана неуверенно/не полностью.
+
+    Неуверенность Locator кодирует в match_type "low_confidence" — в этом
+    случае stop_id по-прежнему может быть заполнен, но доверять ему нельзя.
+    """
+    locator: Locator = app_state["locator"]
+    stop_by_id = {str(stop["id"]): stop for stop in locator.stops}
+    from_name = stop_by_id.get(str(from_stop_id), {}).get("name") if from_stop_id else None
+    to_name = stop_by_id.get(str(to_stop_id), {}).get("name") if to_stop_id else None
+    low_confidence = debug.get("from_type") == "low_confidence" or debug.get("to_type") == "low_confidence"
+
+    if low_confidence:
+        note = "Уточніть, будь ласка, звідки і куди ви їдете — я не до кінця зрозумів назви."
+    else:
+        note = "Я не зрозумів, звідки/куди ви їдете. Назвіть зупинку чи вулицю."
+    return {
+        "mode": "clarify",
+        "user_text": request.text,
+        "debug_info": debug,
+        "from_stop_id": from_stop_id,
+        "to_stop_id": to_stop_id,
+        "from_name": from_name,
+        "to_name": to_name,
+        "reask": low_confidence,
+        "note": note,
+    }
 
 
 # ---------------------------------------------------------------------------

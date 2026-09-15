@@ -121,12 +121,27 @@ function markerFor(stop, color, label) {
 
 function render(endpoint, data) {
   clearLayers();
-  if (Array.isArray(data.legs) && data.legs.length) {
+  if (data.mode === 'clarify' || data.mode === 'no_route') {
+    renderInfo(data);
+  } else if (Array.isArray(data.legs)) {
     renderPlan(data);
   } else {
     renderRoute(data);
   }
   document.getElementById('answer').style.display = 'block';
+}
+
+/** Сервер просить уточнити фразу (не впевнений у точках) або маршруту немає. */
+function renderInfo(data) {
+  const info = data.debug_info || {};
+  const parts = [];
+  parts.push('<span class="badge plan">' + (data.mode === 'clarify' ? 'уточнення' : 'немає маршруту') + '</span>');
+  parts.push(data.note || (data.mode === 'clarify' ? 'переформулюйте, будь ласка, фразу' : 'спробуйте пізніше'));
+  if (data.from_name) parts.push('звідки: «' + data.from_name + '» (' + (info.from_type || '?') + ')');
+  if (data.to_name) parts.push('куди: «' + data.to_name + '» (' + (info.to_type || '?') + ')');
+  if (data.reask) parts.push('підказка: назвіть зупинку або вулицю, наприклад «Соборка», «Гравітон»');
+  document.getElementById('answer').innerHTML = parts.join('\n');
+  setStatus(data.reask ? 'переформулюйте фразу' : 'маршрут не знайдено', 'error');
 }
 
 /** Откат: сервер только понял фразу и вернул две остановки. */
@@ -155,8 +170,8 @@ function renderRoute(data) {
     '<span class="badge plan">розбір фрази</span>\n' +
     'звідки: «' + (from ? from.name : '—') + '» (' + (info.from_type || '?') + ')\n' +
     'куди:   «' + (to ? to.name : '—') + '» (' + (info.to_type || '?') + ')\n' +
-    'маршрут ще не рахується — у роботі (роутер)';
-  setStatus('сервер зрозумів фразу (план маршруту з\'явиться далі)', 'ok');
+    'план маршруту не повернуто — спробуйте ще раз (або натисніть «Це бред»)';
+  setStatus('сервер зрозумів тільки точки (план не побудовано)', 'ok');
 }
 
 /** Основной режим: сервер посчитал маршрут (возможно, с пересадкой). */
@@ -183,7 +198,12 @@ function renderPlan(plan) {
           (leg.vehicle_state ? ' [' + leg.vehicle_state + ']' : ''));
       }
     } else if (leg.type === 'transfer') {
-      lines.push('⇄ пересадка на «' + leg.at + '»' + (leg.wait_min ? ', чекати ~' + leg.wait_min + ' хв' : ''));
+      const isWalk = leg.kind === 'walk';
+      const icon = isWalk ? '🚶' : '⇄';
+      const name = isWalk ? ' йдемо до «' + leg.at + '»' : ' пересадка на «' + leg.at + '»';
+      const walkNote = leg.walk_min ? ' (' + leg.walk_min + ' хв пішки)' : '';
+      const waitNote = leg.wait_min ? ', чекати ~' + leg.wait_min + ' хв' : '';
+      lines.push(icon + name + walkNote + waitNote);
     }
   });
 
