@@ -24,6 +24,7 @@
 """
 
 import math
+import zlib
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -78,7 +79,10 @@ class SimLayer:
 
             label = route.get("live_route_name") or route.get("route_name") or "?"
             service = self._service_for(route.get("vehicle_type"), route.get("route_name"))
-            colour = SIM_COLOURS[abs(hash(label)) % len(SIM_COLOURS)]
+            # crc32, а не вбудований hash(): hash() рядків рандомізується на
+            # кожен процес (PYTHONHASHSEED), тому кольори маршрутів «стрибали»
+            # б при кожному рестарті сервера і не збігалися з палітрою в UI.
+            colour = SIM_COLOURS[zlib.crc32(label.encode("utf-8")) % len(SIM_COLOURS)]
 
             length_km = float(route.get("length_km") or 0.0)
             self.directions.append({
