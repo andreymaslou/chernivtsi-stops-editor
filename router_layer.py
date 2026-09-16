@@ -70,6 +70,13 @@ class TransitRouter:
         self.route_stops: Dict[str, List[int]] = {}
         self.route_pos: Dict[str, Dict[int, int]] = {}
         self.route_prefix: Dict[str, List[float]] = {}
+        # Координаты остановок маршрута — в том же порядке, что route_stops.
+        # Привязка живого ТС к ближайшей остановке идёт в горячем цикле, где
+        # поиск узла в dict по id занимал заметное время: держим готовый список.
+        self.route_coords: Dict[str, List[Tuple[float, float]]] = {}
+        # Нормализованная подпись маршрута для сверки с меткой ТС перевозчика.
+        # Считаем один раз на маршрут, а не в каждом сравнении с машиной.
+        self._route_wanted_norm: Dict[str, str] = {}
         for key, route in self.routes.items():
             chain = [int(node) for node in route["stops"]]
             self.route_stops[key] = chain
@@ -78,6 +85,14 @@ class TransitRouter:
             for segment in route.get("segments", []):
                 prefix.append(prefix[-1] + float(segment.get("minutes", 0.0)))
             self.route_prefix[key] = prefix
+            self.route_coords[key] = [
+                (float(self.nodes[node]["lat"]), float(self.nodes[node]["lon"]))
+                if node in self.nodes
+                else (0.0, 0.0)  # битый узел: ТС к нему просто не привяжется
+                for node in chain
+            ]
+            wanted = route.get("live_route_name") or route.get("route_name") or ""
+            self._route_wanted_norm[key] = self.normalize_label(str(wanted))
 
         # Вузол -> маршрути, що через нього проходять.
         self.node_routes: Dict[int, Set[str]] = {node: set() for node in self.nodes}
@@ -114,6 +129,9 @@ class TransitRouter:
 
         self.schedule: Dict[str, Dict[str, Dict[str, Any]]] = schedule or {}
         self._live_vehicles: List[Dict[str, Any]] = []
+        # Индекс «нормализованная подпись маршрута -> машины». Строится в
+        # set_live(), чтобы поиск «першого потрібного ТС» не перебирал парк.
+        self._live_by_route: Dict[str, List[Dict[str, Any]]] = {}
         # Тестовий режим: всі маршрути вважаємо в роботі незалежно від часу
         # доби (перший/останній рейс ігноруються, очікування — за інтервалом).
         self.assume_in_service = assume_in_service
@@ -133,8 +151,22 @@ class TransitRouter:
             self.stop_coords[stop_id] = (float(raw_stop["lat"]), float(raw_stop["lon"]))
 
     def set_live(self, vehicles: Sequence[Dict[str, Any]]) -> None:
-        """Приймає нормалізований срез живого шару (список ТЗ)."""
+        """
+        Приймає нормалізований срез живого шару (список ТЗ).
+
+        Заодно строит индекс «нормализованная подпись маршрута -> машины»:
+        поиск «першого потрібного ТС» вызывается из Дейкстры тысячи раз за
+        один запрос, поэтому перебор всего парка на каждый вызов заменён на
+        выборку из словаря.
+        """
         self._live_vehicles = list(vehicles)
+        by_route: Dict[str, List[Dict[str, Any]]] = {}
+        for vehicle in self._live_vehicles:
+            label = vehicle.get("route_label") or vehicle.get("route_name") or ""
+            key = self.normalize_label(str(label))
+            if key:
+                by_route.setdefault(key, []).append(vehicle)
+        self._live_by_route = by_route
 
     def _resolve_to_nodes(self, stop_id: int) -> List[int]:
         """
@@ -587,29 +619,26 @@ class TransitRouter:
         route = self.routes.get(route_key)
         if not route:
             return None
-        wanted = route.get("live_route_name") or route.get("route_name")
-        if not wanted or board_node not in self.route_pos.get(route_key, {}):
+        wanted_norm = self._route_wanted_norm.get(route_key) or self.normalize_label(
+            str(route.get("live_route_name") or route.get("route_name") or "")
+        )
+        if not wanted_norm or board_node not in self.route_pos.get(route_key, {}):
             return None
 
-        stops = self.route_stops[route_key]
+        coords = self.route_coords[route_key]
         prefix = self.route_prefix[route_key]
         board_pos = self.route_pos[route_key][board_node]
 
         candidates: List[Tuple[float, Dict[str, Any]]] = []
-        for vehicle in self._live_vehicles:
-            label = str(vehicle.get("route_label") or vehicle.get("route_name") or "")
-            if not self._route_labels_match(label, str(wanted)):
-                continue
+        for vehicle in self._live_by_route.get(wanted_norm, ()):
             lat, lon = vehicle.get("lat"), vehicle.get("lon")
             if lat is None or lon is None:
                 continue
 
+            vlat, vlon = float(lat), float(lon)
             best_idx, best_dist = None, None
-            for index, node_id in enumerate(stops):
-                node = self.nodes[node_id]
-                distance = self._haversine_m(
-                    float(lat), float(lon), node["lat"], node["lon"],
-                )
+            for index, (nlat, nlon) in enumerate(coords):
+                distance = self._haversine_m(vlat, vlon, nlat, nlon)
                 if best_dist is None or distance < best_dist:
                     best_idx, best_dist = index, distance
             if best_dist is None or best_dist > MAX_LIVE_SNAP_METERS:
@@ -630,7 +659,7 @@ class TransitRouter:
                         "eta_min": max(1.0, eta),
                         "live_bus": vehicle.get("board_number") or "?",
                         "is_live": bool(vehicle.get("is_live")),
-                        "route_label": label,
+                        "route_label": str(vehicle.get("route_label") or ""),
                     },
                 )
             )
@@ -649,17 +678,26 @@ class TransitRouter:
         return route_key
 
     @staticmethod
+    def normalize_label(value: str) -> str:
+        """
+        Нормализует подпись маршрута для сверки с меткой ТС перевозчика.
+
+        «6/6a» -> «6a», «2Т» -> «2t», «9A» -> «9a». Кириллические а/б/в
+        приводим к латинице: в графе и в трекере они встречаются вперемешку.
+        """
+        return (
+            value.strip().lower()
+            .replace("/", "")
+            .replace("а", "a").replace("б", "b").replace("в", "v")
+        )
+
+    @staticmethod
     def _route_labels_match(label: str, wanted: str) -> bool:
         """«6/6a»=«6A», «1»=«1», «9A»=«9A» — зіставляємо цифри й одну літеру."""
-
-        def norm(value: str) -> str:
-            return (
-                value.strip().lower()
-                .replace("/", "")
-                .replace("а", "a").replace("б", "b").replace("в", "v")
-            )
-
-        return bool(label) and norm(label) == norm(wanted)
+        if not label:
+            return False
+        norm = TransitRouter.normalize_label
+        return norm(label) == norm(wanted)
 
     @staticmethod
     def _minutes_of_day(value: Any) -> Optional[float]:
