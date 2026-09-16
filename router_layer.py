@@ -226,7 +226,14 @@ class TransitRouter:
                 "computed_at": now.strftime("%Y-%m-%d %H:%M:%S"),
             }
 
-        result = self._dijkstra(from_nodes, to_nodes, now)
+        # Кэш ожиданий на время одного запроса. Дейкстра заходит в одни и те
+        # же пары (маршрут, остановка) тысячи раз, и каждый заход заново
+        # перебирал ТС и считал haversine. Кэш именно локальный, а не self.*:
+        # один объект TransitRouter обслуживает несколько потоков FastAPI
+        # (эндпоинт объявлен обычным def), поэтому общее поле дало бы гонку и
+        # ответы «из другого времени».
+        wait_cache: Dict[Tuple[str, int], Dict[str, Any]] = {}
+        result = self._dijkstra(from_nodes, to_nodes, now, wait_cache)
         return result
 
     # ------------------------------------------------------------------
@@ -291,6 +298,7 @@ class TransitRouter:
         from_nodes: List[int],
         to_nodes: List[int],
         now: datetime,
+        wait_cache: Optional[Dict[Tuple[str, int], Dict[str, Any]]] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Оптимальний маршрут (0-2 пересадки). Вартість — «хвилини від виходу
@@ -318,7 +326,7 @@ class TransitRouter:
         for origin_node in from_nodes:
             for board_node, walk_min in self._expand_to_boardable(origin_node):
                 for route_key in self.node_routes.get(board_node, ()):
-                    wait = self._wait_minutes(route_key, board_node, now)
+                    wait = self._wait_minutes(route_key, board_node, now, wait_cache)
                     if wait is None:
                         continue
                     state = (route_key, board_node)
@@ -376,7 +384,7 @@ class TransitRouter:
                     other_name = self._route_name_id(other)
                     if other_name == self._route_name_id(route_key) or other_name in used:
                         continue
-                    wait = self._wait_minutes(other, alight, now)
+                    wait = self._wait_minutes(other, alight, now, wait_cache)
                     if wait is None:
                         continue
                     new_cost = cost + walk_min + wait
@@ -394,6 +402,7 @@ class TransitRouter:
         total_cost, goal_walk, goal_state = best_goal
         return self._build_plan(
             from_nodes, to_nodes, goal_state, prev, total_cost, goal_walk, now,
+            wait_cache,
         )
 
     # ------------------------------------------------------------------
@@ -409,6 +418,7 @@ class TransitRouter:
         total_cost: float,
         goal_walk: float,
         now: datetime,
+        wait_cache: Optional[Dict[Tuple[str, int], Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         """Відновлює послідовність станів із prev і збирає legs."""
         sequence: List[Tuple[str, int]] = []
@@ -444,7 +454,7 @@ class TransitRouter:
             while index + 1 < len(sequence) and sequence[index + 1][0] == route_key:
                 index += 1
                 ride_nodes.append(sequence[index][1])
-            legs.append(self._transit_leg(route_key, ride_nodes, now))
+            legs.append(self._transit_leg(route_key, ride_nodes, now, wait_cache))
             price_grn += legs[-1].get("price_grn", 0)
 
             # Пересадка на наступний маршрут.
@@ -459,7 +469,7 @@ class TransitRouter:
                         )
                     )
                     used_route_keys.add(nxt_key)
-                    wait_info = self._wait_info(nxt_key, nxt_node, now)
+                    wait_info = self._wait_info(nxt_key, nxt_node, now, wait_cache)
                     legs[-1]["wait_min"] = round(wait_info.get("wait_min") or 0.0, 1)
 
         # Фінальна прогулянка до цільової зупинки (група/пересадка на фініші).
@@ -489,7 +499,13 @@ class TransitRouter:
     # Ноги плану
     # ------------------------------------------------------------------
 
-    def _transit_leg(self, route_key: str, path_nodes: List[int], now: datetime) -> Dict[str, Any]:
+    def _transit_leg(
+        self,
+        route_key: str,
+        path_nodes: List[int],
+        now: datetime,
+        wait_cache: Optional[Dict[Tuple[str, int], Dict[str, Any]]] = None,
+    ) -> Dict[str, Any]:
         """Нога «їдемо маршрутом»: від першого до останнього вузла підряд."""
         route = self.routes.get(route_key) or {}
         prefix = self.route_prefix[route_key]
@@ -504,7 +520,7 @@ class TransitRouter:
             for node in path_nodes
         ]
 
-        wait = self._wait_info(route_key, path_nodes[0], now)
+        wait = self._wait_info(route_key, path_nodes[0], now, wait_cache)
         wait_min = wait.get("wait_min") or 0.0
 
         price_grn = 0
@@ -557,12 +573,37 @@ class TransitRouter:
             return None
         return (self.schedule.get(route["vehicle_type"]) or {}).get(route["route_name"])
 
-    def _wait_minutes(self, route_key: str, board_node: int, now: datetime) -> Optional[float]:
+    def _wait_minutes(
+        self,
+        route_key: str,
+        board_node: int,
+        now: datetime,
+        cache: Optional[Dict[Tuple[str, int], Dict[str, Any]]] = None,
+    ) -> Optional[float]:
         """Очікування (хв) першого потрібного ТС; None — маршрут зараз не ходить."""
-        return self._wait_info(route_key, board_node, now).get("wait_min")
+        return self._wait_info(route_key, board_node, now, cache).get("wait_min")
 
-    def _wait_info(self, route_key: str, board_node: int, now: datetime) -> Dict[str, Any]:
-        """Повна інформація про очікування: wait_min, eta, «перший ТС»."""
+    def _wait_info(
+        self,
+        route_key: str,
+        board_node: int,
+        now: datetime,
+        cache: Optional[Dict[Tuple[str, int], Dict[str, Any]]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Повна інформація про очікування: wait_min, eta, «перший ТС».
+
+        cache (необов'язковий) живе в межах одного plan(): ключ — (маршрут,
+        вузол посадки). Час «now» у ключ не входить навмисно: у межах одного
+        розрахунку він сталий, а спільний між запитами кеш дав би відповідь
+        «з іншого часу».
+        """
+        cache_key = (route_key, board_node)
+        if cache is not None:
+            cached = cache.get(cache_key)
+            if cached is not None:
+                return dict(cached)
+
         route = self.routes.get(route_key) or {}
         sched = self._schedule_for(route_key)
         now_minutes = now.hour * 60 + now.minute
@@ -578,10 +619,13 @@ class TransitRouter:
             last = self._minutes_of_day(sched.get("last"))
             now_in_window = first is None or last is None or (first <= now_minutes <= last)
             if not now_in_window and not self.assume_in_service:
-                return {
+                no_service = {
                     "wait_min": None, "eta_min": None, "live_bus": None,
                     "vehicle_state": "не ходить", "headway_min": headway_min,
                 }
+                if cache is not None:
+                    cache[cache_key] = no_service
+                return no_service
 
         base_wait = (headway_min / 2.0) if headway_min else DEFAULT_WAIT_MINUTES
 
@@ -600,6 +644,8 @@ class TransitRouter:
             result["vehicle_state"] = "live" if live["is_live"] else "за розкладом"
             if live["eta_min"] < base_wait:
                 result["wait_min"] = max(0.5, live["eta_min"] + 0.5)
+        if cache is not None:
+            cache[cache_key] = result
         return result
 
     def _nearest_live_vehicle(
