@@ -790,12 +790,15 @@ def get_plan(request: PlanRequest):
     if live is not None:
         try:
             if plan_now is not None and isinstance(live, SimLayer):
-                # Симулятор строит парк на заданный момент времени.
+                # Симулятор строит парк на заданный момент времени, поэтому
+                # именно plan_now и есть «время среза» для сверки с ETA машин.
                 snapshot = live.snapshot(only_fresh=True, now=plan_now)
+                snapshot_at = plan_now
             else:
                 # Реальный трекер умеет отдавать только «сейчас».
                 snapshot = live.snapshot(only_fresh=True)
-            router.set_live(snapshot.get("vehicles", []))
+                snapshot_at = datetime.now()
+            router.set_live(snapshot.get("vehicles", []), snapshot_at=snapshot_at)
         except Exception:
             router.set_live([])
 

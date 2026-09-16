@@ -39,6 +39,10 @@ MAX_TRANSFERS = 2
 # Далі цієї відстані від маршрутної ланцюжка машину не «прив'язуємо».
 MAX_LIVE_SNAP_METERS = 600.0
 
+# Наскільки машині «дозволено» поїхати раніше за пасажира (світлофор, похибка
+# GPS-треку). Менше значення — суворіша перевірка «встигаю чи ні».
+BOARD_TOLERANCE_MIN = 0.5
+
 # Резервна прив'язка зупинки до вузла графа за координатами, якщо саме цей
 # запис stops.json у граф не потрапив (дублікати однієї зупинки).
 MAX_STOP_SNAP_METERS = 200.0
@@ -132,6 +136,10 @@ class TransitRouter:
         # Индекс «нормализованная подпись маршрута -> машины». Строится в
         # set_live(), чтобы поиск «першого потрібного ТС» не перебирал парк.
         self._live_by_route: Dict[str, List[Dict[str, Any]]] = {}
+        # Момент, на который построен срез живого парка. Нужен, чтобы понять,
+        # успевает ли пассажир на конкретную машину: срез «сейчас», а посадка
+        # будет через несколько минут после старта поездки.
+        self._live_snapshot_at: Optional[datetime] = None
         # Тестовий режим: всі маршрути вважаємо в роботі незалежно від часу
         # доби (перший/останній рейс ігноруються, очікування — за інтервалом).
         self.assume_in_service = assume_in_service
@@ -150,7 +158,11 @@ class TransitRouter:
                 continue
             self.stop_coords[stop_id] = (float(raw_stop["lat"]), float(raw_stop["lon"]))
 
-    def set_live(self, vehicles: Sequence[Dict[str, Any]]) -> None:
+    def set_live(
+        self,
+        vehicles: Sequence[Dict[str, Any]],
+        snapshot_at: Optional[datetime] = None,
+    ) -> None:
         """
         Приймає нормалізований срез живого шару (список ТЗ).
 
@@ -158,8 +170,13 @@ class TransitRouter:
         поиск «першого потрібного ТС» вызывается из Дейкстры тысячи раз за
         один запрос, поэтому перебор всего парка на каждый вызов заменён на
         выборку из словаря.
+
+        `snapshot_at` — момент, на который построен срез. Для симулятора это
+        время, переданное в `snapshot(now=...)` (парк строится относительно
+        него), для реального трекера — «сейчас».
         """
         self._live_vehicles = list(vehicles)
+        self._live_snapshot_at = snapshot_at
         by_route: Dict[str, List[Dict[str, Any]]] = {}
         for vehicle in self._live_vehicles:
             label = vehicle.get("route_label") or vehicle.get("route_name") or ""
@@ -664,11 +681,14 @@ class TransitRouter:
 
         live = self._nearest_live_vehicle(route_key, board_node, now)
         if live is not None:
-            result["eta_min"] = round(live["eta_min"], 1)
+            result["eta_min"] = live["eta_min"]
             result["live_bus"] = live["live_bus"]
             result["vehicle_state"] = "live" if live["is_live"] else "за розкладом"
-            if live["eta_min"] < base_wait:
-                result["wait_min"] = max(0.5, live["eta_min"] + 0.5)
+            # wait_min — очікування на самій зупинці (від прибуття пасажира),
+            # тому порівнюємо його з розкладом, а не з ETA від моменту среза.
+            live_wait = live.get("wait_min")
+            if live_wait is not None and live_wait < base_wait:
+                result["wait_min"] = live_wait
         if cache is not None:
             cache[cache_key] = result
         return result
@@ -677,7 +697,7 @@ class TransitRouter:
         self,
         route_key: str,
         board_node: int,
-        now: datetime,
+        board_time: datetime,
     ) -> Optional[Dict[str, Any]]:
         """
         Шукає на маршруті ТС, що їде в наш бік до board_node.
@@ -686,10 +706,21 @@ class TransitRouter:
         машини перевізника; потім прив'язуємо машину до найближчого вузла
         ланцюжка. Якщо вона стоїть ПЕРЕД нашою зупинкою — вона «перший
         потрібний ТС» з ETA за префіксними сумами сегментів.
+
+        Ключове: срез парка знято в `_live_snapshot_at`, а пасажир опиниться
+        на зупинці в `board_time`. Машина, яка приїде РАНІШЕ за пасажира, нам
+        не підходить — її пропускаємо (це і був баг «неможливих пересадок»).
         """
         route = self.routes.get(route_key)
         if not route:
             return None
+
+        # Скільки хвилин мине від моменту среза парка до нашої посадки.
+        arrive_min = 0.0
+        if self._live_snapshot_at is not None:
+            arrive_min = max(
+                0.0, (board_time - self._live_snapshot_at).total_seconds() / 60.0
+            )
         wanted_norm = self._route_wanted_norm.get(route_key) or self.normalize_label(
             str(route.get("live_route_name") or route.get("route_name") or "")
         )
@@ -730,12 +761,20 @@ class TransitRouter:
             partial_minutes = (
                 (best_dist / 1000.0) / speed * 60.0 if speed > 1.0 else 0.0
             )
-            eta = minutes_away + partial_minutes
+            # eta — «через скільки хвилин від моменту среза приїде машина»;
+            # саме цю величину UI показує як «буде ~N хв».
+            eta = max(1.0, minutes_away + partial_minutes)
+            if eta < arrive_min - BOARD_TOLERANCE_MIN:
+                continue  # машина поїде раніше, ніж пасажир дійде до зупинки
+
+            # Очікування на самій зупинці: від нашого прибуття до машини.
+            wait_after_arrival = max(0.0, eta - arrive_min)
             candidates.append(
                 (
-                    eta,
+                    wait_after_arrival,
                     {
-                        "eta_min": max(1.0, eta),
+                        "eta_min": round(eta, 1),
+                        "wait_min": max(0.5, round(wait_after_arrival + 0.5, 1)),
                         "live_bus": vehicle.get("board_number") or "?",
                         "is_live": bool(vehicle.get("is_live")),
                         "route_label": str(vehicle.get("route_label") or ""),
@@ -745,6 +784,8 @@ class TransitRouter:
 
         if not candidates:
             return None
+        # Сортуємо за очікуванням на зупинці — це і є «перший потрібний ТС»
+        # для пасажира, а не найменша ETA від моменту среза парка.
         candidates.sort(key=lambda item: item[0])
         return candidates[0][1]
 
