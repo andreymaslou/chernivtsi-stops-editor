@@ -12,6 +12,7 @@
    (см. docs/BRIEF-router-correctness.md).
 """
 import json
+from datetime import timedelta
 
 import pytest
 
@@ -187,4 +188,92 @@ def test_ride_path_contains_all_intermediate_stops(router, now):
         "в путь ноги не попали промежуточные остановки"
     )
     assert leg["travel_min"] > 0
+
+
+def test_spatial_cache_does_not_change_result(router, now):
+    """Кэш геометрии (Шаг 4) — только ускорение, а не новая логика.
+
+    Сравниваем два прогона одного запроса: с кэшем `_spatial_cache` и с
+    имитацией старого поведения (кэш очищается перед каждым заходом, поэтому
+    haversine считается заново). Ответы обязаны совпасть байт-в-байт.
+    """
+    cached_plan = router.plan(*PAIR_TRANSFERS, now=now)
+    assert cached_plan is not None
+    assert router._spatial_cache, "геометрия должна была закэшироваться"
+
+    original = TransitRouter._nearest_live_vehicle
+
+    def uncached(self, *args, **kwargs):
+        self._spatial_cache = {}  # как было до Шага 4: считаем каждый раз
+        return original(self, *args, **kwargs)
+
+    TransitRouter._nearest_live_vehicle = uncached
+    try:
+        fresh_plan = router.plan(*PAIR_TRANSFERS, now=now)
+    finally:
+        TransitRouter._nearest_live_vehicle = original
+
+    assert json.dumps(fresh_plan, ensure_ascii=False, sort_keys=True) == json.dumps(
+        cached_plan, ensure_ascii=False, sort_keys=True
+    )
+
+
+def test_same_fleet_keeps_spatial_cache(router, fleet, now, data):
+    """Тот же парк (даже с другим snapshot_at) не сбрасывает кэш геометрии.
+
+    Прод-эндпоинт зовёт set_live() на каждый запрос (main.py), а трекер отдаёт
+    последние опрошенные позиции: если сбрасывать кэш на каждом вызове, он
+    всегда холодный. eta в кэше — относительная величина, от `snapshot_at` не
+    зависит, поэтому смена только метки времени кэш не ломает.
+    """
+    first = router.plan(*PAIR_DIRECT, now=now)
+    version = router._fleet_version
+    cached = dict(router._spatial_cache)
+    assert cached, "геометрия должна была закэшироваться"
+
+    router.set_live(
+        [dict(vehicle) for vehicle in fleet],  # новый список, те же позиции
+        snapshot_at=now + timedelta(minutes=1),
+    )
+
+    assert router._fleet_version == version, "кэш сбросили без нужды"
+    assert router._spatial_cache == cached
+
+    # Возвращаем исходный момент среза: ответ обязан совпасть байт-в-байт.
+    router.set_live([dict(vehicle) for vehicle in fleet], snapshot_at=now)
+    again = router.plan(*PAIR_DIRECT, now=now)
+    assert json.dumps(again, ensure_ascii=False, sort_keys=True) == json.dumps(
+        first, ensure_ascii=False, sort_keys=True
+    )
+
+
+def test_spatial_cache_drops_stale_fleet(router, data, fleet, now):
+    """Новый срез парка обязан сбросить кэш геометрии.
+
+    Иначе после опроса GPS ответ строился бы по позициям прошлого среза.
+    Проверяем и версию кэша, и сам результат: он должен совпасть с ответом
+    «чистого» роутера на том же парке.
+    """
+    router.plan(*PAIR_DIRECT, now=now)  # прогреваем кэш прошлым срезом
+    version = router._fleet_version
+
+    moved = [dict(vehicle) for vehicle in fleet]
+    for vehicle in moved:
+        vehicle["lat"] = float(vehicle["lat"]) + 0.02  # машины уехали
+    router.set_live(moved, snapshot_at=now)
+
+    assert router._fleet_version > version, "версия парка не поднялась"
+    assert not router._spatial_cache, "кэш геометрии не сброшен в set_live()"
+
+    after = router.plan(*PAIR_DIRECT, now=now)
+
+    graph, schedule, stops = data
+    fresh = TransitRouter(graph, schedule, stops=stops, assume_in_service=True)
+    fresh.set_live(moved, snapshot_at=now)
+    expected = fresh.plan(*PAIR_DIRECT, now=now)
+
+    assert json.dumps(after, ensure_ascii=False, sort_keys=True) == json.dumps(
+        expected, ensure_ascii=False, sort_keys=True
+    )
+
 

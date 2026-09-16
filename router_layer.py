@@ -140,6 +140,22 @@ class TransitRouter:
         # успевает ли пассажир на конкретную машину: срез «сейчас», а посадка
         # будет через несколько минут после старта поездки.
         self._live_snapshot_at: Optional[datetime] = None
+        # Версия среза парка: растёт вместе с подписью геометрии в set_live().
+        # По ней «стареют» записи пространственного кэша (см.
+        # _approaching_vehicles).
+        self._fleet_version = 0
+        # Подпись геометрии парка (см. _fleet_fingerprint): если новый срез
+        # принёс те же позиции, кэш остаётся валидным.
+        self._fleet_key: Optional[Tuple[Any, ...]] = None
+        # Кэш пространственной части поиска «першого потрібного ТС»:
+        # (маршрут, вузол посадки) -> (версия парка, [машины за зростанням eta]).
+        # Геометрия (прив'язка ТС до ланцюжка зупинок) від часу пасажира не
+        # залежить, поэтому считается один раз на срез парка, а не на каждый
+        # заход Дейкстры (Шаг 4: haversine давал ~33 тыс. вызовов на один
+        # plan() замість тысяч).
+        self._spatial_cache: Dict[
+            Tuple[str, int], Tuple[int, List[Dict[str, Any]]]
+        ] = {}
         # Тестовий режим: всі маршрути вважаємо в роботі незалежно від часу
         # доби (перший/останній рейс ігноруються, очікування — за інтервалом).
         self.assume_in_service = assume_in_service
@@ -157,6 +173,23 @@ class TransitRouter:
             if stop_id in self.stop_coords:
                 continue
             self.stop_coords[stop_id] = (float(raw_stop["lat"]), float(raw_stop["lon"]))
+
+    # Поля ТС, от которых зависит пространственный кэш (_approaching_vehicles):
+    # позиция, скорость, подпись маршрута и то, что попадает в ответ. Остальные
+    # поля среза на геометрию не влияют.
+    _FLEET_KEY_FIELDS = (
+        "lat", "lon", "speed_kmh", "board_number", "is_live", "route_label",
+    )
+
+    @classmethod
+    def _fleet_fingerprint(
+        cls, vehicles: Sequence[Dict[str, Any]]
+    ) -> Tuple[Any, ...]:
+        """Подпись геометрии парка: изменилась — записи кэша устарели."""
+        fields = cls._FLEET_KEY_FIELDS
+        return tuple(
+            tuple(vehicle.get(field) for field in fields) for vehicle in vehicles
+        )
 
     def set_live(
         self,
@@ -177,6 +210,19 @@ class TransitRouter:
         """
         self._live_vehicles = list(vehicles)
         self._live_snapshot_at = snapshot_at
+        # Сброс пространственного кэша — только если изменилась ГЕОМЕТРИЯ парка.
+        # eta в записях кэша — величина относительная («через сколько минут от
+        # позиции приедет»), от `snapshot_at` она не зависит, поэтому новый
+        # опрос с теми же координатами не повод считать haversine заново.
+        # Прод-эндпоинт зовёт set_live() на каждый запрос, а трекер отдаёт
+        # последние опрошенные позиции: без этой проверки кэш был бы всегда
+        # холодным. Версия парка растёт вместе с подписью — по ней «стареют»
+        # записи (см. _approaching_vehicles).
+        fingerprint = self._fleet_fingerprint(self._live_vehicles)
+        if fingerprint != self._fleet_key:
+            self._fleet_key = fingerprint
+            self._fleet_version += 1
+            self._spatial_cache.clear()
         by_route: Dict[str, List[Dict[str, Any]]] = {}
         for vehicle in self._live_vehicles:
             label = vehicle.get("route_label") or vehicle.get("route_name") or ""
@@ -707,92 +753,125 @@ class TransitRouter:
         """
         Шукає на маршруті ТС, що їде в наш бік до board_node.
 
-        Підпис маршруту графа (live_route_name) зіставляємо з route_label
-        машини перевізника; потім прив'язуємо машину до найближчого вузла
-        ланцюжка. Якщо вона стоїть ПЕРЕД нашою зупинкою — вона «перший
-        потрібний ТС» з ETA за префіксними сумами сегментів.
+        Робота разделена на две части:
 
-        Ключове: срез парка знято в `_live_snapshot_at`, а пасажир опиниться
-        на зупинці в `board_time`. Машина, яка приїде РАНІШЕ за пасажира, нам
-        не підходить — її пропускаємо (це і був баг «неможливих пересадок»).
+        * пространственная (`_approaching_vehicles`) — хто взагалі їде до цієї
+          зупинки і через скільки хвилин: залежить лише від среза парка та
+          маршруту, тому считается один раз и живёт в `_spatial_cache`;
+        * временная (тут) — пассажир окажется на остановке в `board_time`, а
+          срез парка снят в `_live_snapshot_at`. Машина, яка приїде РАНІШЕ за
+          пасажира, не підходить — її пропускаємо (це і був баг «неможливих
+          пересадок»).
+
+        Список из кэша отсортирован по eta: «первый нужный ТС» — первая
+        машина, которая успевает (ожидание на остановке `eta - arrive_min`
+        монотонно по eta, поэтому отдельная сортировка не нужна).
         """
-        route = self.routes.get(route_key)
-        if not route:
-            return None
-
         # Скільки хвилин мине від моменту среза парка до нашої посадки.
         arrive_min = 0.0
         if self._live_snapshot_at is not None:
             arrive_min = max(
                 0.0, (board_time - self._live_snapshot_at).total_seconds() / 60.0
             )
-        wanted_norm = self._route_wanted_norm.get(route_key) or self.normalize_label(
-            str(route.get("live_route_name") or route.get("route_name") or "")
-        )
-        if not wanted_norm or board_node not in self.route_pos.get(route_key, {}):
-            return None
 
-        coords = self.route_coords[route_key]
-        prefix = self.route_prefix[route_key]
-        board_pos = self.route_pos[route_key][board_node]
-
-        candidates: List[Tuple[float, Dict[str, Any]]] = []
-        for vehicle in self._live_by_route.get(wanted_norm, ()):
-            lat, lon = vehicle.get("lat"), vehicle.get("lon")
-            if lat is None or lon is None:
-                continue
-
-            vlat, vlon = float(lat), float(lon)
-            # Грубый отсев в градусах ДО haversine: машину привязываем только
-            # к остановкам ближе MAX_LIVE_SNAP_METERS (1° широты ≈ 111.32 км).
-            # Окно берём с запасом (долгота делится на cos широты), поэтому
-            # отбрасываются только заведомо далёкие точки — ответ не меняется.
-            lat_window = MAX_LIVE_SNAP_METERS / 111320.0
-            lon_window = lat_window / max(0.2, math.cos(math.radians(vlat)))
-            best_idx, best_dist = None, None
-            for index, (nlat, nlon) in enumerate(coords):
-                if abs(nlat - vlat) > lat_window or abs(nlon - vlon) > lon_window:
-                    continue
-                distance = self._haversine_m(vlat, vlon, nlat, nlon)
-                if best_dist is None or distance < best_dist:
-                    best_idx, best_dist = index, distance
-            if best_dist is None or best_dist > MAX_LIVE_SNAP_METERS:
-                continue
-            if best_idx >= board_pos:
-                continue  # вже проїхала нашу зупинку
-
-            minutes_away = prefix[board_pos] - prefix[best_idx]
-            speed = float(vehicle.get("speed_kmh") or 20.0)
-            partial_minutes = (
-                (best_dist / 1000.0) / speed * 60.0 if speed > 1.0 else 0.0
-            )
-            # eta — «через скільки хвилин від моменту среза приїде машина»;
-            # саме цю величину UI показує як «буде ~N хв».
-            eta = max(1.0, minutes_away + partial_minutes)
+        for approach in self._approaching_vehicles(route_key, board_node):
+            eta = approach["eta_min"]
             if eta < arrive_min - BOARD_TOLERANCE_MIN:
                 continue  # машина поїде раніше, ніж пасажир дійде до зупинки
-
             # Очікування на самій зупинці: від нашого прибуття до машини.
             wait_after_arrival = max(0.0, eta - arrive_min)
-            candidates.append(
-                (
-                    wait_after_arrival,
+            return {
+                "eta_min": round(eta, 1),
+                "wait_min": max(0.5, round(wait_after_arrival + 0.5, 1)),
+                "live_bus": approach["live_bus"],
+                "is_live": approach["is_live"],
+                "route_label": approach["route_label"],
+            }
+        return None
+
+    def _approaching_vehicles(
+        self,
+        route_key: str,
+        board_node: int,
+    ) -> List[Dict[str, Any]]:
+        """
+        Машини маршруту, що їдуть у наш бік до board_node, за зростанням eta.
+
+        Підпис маршруту графа (live_route_name) зіставляємо з route_label
+        машини перевізника; потім прив'язуємо машину до найближчого вузла
+        ланцюжка. Якщо вона стоїть ПЕРЕД нашою зупинкою — вона кандидат на
+        посадку, а eta рахуємо за префіксними сумами сегментів плюс залишок
+        шляху від поточної позиції до найближчої зупинки.
+
+        Результат залежить лише від `(маршрут, вузол)` і поточного среза парка,
+        але НЕ від часу посадки пасажира, тому він живёт в `_spatial_cache` до
+        следующего `set_live()`. Записи помечены версией парка
+        (`_fleet_version`): она растёт на каждом новом срезе, поэтому
+        устаревшая геометрия не может попасть в ответ (важно для потоков
+        FastAPI: один объект TransitRouter обслуживает несколько запросов).
+        """
+        key = (route_key, board_node)
+        cached = self._spatial_cache.get(key)
+        if cached is not None and cached[0] == self._fleet_version:
+            return cached[1]
+
+        found: List[Dict[str, Any]] = []
+        if route_key in self.routes and board_node in self.route_pos.get(route_key, {}):
+            wanted_norm = self._route_wanted_norm.get(route_key, "")
+            coords = self.route_coords[route_key]
+            prefix = self.route_prefix[route_key]
+            board_pos = self.route_pos[route_key][board_node]
+
+            for vehicle in self._live_by_route.get(wanted_norm, ()):
+                lat, lon = vehicle.get("lat"), vehicle.get("lon")
+                if lat is None or lon is None:
+                    continue
+
+                vlat, vlon = float(lat), float(lon)
+                # Грубый отсев в градусах ДО haversine: машину привязываем
+                # только к остановкам ближе MAX_LIVE_SNAP_METERS (1° широты ≈
+                # 111.32 км). Окно берём с запасом (долгота делится на cos
+                # широты), поэтому отбрасываются только заведомо далёкие
+                # точки — ответ не меняется.
+                lat_window = MAX_LIVE_SNAP_METERS / 111320.0
+                lon_window = lat_window / max(0.2, math.cos(math.radians(vlat)))
+                best_idx, best_dist = None, None
+                for index, (nlat, nlon) in enumerate(coords):
+                    if abs(nlat - vlat) > lat_window or abs(nlon - vlon) > lon_window:
+                        continue
+                    distance = self._haversine_m(vlat, vlon, nlat, nlon)
+                    if best_dist is None or distance < best_dist:
+                        best_idx, best_dist = index, distance
+                if best_dist is None or best_dist > MAX_LIVE_SNAP_METERS:
+                    continue
+                if best_idx >= board_pos:
+                    continue  # вже проїхала нашу зупинку
+
+                minutes_away = prefix[board_pos] - prefix[best_idx]
+                speed = float(vehicle.get("speed_kmh") or 20.0)
+                partial_minutes = (
+                    (best_dist / 1000.0) / speed * 60.0 if speed > 1.0 else 0.0
+                )
+                # eta — «через скільки хвилин від моменту среза приїде машина»;
+                # саме цю величину UI показує як «буде ~N хв». Округляем только
+                # на выходе: временной фильтр должен видеть сырое значение.
+                eta = max(1.0, minutes_away + partial_minutes)
+                found.append(
                     {
-                        "eta_min": round(eta, 1),
-                        "wait_min": max(0.5, round(wait_after_arrival + 0.5, 1)),
+                        "eta_min": eta,
                         "live_bus": vehicle.get("board_number") or "?",
                         "is_live": bool(vehicle.get("is_live")),
                         "route_label": str(vehicle.get("route_label") or ""),
-                    },
+                    }
                 )
-            )
 
-        if not candidates:
-            return None
-        # Сортуємо за очікуванням на зупинці — це і є «перший потрібний ТС»
-        # для пасажира, а не найменша ETA від моменту среза парка.
-        candidates.sort(key=lambda item: item[0])
-        return candidates[0][1]
+            # Сортуємо за eta (сортировка устойчива): временной фильтр выше
+            # возьмёт первую подходящую машину — это и есть «перший потрібний
+            # ТС» для пассажира, а не просто машина с минимальной eta.
+            found.sort(key=lambda item: item["eta_min"])
+
+        self._spatial_cache[key] = (self._fleet_version, found)
+        return found
 
     @staticmethod
     def _route_name_id(route_key: str) -> str:
