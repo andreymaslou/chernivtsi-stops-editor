@@ -553,9 +553,14 @@ class TransitRouter:
 
         from_name = self.nodes[path_nodes[0]]["name"]
         to_name = self.nodes[path_nodes[-1]]["name"]
+        # Дейкстра «їде» одразу до будь-якої наступної зупинки, тож у
+        # відновленому шляху лишаються тільки посадка й висадка. Для карти
+        # розгортаємо ногу в повну ланцюжок зупинок маршруту між ними —
+        # інакше emulator.js малює хорду крізь пів міста замість маршруту
+        # (координати вже пораховані: route_coords у тому ж порядку).
         path = [
-            [self.nodes[node]["lat"], self.nodes[node]["lon"]]
-            for node in path_nodes
+            [lat, lon]
+            for lat, lon in self.route_coords[route_key][pos_first : pos_last + 1]
         ]
 
         wait = self._wait_info(route_key, path_nodes[0], now, wait_cache)

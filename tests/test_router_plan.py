@@ -120,3 +120,71 @@ def test_no_boarding_of_vehicle_that_leaves_before_arrival(router, now):
         arrival_min += (leg.get("wait_min") or 0.0) + (leg.get("travel_min") or 0.0)
 
     assert not missed, f"в плане есть ТС, которые уезжают раньше пассажира: {missed}"
+
+
+def _chain_node_id(router, route_key, name_part):
+    """Id узла маршрута по части имени (устойчиво к перенумерации графа)."""
+    for node_id in router.route_stops[route_key]:
+        if name_part in router.nodes[node_id]["name"]:
+            return node_id
+    return None
+
+
+def _slice_offset(coords, path):
+    """Позиция, с которой path совпадает с цепочкой координат маршрута."""
+    for start in range(len(coords) - len(path) + 1):
+        if [tuple(point) for point in coords[start:start + len(path)]] == path:
+            return start
+    return None
+
+
+def test_transit_leg_path_is_continuous_route_slice(router, now):
+    """Путь ноги обязан быть НЕПРЕРЫВНЫМ куском цепочки остановок маршрута.
+
+    Иначе Leaflet рисует хорду через полгорода вместо маршрута (жалоба «немає
+    прорисованих маршрутів»): Дейкстра едет сразу до любой следующей остановки,
+    и в leg["path"] когда-то попадали только посадка и высадка.
+    """
+    for pair in (PAIR_DIRECT, PAIR_TRANSFERS):
+        plan = router.plan(*pair, now=now)
+        assert plan is not None
+        for leg in [item for item in plan["legs"] if item["type"] == "transit"]:
+            path = [tuple(point) for point in leg["path"]]
+            assert len(path) >= 2, f"нога без линии на карте: {leg['route']}"
+            assert any(
+                _slice_offset(coords, path) is not None
+                for coords in router.route_coords.values()
+            ), (
+                "путь ноги не является непрерывным срезом маршрута — карта "
+                f"нарисует прямую: route={leg['route']} точек={len(path)}"
+            )
+
+
+def test_ride_path_contains_all_intermediate_stops(router, now):
+    """Регрессия жалобы на карту: у длинной поездки в path ВСЕ остановки.
+
+    Эталон — trolley:5:A «Калинівський ринок → Стадіон Мальва»: девять
+    остановок подряд; раньше в path оставалось две точки.
+    """
+    route_key = "trolley:5:A"
+    if route_key not in router.routes:
+        pytest.skip("в графе нет trolley:5:A")
+
+    board = _chain_node_id(router, route_key, "Калинівський ринок")
+    alight = _chain_node_id(router, route_key, "Мальва")
+    if board is None or alight is None:
+        pytest.skip("в цепочке trolley:5:A нет эталонных остановок")
+
+    positions = router.route_pos[route_key]
+    pos_first, pos_last = positions[board], positions[alight]
+    assert pos_last > pos_first, "эталонные остановки идут не по порядку"
+
+    leg = router._transit_leg(route_key, [board, alight], now)
+    expected = [list(point) for point in router.route_coords[route_key][pos_first:pos_last + 1]]
+
+    assert leg["path"] == expected
+    assert len(leg["path"]) == pos_last - pos_first + 1 > 2, (
+        "в путь ноги не попали промежуточные остановки"
+    )
+    assert leg["travel_min"] > 0
+
