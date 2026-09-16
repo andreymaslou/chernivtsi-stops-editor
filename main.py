@@ -36,6 +36,7 @@ from rapidfuzz import fuzz, process
 from feedback_store import feedback_stats, list_feedback, save_feedback
 from live_layer import LiveTracker
 from router_layer import TransitRouter
+from sim_layer import SimLayer
 from slang_store import (
     apply_overrides,
     delete_stop,
@@ -387,6 +388,17 @@ OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "qwen/qwen-2.5-72b-instruct")
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
+# Тестовый режим (для локальной обкатки; в проде переменные не задаём):
+#   ASSUME_IN_SERVICE=1 — считаем все маршруты в работе независимо от времени
+#                         суток (ночные запросы ведут себя как дневные);
+#   GPS_SIMULATOR=1     — /api/live и /api/plan используют виртуальный парк
+#                         (sim_layer) вместо реального GPS-трекера.
+def _env_flag(name: str) -> bool:
+    return os.getenv(name, "").strip().lower() in ("1", "true", "yes", "on")
+
+ASSUME_IN_SERVICE = _env_flag("ASSUME_IN_SERVICE")
+GPS_SIMULATOR = _env_flag("GPS_SIMULATOR")
+
 if not OPENROUTER_API_KEY:
     logger.warning(
         "OPENROUTER_API_KEY не задан в .env — сервер запустится, но реальные "
@@ -561,23 +573,32 @@ async def lifespan(app: FastAPI):
         except (OSError, json.JSONDecodeError) as exc:
             logger.warning("Расписание не прочитано (%s) — роутер без расписания.", exc)
             schedule = {}
-        router = TransitRouter(graph, schedule, stops=app_state["locator"].stops)
+        router = TransitRouter(
+            graph, schedule, 
+            stops=app_state["locator"].stops,
+            assume_in_service=ASSUME_IN_SERVICE
+        )
         logger.info(
             "Роутер готов: %d направлений, %d узлов графа.",
             len(router.routes), len(router.nodes),
         )
     app_state["router"] = router
 
-    # Живой GPS-слой (trans-gps.cv.ua): фоновый опрос ТС раз в 5 секунд.
-    # Источник внешний и нестабильный, поэтому его падение не должно мешать
-    # поднятию API — LiveTracker.start() не пробрасывает ошибки наружу.
-    live = LiveTracker()
-    app_state["live"] = live
-    await live.start()
+    # Выбираем источник данных о машинах: симулятор (для тестов) или реальный трекер.
+    if GPS_SIMULATOR and graph is not None:
+        live = SimLayer(graph, schedule, assume_in_service=ASSUME_IN_SERVICE)
+        app_state["live"] = live
+        logger.info("Подключен виртуальный парк (GPS_SIMULATOR=1).")
+    else:
+        live = LiveTracker()
+        app_state["live"] = live
+        await live.start()
+        logger.info("Подключен реальный GPS-трекер.")
 
     yield
 
-    await live.stop()
+    if hasattr(live, "stop"):
+        await live.stop()
     logger.info("Остановка сервера.")
 
 

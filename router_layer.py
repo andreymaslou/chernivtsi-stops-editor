@@ -58,6 +58,7 @@ class TransitRouter:
         graph: Dict[str, Any],
         schedule: Optional[Dict[str, Any]] = None,
         stops: Optional[Sequence[Dict[str, Any]]] = None,
+        assume_in_service: bool = False,
     ):
         raw_nodes: Dict[str, Dict[str, Any]] = graph["nodes"]
         self.routes: Dict[str, Dict[str, Any]] = graph["routes"]
@@ -113,6 +114,9 @@ class TransitRouter:
 
         self.schedule: Dict[str, Dict[str, Dict[str, Any]]] = schedule or {}
         self._live_vehicles: List[Dict[str, Any]] = []
+        # Тестовий режим: всі маршрути вважаємо в роботі незалежно від часу
+        # доби (перший/останній рейс ігноруються, очікування — за інтервалом).
+        self.assume_in_service = assume_in_service
 
         # Координаты остановок из stops.json (после правок сленга). Нужны для
         # резервной привязки stop_id -> узел: в stops.json встречаются дубли
@@ -540,13 +544,12 @@ class TransitRouter:
                 headway_min = (float(lo) + float(hi)) / 2.0
             first = self._minutes_of_day(sched.get("first"))
             last = self._minutes_of_day(sched.get("last"))
-            if first is not None and last is not None:
-                in_service = first <= now_minutes <= last
-                if not in_service:
-                    return {
-                        "wait_min": None, "eta_min": None, "live_bus": None,
-                        "vehicle_state": "не ходить", "headway_min": headway_min,
-                    }
+            now_in_window = first is None or last is None or (first <= now_minutes <= last)
+            if not now_in_window and not self.assume_in_service:
+                return {
+                    "wait_min": None, "eta_min": None, "live_bus": None,
+                    "vehicle_state": "не ходить", "headway_min": headway_min,
+                }
 
         base_wait = (headway_min / 2.0) if headway_min else DEFAULT_WAIT_MINUTES
 
