@@ -36,3 +36,6 @@ router_demo_out.txt
 .pytest_cache/
 .cursor/
 
+# Результаты замеров (tools/perf) — генерируются, в git не нужны
+tools/perf/out/
+

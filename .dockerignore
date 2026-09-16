@@ -28,6 +28,7 @@ router_demo_out.txt
 # Не нужны контейнеру: тесты, документация, локальные кэши и исходники данных
 tests
 docs
+tools
 *.md
 .pytest_cache
 .cursor
