@@ -30,7 +30,7 @@
 """
 
 import math
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 # Скільки пересадок шукаємо максимум (0-2 за ТЗ).
@@ -326,7 +326,11 @@ class TransitRouter:
         for origin_node in from_nodes:
             for board_node, walk_min in self._expand_to_boardable(origin_node):
                 for route_key in self.node_routes.get(board_node, ()):
-                    wait = self._wait_minutes(route_key, board_node, now, wait_cache)
+                    # Пассажир сначала идёт пешком до остановки и только потом
+                    # ждёт ТС: ожидание считаем на момент прихода на остановку,
+                    # а не на момент начала поездки.
+                    board_time = now + timedelta(minutes=walk_min)
+                    wait = self._wait_minutes(route_key, board_node, board_time, wait_cache)
                     if wait is None:
                         continue
                     state = (route_key, board_node)
@@ -384,7 +388,11 @@ class TransitRouter:
                     other_name = self._route_name_id(other)
                     if other_name == self._route_name_id(route_key) or other_name in used:
                         continue
-                    wait = self._wait_minutes(other, alight, now, wait_cache)
+                    # cost уже включает всю предыдущую поездку (ожидания и
+                    # перегоны), поэтому посадка на следующую ногу произойдёт
+                    # не «сейчас», а через cost плюс пеший переход.
+                    board_time = now + timedelta(minutes=cost + walk_min)
+                    wait = self._wait_minutes(other, alight, board_time, wait_cache)
                     if wait is None:
                         continue
                     new_cost = cost + walk_min + wait
@@ -434,6 +442,10 @@ class TransitRouter:
         legs: List[Dict[str, Any]] = []
         used_route_keys: Set[str] = set()
         price_grn = 0
+        # Накопленное время от начала поездки до момента посадки на текущую
+        # ногу. Нужно, чтобы wait_min/«перший ТС» в ответе считались на то же
+        # время прибытия, что и в поиске (Дейкстра), иначе ответ врёт.
+        elapsed_min = 0.0
 
         index = 0
         while index < len(sequence):
@@ -444,6 +456,7 @@ class TransitRouter:
             # Стартова прогулянка до місця посадки (група/пересадка).
             if entry is not None and entry[2] == "start":
                 walk_min, _wait = entry[3]
+                elapsed_min += walk_min
                 if walk_min > 0.01:
                     legs.append(
                         self._walk_leg_name(self.nodes[board_node]["name"], walk_min, "walk")
@@ -454,8 +467,11 @@ class TransitRouter:
             while index + 1 < len(sequence) and sequence[index + 1][0] == route_key:
                 index += 1
                 ride_nodes.append(sequence[index][1])
-            legs.append(self._transit_leg(route_key, ride_nodes, now, wait_cache))
-            price_grn += legs[-1].get("price_grn", 0)
+            board_time = now + timedelta(minutes=elapsed_min)
+            leg = self._transit_leg(route_key, ride_nodes, board_time, wait_cache)
+            legs.append(leg)
+            price_grn += leg.get("price_grn", 0)
+            elapsed_min += (leg.get("wait_min") or 0.0) + (leg.get("travel_min") or 0.0)
 
             # Пересадка на наступний маршрут.
             index += 1
@@ -469,7 +485,12 @@ class TransitRouter:
                         )
                     )
                     used_route_keys.add(nxt_key)
-                    wait_info = self._wait_info(nxt_key, nxt_node, now, wait_cache)
+                    # Пеший переход уже случился: пассажир стоит на nxt_node
+                    # спустя elapsed_min минут от начала поездки.
+                    elapsed_min += walk_min
+                    wait_info = self._wait_info(
+                        nxt_key, nxt_node, now + timedelta(minutes=elapsed_min), wait_cache
+                    )
                     legs[-1]["wait_min"] = round(wait_info.get("wait_min") or 0.0, 1)
 
         # Фінальна прогулянка до цільової зупинки (група/пересадка на фініші).
@@ -598,7 +619,11 @@ class TransitRouter:
         розрахунку він сталий, а спільний між запитами кеш дав би відповідь
         «з іншого часу».
         """
-        cache_key = (route_key, board_node)
+        # Ключ включает момент посадки (с точностью до минуты): время поездки
+        # стало честным, поэтому в один и тот же узел можно прийти в разное
+        # время, и ожидание будет разным. Секунды отбрасываем — расписание
+        # всё равно оперирует минутами, а hit-rate кэша сохраняется.
+        cache_key = (route_key, board_node, now.replace(second=0, microsecond=0))
         if cache is not None:
             cached = cache.get(cache_key)
             if cached is not None:
