@@ -770,16 +770,10 @@ def get_plan(request: PlanRequest):
             detail="Router is not initialized (graph.json не загружен)",
         )
 
-    # Живой GPS (если поллер успел накопить данные) уточняет ожидание и
-    # «перший потрібний ТС» для каждой ноги плана.
-    live: Optional[LiveTracker] = app_state.get("live")
-    if live is not None:
-        try:
-            router.set_live(live.snapshot(only_fresh=True).get("vehicles", []))
-        except Exception:
-            router.set_live([])
-
     # «Модельное время» умеет только сервер (тесты/демо); приложение не шлёт.
+    # Разбираем его ДО живого среза: ТС нужно подбирать на тот же момент,
+    # для которого считаем план. Иначе ночные тесты показывают машины,
+    # которые едут «сейчас», и одинаковые запросы дают разный ответ.
     plan_now: Optional[datetime] = None
     if request.now:
         try:
@@ -789,6 +783,21 @@ def get_plan(request: PlanRequest):
                 plan_now = plan_now.replace(tzinfo=None)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=f"Field 'now' is not ISO-8601: {exc}")
+
+    # Живой GPS (если поллер успел накопить данные) уточняет ожидание и
+    # «перший потрібний ТС» для каждой ноги плана.
+    live: Optional[LiveTracker] = app_state.get("live")
+    if live is not None:
+        try:
+            if plan_now is not None and isinstance(live, SimLayer):
+                # Симулятор строит парк на заданный момент времени.
+                snapshot = live.snapshot(only_fresh=True, now=plan_now)
+            else:
+                # Реальный трекер умеет отдавать только «сейчас».
+                snapshot = live.snapshot(only_fresh=True)
+            router.set_live(snapshot.get("vehicles", []))
+        except Exception:
+            router.set_live([])
 
     plan = router.plan(from_stop_id, to_stop_id, now=plan_now)
     if plan is None:
@@ -941,9 +950,17 @@ def get_live_vehicles(
     vehicle_types: Optional[str] = Query(
         None, description="Фильтр по типу ТС: bus, trolley"
     ),
+    now: Optional[str] = Query(
+        None,
+        description="«Модельное время» ISO-8601: отдать парк на этот момент (только симулятор)",
+    ),
 ):
     """
     Живой GPS-слой: текущее положение транспорта Черновцов.
+
+    Параметр now работает только в тестовом режиме (GPS_SIMULATOR=1): он
+    позволяет запросить парк на произвольный момент — проверить ночь, утро
+    или конец смены, не переводя часы на сервере.
 
     Данные берутся с открытого сайта перевозчика trans-gps.cv.ua
     (/map/tracker/), опрашиваются фоновой задачей раз в 5 секунд и
@@ -962,12 +979,27 @@ def get_live_vehicles(
     if live is None:
         raise HTTPException(status_code=503, detail="Live layer is not initialized yet")
 
-    return live.snapshot(
-        only_fresh=only_fresh,
-        include_depo=include_depo,
-        route_ids=_parse_id_list(routes),
-        vehicle_types=_parse_type_list(vehicle_types),
-    )
+    query_now: Optional[datetime] = None
+    if now:
+        try:
+            raw_now = now.replace("Z", "+00:00")
+            query_now = datetime.fromisoformat(raw_now)
+            if query_now.tzinfo is not None:
+                query_now = query_now.replace(tzinfo=None)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=f"Query 'now' is not ISO-8601: {exc}")
+
+    snapshot_kwargs: Dict[str, Any] = {
+        "only_fresh": only_fresh,
+        "include_depo": include_depo,
+        "route_ids": _parse_id_list(routes),
+        "vehicle_types": _parse_type_list(vehicle_types),
+    }
+    if query_now is not None and isinstance(live, SimLayer):
+        # Симулятор умеет отдать парк на произвольный момент («машина времени»).
+        snapshot_kwargs["now"] = query_now
+
+    return live.snapshot(**snapshot_kwargs)
 
 
 # ---------------------------------------------------------------------------
