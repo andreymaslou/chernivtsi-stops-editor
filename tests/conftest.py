@@ -57,9 +57,12 @@ def fleet(sim, now):
 
 
 @pytest.fixture
-def router(data, fleet):
+def router(data, fleet, now):
     """Роутер в тестовом режиме (как на стенде: GPS_SIMULATOR=1)."""
     graph, schedule, stops = data
     r = TransitRouter(graph, schedule, stops=stops, assume_in_service=True)
-    r.set_live(fleet)
+    # Парк построен относительно `now`, поэтому он же — «момент среза»
+    # (в main.py эту роль играет plan_now). Без него не с чем сверять ETA
+    # машин и время прибытия пассажира.
+    r.set_live(fleet, snapshot_at=now)
     return r
