@@ -682,8 +682,16 @@ class TransitRouter:
                 continue
 
             vlat, vlon = float(lat), float(lon)
+            # Грубый отсев в градусах ДО haversine: машину привязываем только
+            # к остановкам ближе MAX_LIVE_SNAP_METERS (1° широты ≈ 111.32 км).
+            # Окно берём с запасом (долгота делится на cos широты), поэтому
+            # отбрасываются только заведомо далёкие точки — ответ не меняется.
+            lat_window = MAX_LIVE_SNAP_METERS / 111320.0
+            lon_window = lat_window / max(0.2, math.cos(math.radians(vlat)))
             best_idx, best_dist = None, None
             for index, (nlat, nlon) in enumerate(coords):
+                if abs(nlat - vlat) > lat_window or abs(nlon - vlon) > lon_window:
+                    continue
                 distance = self._haversine_m(vlat, vlon, nlat, nlon)
                 if best_dist is None or distance < best_dist:
                     best_idx, best_dist = index, distance
