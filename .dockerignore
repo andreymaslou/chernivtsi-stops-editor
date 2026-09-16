@@ -21,3 +21,17 @@ docker-compose.yml
 
 # Служебные / временные файлы
 *.log
+_*
+*.png
+router_demo_out.txt
+
+# Не нужны контейнеру: тесты, документация, локальные кэши и исходники данных
+tests
+docs
+*.md
+.pytest_cache
+.cursor
+node_modules
+scraped_data
+Маршрути
+package-lock.json
