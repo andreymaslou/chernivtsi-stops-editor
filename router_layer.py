@@ -705,6 +705,13 @@ class TransitRouter:
             [lat, lon]
             for lat, lon in self.route_coords[route_key][pos_first : pos_last + 1]
         ]
+        # Повна геометрія напрямку (від початкової кінцевої до кінцевої) — для
+        # «хвостів» на карті: пасажир бачить, куди маршрут іде до і після його
+        # ділянки. `path` завжди є НЕПЕРЕРВНИМ срізом `full_geom`
+        # (`full_geom[pos_first:pos_last+1]`, це перевіряє
+        # test_leg_full_geom_covers_active_path) — інакше хвіст не стикувався б
+        # з активною лінією.
+        full_geom = [[lat, lon] for lat, lon in self.route_coords[route_key]]
 
         wait = self._wait_info(route_key, path_nodes[0], now, wait_cache)
         wait_min = wait.get("wait_min") or 0.0
@@ -730,6 +737,7 @@ class TransitRouter:
             "from": from_name,
             "to": to_name,
             "path": path,
+            "full_geom": full_geom,
             "travel_min": round(travel_min, 1),
             "wait_min": round(wait_min, 1),
             "price_grn": price_grn,

@@ -46,7 +46,7 @@ def test_plan_response_contract(router, now):
     assert transit, "в плане должна быть хотя бы одна нога-поездка"
 
     leg_fields = {
-        "vehicle", "route", "from", "to", "path", "travel_min", "wait_min",
+        "vehicle", "route", "from", "to", "path", "full_geom", "travel_min", "wait_min",
         "price_grn", "live_bus", "eta", "vehicle_state", "color",
     }
     for leg in transit:
@@ -54,6 +54,9 @@ def test_plan_response_contract(router, now):
         assert leg["travel_min"] >= 0
         assert leg["wait_min"] is None or leg["wait_min"] >= 0
         assert leg["path"], "у ноги должен быть непустой путь для карты"
+        assert len(leg["full_geom"]) >= len(leg["path"]) >= 2, (
+            "full_geom (хвіст маршруту) не може бути коротшим за активну ділянку"
+        )
 
 
 def test_fleet_is_reproducible(sim, now):
@@ -188,6 +191,27 @@ def test_ride_path_contains_all_intermediate_stops(router, now):
         "в путь ноги не попали промежуточные остановки"
     )
     assert leg["travel_min"] > 0
+
+
+def test_leg_full_geom_covers_active_path(router, now):
+    """`full_geom` (хвіст маршруту) мусить містити активну ділянку як сріз.
+
+    Фронт малює хвіст як `full_geom` із вирізаною ділянкою `path`. Якщо `path`
+    не є неперервним срізом `full_geom`, хвіст «не стикується» з активною
+    лінією — головний візуальний ризик цієї правки, тому це інваріант.
+    """
+    for pair in (PAIR_DIRECT, PAIR_TRANSFERS):
+        plan = router.plan(*pair, now=now)
+        assert plan is not None
+        for leg in [item for item in plan["legs"] if item["type"] == "transit"]:
+            full = [tuple(point) for point in leg["full_geom"]]
+            path = [tuple(point) for point in leg["path"]]
+            assert len(full) >= len(path) >= 2, f"хвіст коротший за ногу: {leg['route']}"
+            offset = _slice_offset(full, path)
+            assert offset is not None, (
+                "активна ділянка ноги не є неперервним срізом full_geom — "
+                f"хвіст на карті не зійдеться з лінією: route={leg['route']}"
+            )
 
 
 def test_spatial_cache_does_not_change_result(router, now):

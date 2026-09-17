@@ -204,6 +204,85 @@
       margin-top: 4px;
     }
 
+    /* План маршруту на карті (UX-апгрейд): хвости, шеврони напрямку, бейджі
+       кроків, фініш, іконка пішої пересадки. Розмітка — renderPlan() в
+       web/emulator.js, стилі тут. */
+    .plan-stop, .plan-arrow, .plan-step-wrap, .plan-finish-wrap, .plan-walk-wrap {
+      background: none;
+      border: none;
+    }
+
+    /* Точка проміжної зупинки: білий кружок у колір маршруту + шеврон напрямку */
+    .plan-stop-dot {
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: #fff;
+      border: 2px solid var(--route-colour, #4f8cff);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 1px 2px rgba(0, 0, 0, .35);
+    }
+
+    .plan-stop-dot .plan-chevron {
+      display: flex;
+      color: var(--route-colour, #4f8cff);
+    }
+
+    .plan-stop-dot svg { width: 10px; height: 10px; }
+
+    .plan-arrow-icon { display: block; width: 14px; height: 14px; }
+    .plan-arrow-icon svg {
+      width: 14px;
+      height: 14px;
+      filter: drop-shadow(0 1px 1px rgba(0, 0, 0, .45));
+    }
+
+    /* Посадка: крупний номер кроку, який пульсує — око чіпляється одразу */
+    .plan-step {
+      width: 30px;
+      height: 30px;
+      border-radius: 50%;
+      border: 2px solid #fff;
+      color: #fff;
+      text-align: center;
+      font: 700 15px/26px -apple-system, "Segoe UI", Roboto, sans-serif;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, .45);
+      animation: pulse-step 1.6s infinite ease-in-out;
+    }
+
+    @keyframes pulse-step {
+      0% { transform: scale(1); box-shadow: 0 2px 6px rgba(0, 0, 0, .45); }
+      50% { transform: scale(1.18); box-shadow: 0 0 14px rgba(255, 255, 255, .8); }
+      100% { transform: scale(1); box-shadow: 0 2px 6px rgba(0, 0, 0, .45); }
+    }
+
+    .plan-finish {
+      font-size: 22px;
+      line-height: 24px;
+      filter: drop-shadow(0 1px 2px rgba(0, 0, 0, .5));
+    }
+
+    .plan-walk-icon { font-size: 16px; line-height: 20px; text-align: center; }
+
+    /* Цифра кроку в текстовій панелі: той самий колір, що й бейдж на карті */
+    .step-dot {
+      display: inline-block;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      color: #fff;
+      text-align: center;
+      cursor: pointer;
+      font: 700 12px/18px -apple-system, "Segoe UI", Roboto, sans-serif;
+    }
+
+    /* Пульсації — лише якщо користувач не просив їх вимкнути */
+    @media (prefers-reduced-motion: reduce) {
+      .plan-step { animation: none; }
+    }
+
     /* Легенда карти (специфікація дизайну, п. 2.2): темна напівпрозора
        панелька в правому нижньому куті, над атрибуцією OSM. */
     .map-legend {

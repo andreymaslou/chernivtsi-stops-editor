@@ -11,10 +11,13 @@
  *
  * Что проверяется:
  *   1. страница грузится без ошибок консоли и без упавших запросов;
- *   2. легенда карти: 4 ряда за спецификацией, CSS, клик и свайп не двигают карту;
+ *   2. легенда карти: 5 рядів за специфікацією, CSS, клик и свайп не двигают карту;
  *   3. чекбокс «живий парк» рисует машины стрелками (у каждой data-heading);
  *   4. режим «▶ рух» реально двигает машины (пиксельные позиции меняются);
  *   5. фраза -> план: полілінії маршруту + ТС плана теж стрелками;
+ *   5.1 карта плану (UX): номери кроків у кольорі маршруту з пульсацією, шеврони
+ *      напрямку (азимут звіряється з `leg.path`), хвости маршруту, фініш 🏁,
+ *      іконка 🚶 на пешій пересадці, цифри в панелі = бейджам на карті;
  *   6. попап машини: структура, світлий бейдж, екранування зовнішніх рядків;
  *   7. розвантаження при віддаленні: zoom < 13 — крапки без номера й стрілки,
  *      zoom >= 13 — повний маркер, і крапка не з'їжджає з координати;
@@ -95,7 +98,124 @@ const probe = () => ({
     };
   })(),
   transforms: [...document.querySelectorAll('.veh-marker')].map((el) => el.style.transform),
+  // Пеший отрезок проверяем синтетическим планом: у реальных фраз пешей ноги
+  // может не быть вовсе (старт и финиш совпадают с остановками посадки), а
+  // проверить пунктир, иконку и новый фолбэк «прямая между остановками» надо.
+  // После замера возвращаем настоящий план на карту.
+  mapWalk: (() => {
+    if (typeof state === 'undefined' || !state.lastPlan) return null;
+    const real = state.lastPlan;
+    const rides = real.legs.filter((leg) => leg.type === 'transit' && Array.isArray(leg.path));
+    if (!rides.length) return null;
+    const synthetic = {
+      legs: [
+        rides[0],
+        { type: 'transfer', kind: 'walk', at: 'Тестова зупинка', walk_min: 2, wait_min: 1 },
+        rides[rides.length - 1],
+      ],
+      vehicles: [],
+      to_stop_id: real.to_stop_id,
+    };
+    clearLayers();
+    renderPlan(synthetic);
+    const walkLine = document.querySelector('.plan-walk-line');
+    const out = {
+      icons: document.querySelectorAll('.plan-walk-icon').length,
+      lines: document.querySelectorAll('.plan-walk-line').length,
+      dash: walkLine ? getComputedStyle(walkLine).strokeDasharray.replace(/px/g, '') : null,
+      steps: document.querySelectorAll('.plan-step').length,
+      tails: document.querySelectorAll('.plan-tail').length,
+    };
+    clearLayers();
+    renderPlan(real);
+    return out;
+  })(),
   polylines: document.querySelectorAll('.leaflet-overlay-pane path').length,
+  // Карта плана (UX-апгрейд): номера шагов, шевроны направления, хвосты,
+  // финиш, иконка пешего отрезка. Ожидаемые значения считаем из ответа сервера
+  // (state.lastPlan), поэтому проверка ловит и «не нарисовали», и «нарисовали
+  // не то».
+  mapUx: (() => {
+    const plan = (typeof state !== 'undefined' && state.lastPlan) ? state.lastPlan : null;
+    const transit = plan ? plan.legs.filter((leg) => leg.type === 'transit') : [];
+    const walkLegs = plan ? plan.legs.filter((leg) => leg.kind === 'walk') : [];
+    const bearingOf = (lat1, lon1, lat2, lon2) => {
+      const mid = ((lat1 + lat2) / 2) * Math.PI / 180;
+      const dlat = lat2 - lat1;
+      const dlon = (lon2 - lon1) * Math.cos(mid);
+      if (!dlat && !dlon) return 0;
+      return (Math.atan2(dlon, dlat) * 180) / Math.PI % 360;
+    };
+    // Ожидаемый азимут шеврона: для точки остановки — на следующую остановку,
+    // для «середины сегмента» — азимут самого сегмента.
+    const expectedBearing = (lat, lon, isMid) => {
+      for (const leg of transit) {
+        const path = Array.isArray(leg.path) ? leg.path : [];
+        for (let i = 0; i < path.length - 1; i += 1) {
+          const a = path[i];
+          const b = path[i + 1];
+          const at = isMid ? [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2] : a;
+          if (Math.abs(at[0] - lat) < 1e-9 && Math.abs(at[1] - lon) < 1e-9) {
+            const value = bearingOf(a[0], a[1], b[0], b[1]);
+            return (value + 360) % 360;
+          }
+        }
+      }
+      return null;
+    };
+    const chevrons = [...document.querySelectorAll('.plan-stop-dot, .plan-arrow-icon')]
+      .map((el) => {
+        const lat = Number(el.getAttribute('data-lat'));
+        const lon = Number(el.getAttribute('data-lon'));
+        const isMid = el.classList.contains('plan-arrow-icon');
+        const want = expectedBearing(lat, lon, isMid);
+        const got = Number(el.getAttribute('data-bearing'));
+        return {
+          want, got,
+          ok: want !== null && Number.isFinite(got) && Math.abs(want - got) < 0.6,
+        };
+      });
+    const steps = [...document.querySelectorAll('.plan-step')].map((el) => {
+      const style = getComputedStyle(el);
+      return {
+        step: el.getAttribute('data-step'),
+        colour: el.getAttribute('data-colour'),
+        background: style.backgroundColor,
+        width: parseFloat(style.width),
+        animation: style.animationName,
+        text: el.textContent.trim(),
+      };
+    });
+    const line = (selector) => {
+      const el = document.querySelector(selector);
+      const style = el ? getComputedStyle(el) : null;
+      return style ? {
+        count: document.querySelectorAll(selector).length,
+        opacity: Number(style.strokeOpacity),
+        weight: style.strokeWidth,
+      } : null;
+    };
+    const walkLine = document.querySelector('.plan-walk-line');
+    return {
+      hasPlan: !!plan,
+      transit: transit.length,
+      walkLegs: walkLegs.length,
+      steps,
+      chevrons,
+      chevronsOk: chevrons.filter((item) => item.ok).length,
+      tails: line('.plan-tail'),
+      active: line('.plan-active'),
+      walkLine: walkLine
+        ? getComputedStyle(walkLine).strokeDasharray.replace(/px/g, '') : null,
+      walkIcons: document.querySelectorAll('.plan-walk-icon').length,
+      finish: document.querySelectorAll('.plan-finish').length,
+      panelDots: [...document.querySelectorAll('#answer .step-dot')]
+        .map((el) => el.textContent.trim()),
+      stopDots: document.querySelectorAll('.plan-stop-dot').length,
+      expectedStops: transit.reduce((sum, leg) =>
+        sum + Math.max(0, (Array.isArray(leg.path) ? leg.path : []).length - 2), 0),
+    };
+  })(),
   // CSS спецификации: проверяем правила на одноразовых элементах, а не «на глаз».
   // Данные симулятора не дают «зупинено» (speed_kmh — средняя скорость маршрута),
   // поэтому правило stopped иначе не увидеть вообще.
@@ -201,6 +321,7 @@ const probe = () => ({
         text: row.textContent.replace(icon.textContent, '').trim(),
         icon: icon.textContent.trim(),
         colour: style.color,
+        background: style.backgroundColor,
         spacing: style.letterSpacing,
         shadow: style.textShadow,
       };
@@ -240,6 +361,11 @@ const probe = () => ({
   const browser = await puppeteer.launch({ headless: 'new', args: ['--no-sandbox'] });
   const page = await browser.newPage();
   await page.setViewport({ width: 1400, height: 900 });
+  // Headless Chrome по умолчанию отдаёт prefers-reduced-motion: reduce, и наши
+  // пульсации честно выключаются (@media в emulator.html). Для проверки
+  // анимации явно просим «как у обычного пользователя» — а сам выключатель
+  // проверяем отдельным ассертом ниже.
+  await page.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'no-preference' }]);
 
   page.on('console', (message) => {
     if (message.type() === 'error') report.errors.push('console: ' + message.text());
@@ -266,7 +392,7 @@ const probe = () => ({
   const legendProbe = initial.legend;
   const legendRows = legendProbe ? legendProbe.rows : [];
   check('легенда карти на місці',
-    !!legendProbe && legendProbe.bottomRight && legendRows.length === 4 && legendProbe.insideMap,
+    !!legendProbe && legendProbe.bottomRight && legendRows.length === 5 && legendProbe.insideMap,
     legendProbe ? 'кут «правий нижній»=' + legendProbe.bottomRight + ', рядків: ' + legendRows.length +
       ', у межах карти=' + legendProbe.insideMap + ', ' + JSON.stringify(legendProbe.rect) +
       ', aria="' + legendProbe.aria + '"' : 'немає .map-legend');
@@ -275,19 +401,21 @@ const probe = () => ({
     { text: 'Живий (GPS)', colour: rgb('#43c463'), glow: false },
     { text: 'За розкладом', colour: rgb('#8b9096'), glow: false },
     { text: 'Ваша посадка', colour: rgb('#ffd700'), glow: true },
+    { text: 'Крок плану', colour: rgb('#ffffff'), glow: false, background: rgb('#4f8cff') },
     { text: 'Пішки', colour: '', glow: false },
   ];
   const legendOk = !!legendProbe && LEGEND_SPEC.every((want, index) => {
     const row = legendRows[index];
     if (!row || row.text !== want.text) return false;
     if (want.colour && row.colour !== want.colour) return false;
+    if (want.background && row.background !== want.background) return false;
     if (want.glow && !row.shadow.includes(rgb('#ffd700'))) return false;
     return true;
   });
   check('легенда за специфікацією', legendOk, legendRows.map((row) => row.icon + ' ' + row.text +
     ' [' + row.colour + (row.shadow && row.shadow !== 'none' ? ' +glow' : '') + ']').join(' | '));
 
-  const walkRow = legendRows[3] || {};
+  const walkRow = legendRows[4] || {};
   check('CSS легенди за специфікацією',
     !!legendProbe && legendProbe.background === 'rgba(30, 33, 38, 0.85)' &&
     legendProbe.borderWidth === '1px' && legendProbe.borderColour === rgb('#333941') &&
@@ -499,6 +627,56 @@ const probe = () => ({
   } else {
     check('ціль плана підсвічена', true, 'у плані немає живого ТС для посадки — цілі немає');
   }
+
+  // --- 5.1 Карта плана: номери кроків, шеврони, хвости, фініш ---------------
+  const ux = plan.mapUx || {};
+  const stepNumbers = (ux.steps || []).map((item) => item.step).join(',');
+  check('номери кроків на карті',
+    !!ux.hasPlan && ux.transit > 0 && ux.steps.length === ux.transit,
+    'бейджів: ' + ux.steps.length + ' [' + stepNumbers + '] при ' + ux.transit + ' поїздках');
+  check('бейдж кроку крупний і пульсує',
+    ux.steps.length > 0 && ux.steps.every((item) => item.width >= 28 && item.animation !== 'none'),
+    ux.steps.map((item) => '№' + item.step + ': ' + item.width + 'px/' + item.animation).join(', '));
+  check('колір бейджа = колір маршруту',
+    ux.steps.length > 0 && ux.steps.every((item) => item.background === rgb(item.colour)),
+    ux.steps.map((item) => '№' + item.step + ': ' + item.background + ' vs ' +
+      rgb(item.colour)).join(', '));
+  check('шеврони напрямку на активній лінії',
+    ux.chevrons.length > 0 && ux.chevronsOk === ux.chevrons.length,
+    'шевронів: ' + ux.chevrons.length + ', з вірним азимутом: ' + ux.chevronsOk +
+    (ux.chevronsOk === ux.chevrons.length ? '' : ', розбіжності: ' +
+      JSON.stringify(ux.chevrons.filter((item) => !item.ok).slice(0, 3))));
+  check('точки проміжних зупинок', ux.stopDots === ux.expectedStops,
+    'точок: ' + ux.stopDots + ' (очікується ' + ux.expectedStops + ')');
+  check('хвости маршруту напівпрозорі',
+    !!ux.tails && !!ux.active && ux.tails.count === ux.transit &&
+    ux.tails.opacity > 0 && ux.tails.opacity < ux.active.opacity,
+    ux.tails ? 'хвостів: ' + ux.tails.count + ', opacity ' + ux.tails.opacity +
+      ' проти активної ' + ux.active.opacity : 'немає .plan-tail');
+  check('іконка пішохода на пересадці',
+    !!plan.mapWalk && plan.mapWalk.icons === 1 && plan.mapWalk.lines === 1,
+    plan.mapWalk ? 'іконок: ' + plan.mapWalk.icons + ', пунктирів: ' + plan.mapWalk.lines +
+      ' (синтетичний план: пеша нога без геометрії → пряма між зупинками)'
+      : 'немає синтетичного плану');
+  check('пунктир пешої ноги не змінився',
+    !!plan.mapWalk && String(plan.mapWalk.dash).replace(/\s+/g, '') === '1,10',
+    'stroke-dasharray: ' + (plan.mapWalk ? plan.mapWalk.dash : 'немає'));
+  check('фініш позначено', ux.finish === 1, 'іконок фінішу: ' + ux.finish);
+  check('цифри кроків у панелі = бейджам на карті',
+    (ux.panelDots || []).length === ux.transit &&
+    (ux.panelDots || []).join(',') === stepNumbers,
+    'у панелі: ' + JSON.stringify(ux.panelDots) + ', на карті: [' + stepNumbers + ']');
+
+  // Доступность: при prefers-reduced-motion пульсація бейджа зобов'язана
+  // вимкнутись (правило живе в @media emulator.html).
+  await page.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'reduce' }]);
+  const reducedPulse = await page.evaluate(() => {
+    const el = document.querySelector('.plan-step');
+    return el ? getComputedStyle(el).animationName : null;
+  });
+  await page.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'no-preference' }]);
+  check('пульсація вимикається на prefers-reduced-motion', reducedPulse === 'none',
+    'animation-name при reduce: ' + reducedPulse);
   const plannedCount = plan.wraps.filter((item) => item.planned).length;
   const stoppedCount = plan.wraps.filter((item) => item.stopped).length;
   console.log('       станів: live=' + (plan.wraps.length - plannedCount) + ' planned=' + plannedCount +

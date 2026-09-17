@@ -28,6 +28,10 @@ const state = {
   modelNow: null,      // «машина часу»: ISO без секунд, null = реальное время
   fleetTimer: null,
   animFrame: null,
+  // План маршруту: останній ответ сервера и слои по шагам. Нужны, чтобы
+  // «крок плану» в тексте можно было связать с его линией на карте.
+  lastPlan: null,
+  planStepLayers: {},
 };
 
 // ---------------------------------------------------------------------------
@@ -489,48 +493,247 @@ function renderRoute(data) {
   setStatus('сервер зрозумів тільки точки (план не побудовано)', 'ok');
 }
 
+// ---------------------------------------------------------------------------
+// План маршруту на карті: хвости, шеврони напрямку, бейджі кроків
+// ---------------------------------------------------------------------------
+//
+// Данные: `leg.path` — активная часть (непрерывный срез), `leg.full_geom` —
+// полная геометрия направления, `leg.color` — цвет маршрута. Хвост обрезаем на
+// клиенте: полная линия через весь город даёт «простыню» вместо контекста.
+const TAIL_CLIP_STOPS = 6;        // ± столько остановок маршрута вокруг ноги
+const ARROW_MIN_SEGMENT_M = 800;  // длинный сегмент получает свой шеврон
+
+/** Азимут сегмента (0° — север, по часовой) — та же формула, что в роутере. */
+function bearingDeg(lat1, lon1, lat2, lon2) {
+  const mid = ((lat1 + lat2) / 2) * Math.PI / 180;
+  const dlat = lat2 - lat1;
+  const dlon = (lon2 - lon1) * Math.cos(mid);
+  if (!dlat && !dlon) return 0;
+  return (Math.atan2(dlon, dlat) * 180 / Math.PI + 360) % 360;
+}
+
+/** Длина сегмента, м (haversine) — только для порога «длинного сегмента». */
+function distanceM(lat1, lon1, lat2, lon2) {
+  const radius = 6371000;
+  const phi1 = (lat1 * Math.PI) / 180;
+  const phi2 = (lat2 * Math.PI) / 180;
+  const dphi = ((lat2 - lat1) * Math.PI) / 180;
+  const dlambda = ((lon2 - lon1) * Math.PI) / 180;
+  const a = Math.sin(dphi / 2) ** 2 +
+    Math.cos(phi1) * Math.cos(phi2) * Math.sin(dlambda / 2) ** 2;
+  return 2 * radius * Math.asin(Math.min(1, Math.sqrt(a)));
+}
+
+/** Где в `full` лежит непрерывный срез `path` (-1, если это не срез). */
+function sliceOffset(full, path) {
+  for (let start = 0; start + path.length <= full.length; start += 1) {
+    let match = true;
+    for (let i = 0; i < path.length; i += 1) {
+      if (full[start + i][0] !== path[i][0] || full[start + i][1] !== path[i][1]) {
+        match = false;
+        break;
+      }
+    }
+    if (match) return start;
+  }
+  return -1;
+}
+
+const CHEVRON_SVG = '<svg viewBox="0 0 12 12" aria-hidden="true">' +
+  '<path d="M 2 2 L 10 6 L 2 10 Z" fill="currentColor"/></svg>';
+
+/**
+ * Промежуточная остановка со шевроном направления: один маркер несёт и «здесь
+ * остановка», и «маршрут едет туда». На длинной ноге это вдвое меньше
+ * маркеров, чем отдельные точки остановок плюс отдельные стрелки.
+ */
+function stopChevron(point, next, colour) {
+  const angle = (next ? bearingDeg(point[0], point[1], next[0], next[1]) : 0).toFixed(1);
+  return L.marker(point, {
+    interactive: false,
+    icon: L.divIcon({
+      className: 'plan-stop',
+      html: '<span class="plan-stop-dot" data-bearing="' + angle +
+        '" data-lat="' + point[0] + '" data-lon="' + point[1] +
+        '" style="--route-colour: ' + colour + '">' +
+        '<span class="plan-chevron" style="transform: rotate(' + angle + 'deg)">' +
+        CHEVRON_SVG + '</span></span>',
+      iconSize: [18, 18],
+      iconAnchor: [9, 9],
+    }),
+  });
+}
+
+/** Отдельный шеврон посередине длинного сегмента (между остановками). */
+function midChevron(point, bearing, colour) {
+  const angle = bearing.toFixed(1);
+  return L.marker(point, {
+    interactive: false,
+    icon: L.divIcon({
+      className: 'plan-arrow',
+      html: '<span class="plan-arrow-icon" data-bearing="' + angle +
+        '" data-lat="' + point[0] + '" data-lon="' + point[1] +
+        '" style="color: ' + colour + '; transform: rotate(' + angle + 'deg)">' +
+        CHEVRON_SVG + '</span>',
+      iconSize: [14, 14],
+      iconAnchor: [7, 7],
+    }),
+  });
+}
+
+/** Бейдж шага плана: посадка, где пассажиру ждать. Крупный и пульсирует. */
+function stepBadge(step, point, colour) {
+  return L.marker(point, {
+    interactive: false,
+    icon: L.divIcon({
+      className: 'plan-step-wrap',
+      html: '<div class="plan-step" data-step="' + step + '" data-colour="' + colour +
+        '" style="background: ' + colour + '">' + step + '</div>',
+      iconSize: [30, 30],
+      iconAnchor: [15, 15],
+    }),
+  });
+}
+
+/** Финиш плана — кінцева пассажира. */
+function finishBadge(point) {
+  return L.marker(point, {
+    interactive: false,
+    icon: L.divIcon({
+      className: 'plan-finish-wrap',
+      html: '<div class="plan-finish">🏁</div>',
+      iconSize: [24, 24],
+      iconAnchor: [12, 12],
+    }),
+  });
+}
+
+/** Пешеходный отрезок: иконка на середине линии. */
+function walkBadge(point) {
+  return L.marker(point, {
+    interactive: false,
+    icon: L.divIcon({
+      className: 'plan-walk-wrap',
+      html: '<div class="plan-walk-icon">🚶</div>',
+      iconSize: [20, 20],
+      iconAnchor: [10, 10],
+    }),
+  });
+}
+
 /** Основной режим: сервер посчитал маршрут (возможно, с пересадкой). */
 function renderPlan(plan) {
   const bounds = [];
   const lines = [];
+  state.lastPlan = plan;
+  state.planStepLayers = {};
+
+  // Точки стыковки ног: нужны, чтобы нарисовать пешую пересадку, у которой
+  // своей геометрии пока нет (роутер отдаёт геометрию только для поездок).
+  const legStarts = plan.legs.map((leg) =>
+    (leg.type === 'transit' && Array.isArray(leg.path) && leg.path.length ? leg.path[0] : null));
+  const legEnds = plan.legs.map((leg) =>
+    (leg.type === 'transit' && Array.isArray(leg.path) && leg.path.length
+      ? leg.path[leg.path.length - 1] : null));
+
+  let step = 0;
 
   plan.legs.forEach((leg, index) => {
     if (leg.type === 'transit') {
+      step += 1;
+      const colour = leg.color || '#4f8cff';
       const path = Array.isArray(leg.path) ? leg.path : [];
+      const full = Array.isArray(leg.full_geom) ? leg.full_geom : [];
+      const legLayer = L.layerGroup().addTo(layerGroup);
+      state.planStepLayers[step] = legLayer;
+
+      // Хвост маршрута: где он идёт до и после нашей ділянки. Обрезаем вокруг
+      // активной части — полная линия через весь город была бы шумом.
+      const offset = path.length > 1 ? sliceOffset(full, path) : -1;
+      if (offset >= 0) {
+        const from = Math.max(0, offset - TAIL_CLIP_STOPS);
+        const to = Math.min(full.length, offset + path.length + TAIL_CLIP_STOPS);
+        const tail = full.slice(from, to);
+        if (tail.length > 1) {
+          L.polyline(tail, {
+            color: colour, weight: 4, opacity: .3, className: 'plan-tail',
+          }).addTo(legLayer);
+        }
+      }
+
       if (path.length > 1) {
-        L.polyline(path, { color: leg.color || '#4f8cff', weight: 6, opacity: .9 }).addTo(layerGroup);
+        L.polyline(path, {
+          color: colour, weight: 6, opacity: .9, className: 'plan-active',
+        }).addTo(legLayer);
         path.forEach((point) => bounds.push(point));
       }
-      const isFirst = index === 0;
+
+      // Направление: шеврон в каждой промежуточной остановке + отдельный
+      // шеврон посередине длинного сегмента (там между остановками > 800 м).
+      for (let i = 1; i < path.length - 1; i += 1) {
+        stopChevron(path[i], path[i + 1], colour).addTo(legLayer);
+      }
+      for (let i = 0; i < path.length - 1; i += 1) {
+        const [aLat, aLon] = path[i];
+        const [bLat, bLon] = path[i + 1];
+        if (distanceM(aLat, aLon, bLat, bLon) > ARROW_MIN_SEGMENT_M) {
+          midChevron([(aLat + bLat) / 2, (aLon + bLon) / 2],
+            bearingDeg(aLat, aLon, bLat, bLon), colour).addTo(legLayer);
+        }
+      }
+
+      // Посадка: номер шага вместо безликой точки — глаз цепляется сразу.
+      if (path.length) stepBadge(step, path[0], colour).addTo(legLayer);
+
       lines.push(
-        (isFirst ? '1️⃣ ' : '2️⃣ ') + (leg.vehicle === 'trolley' ? '🚎' : '🚌') + ' ' + leg.route +
-        ': «' + leg.from + '» → «' + leg.to + '», ' + leg.travel_min + ' хв у дорозі, чекати ~' + leg.wait_min + ' хв'
+        '<span class="step-dot" data-step="' + step + '" style="background: ' +
+        esc(colour) + '">' + step + '</span> ' +
+        (leg.vehicle === 'trolley' ? '🚎' : '🚌') + ' ' + esc(leg.route) +
+        ': «' + esc(leg.from) + '» → «' + esc(leg.to) + '», ' + leg.travel_min +
+        ' хв у дорозі, чекати ~' + leg.wait_min + ' хв'
       );
 
       // Перший потрібний ТС: те, у що сідати в цій нозі.
       if (leg.live_bus || leg.eta) {
-        lines.push('   ↳ сідати: ' + (leg.live_bus || 'ТЗ') + (leg.eta ? ', буде ~' + leg.eta : '') +
-          (leg.vehicle_state ? ' [' + leg.vehicle_state + ']' : ''));
+        lines.push('   ↳ сідати: ' + esc(leg.live_bus || 'ТЗ') + (leg.eta ? ', буде ~' + leg.eta : '') +
+          (leg.vehicle_state ? ' [' + esc(leg.vehicle_state) + ']' : ''));
       }
     } else if (leg.type === 'transfer') {
       const isWalk = leg.kind === 'walk';
       const icon = isWalk ? '🚶' : '⇄';
-      const name = isWalk ? ' йдемо до «' + leg.at + '»' : ' пересадка на «' + leg.at + '»';
+      const name = isWalk ? ' йдемо до «' + esc(leg.at) + '»' : ' пересадка на «' + esc(leg.at) + '»';
       const walkNote = leg.walk_min ? ' (' + leg.walk_min + ' хв пішки)' : '';
       const waitNote = leg.wait_min ? ', чекати ~' + leg.wait_min + ' хв' : '';
-      // Пішохідна частина: коли роутер почне віддавати геометрію пересадки
-      // (leg.path), малюємо її «як у Google Maps» — пунктир із кружечків.
-      const walkPath = isWalk && Array.isArray(leg.path) ? leg.path : [];
+      const legLayer = L.layerGroup().addTo(layerGroup);
+
+      // Пешая часть: пунктир «як у Google Maps» (кружечки). Своей геометрии у
+      // роутера пока нет — берём прямую между остановками ног по обе стороны.
+      let walkPath = isWalk && Array.isArray(leg.path) ? leg.path : [];
+      if (isWalk && walkPath.length < 2) {
+        const fromPoint = legEnds.slice(0, index).reverse().find(Boolean);
+        const toPoint = legStarts.slice(index + 1).find(Boolean);
+        if (fromPoint && toPoint) walkPath = [fromPoint, toPoint];
+      }
       if (walkPath.length > 1) {
         L.polyline(walkPath, {
           color: '#808080', weight: 5, dashArray: '1, 10',
-          lineCap: 'round', lineJoin: 'round',
-        }).addTo(layerGroup);
+          lineCap: 'round', lineJoin: 'round', className: 'plan-walk-line',
+        }).addTo(legLayer);
         walkPath.forEach((point) => bounds.push(point));
+        if (isWalk) walkBadge(walkPath[Math.floor(walkPath.length / 2)]).addTo(legLayer);
       }
       lines.push(icon + name + walkNote + waitNote);
     }
   });
+
+  // Финиш — это кінцева пассажира. Координату берём из справочника остановок:
+  // последняя нога бывает пешей, а геометрии у неё пока нет.
+  const toStop = state.stops[plan.to_stop_id];
+  const finishPoint = toStop ? [toStop.lat, toStop.lon] : legEnds.filter(Boolean).pop();
+  if (finishPoint) {
+    finishBadge(finishPoint).addTo(layerGroup);
+    bounds.push(finishPoint);
+  }
 
   if (Array.isArray(plan.vehicles)) {
     renderVehicles(plan.vehicles, bounds, plan.legs);
@@ -543,8 +746,17 @@ function renderPlan(plan) {
   if (plan.price_grn !== undefined) summary.push('вартість ~' + plan.price_grn + ' грн');
   if (plan.transfers !== undefined) summary.push('пересадок: ' + plan.transfers);
 
-  document.getElementById('answer').innerHTML =
+  const answer = document.getElementById('answer');
+  answer.innerHTML =
     '<span class="badge plan">план маршруту</span> ' + summary.join(' · ') + '\n' + lines.join('\n');
+  // «UI Sync»: цифра шага в тексте — это ссылка на его линию на карте.
+  answer.onclick = (event) => {
+    const dot = event.target.closest ? event.target.closest('.step-dot') : null;
+    const layer = dot ? state.planStepLayers[dot.dataset.step] : null;
+    if (layer && layer.getBounds().isValid()) {
+      map.fitBounds(layer.getBounds(), { padding: [40, 40] });
+    }
+  };
   setStatus('маршрут побудовано', 'ok');
 }
 
@@ -691,6 +903,7 @@ const LEGEND_ROWS = [
   { icon: '●', colour: '#43c463', text: 'Живий (GPS)' },
   { icon: '●', colour: '#8b9096', text: 'За розкладом' },
   { icon: '●', colour: '#ffd700', glow: '#ffd700', text: 'Ваша посадка' },
+  { icon: '1', colour: '#fff', background: '#4f8cff', text: 'Крок плану' },
   { icon: '--', spacing: '2px', text: 'Пішки' },
 ];
 
@@ -698,6 +911,10 @@ function legendIconStyle(row) {
   const parts = ['color: ' + (row.colour || 'inherit')];
   if (row.glow) parts.push('text-shadow: 0 0 5px ' + row.glow);
   if (row.spacing) parts.push('letter-spacing: ' + row.spacing);
+  // Бейдж кроку плану — кружечок із цифрою, як на карті (кольори з легенди).
+  if (row.background) {
+    parts.push('background: ' + row.background, 'border-radius: 50%', 'padding: 0 5px');
+  }
   return parts.join('; ');
 }
 

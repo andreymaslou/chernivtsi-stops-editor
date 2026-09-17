@@ -14,6 +14,7 @@
 python tools/perf/latency_plan.py --tag after            # слепок планов + время
 python tools/perf/latency_plan.py --tag before --rev 1e16f98
 python tools/perf/compare_snapshots.py before after      # побайтовая сверка + счётчики
+python tools/perf/compare_snapshots.py before after --ignore-keys full_geom  # если поле добавлено сознательно
 python tools/perf/ab_prod_cycle.py --old 1e16f98        # A/B в прод-режиме
 python tools/perf/regimes.py                            # режимы A/B/C
 python tools/perf/bench_counters.py                     # cProfile + масштабирование
@@ -80,3 +81,9 @@ python tools/perf/check_map_paths.py --text-file tools/perf/phrases/kalynka_univ
    способы: запуск из PowerShell или `--text-file phrase.txt` (UTF-8).
    Скрипт специально сообщает «НЕ ПЛАН, а: ...» и возвращает код 2, чтобы пустой
    ответ нельзя было принять за «разрывов нет».
+8. **Добавленное в план поле делает сверку красной — это ожидаемо.** Правка
+   вроде `leg.full_geom` (хвосты маршруту на карте, `docs/REVIEW-map-ux.md`)
+   добавляет ключ в ответ, и `compare_snapshots.py` показывает
+   `IDENTICAL: False` + путь первой разницы для всех эталонных пар. Для приёма
+   оптимизаций запускайте с `--ignore-keys <поле>`: список игнорируемых полей
+   печатается в отчёте, так что «осознанное» отличие нельзя спрятать случайно.
