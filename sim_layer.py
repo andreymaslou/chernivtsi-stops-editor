@@ -183,7 +183,8 @@ class SimLayer:
 
                 lat, lon, speed, heading = self._position_at(direction, elapsed)
                 label = direction["label"]
-                board = f"{direction['route_name']}-{k + 1:03d}"
+                dir_offset = 500 if direction["key"].endswith(":B") else 0
+                board = f"{direction['route_name']}-{k + 1 + dir_offset:03d}"
                 vehicles.append({
                     "imei": f"SIM-{direction['key']}-{k}",
                     "vehicle_id": direction["route_id"] * 1000 + k,
