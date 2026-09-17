@@ -4,7 +4,10 @@
  *
  * Запуск из корня репозитория:
  *   node tools/ui/check_emulator.js
- *   node tools/ui/check_emulator.js --url http://169.58.82.105:8000/ui/emulator.html
+ *   node tools/ui/check_emulator.js --url http://169.58.82.105:8000/ui/emulator.html --out C:\\Temp\\ui_vps
+ *
+ * --url — какой эмулятор проверять, --text — фраза для сценария плана,
+ * --out — куда сложить PNG и report.json (по умолчанию tools/ui/out).
  *
  * Что проверяется:
  *   1. страница грузится без ошибок консоли и без упавших запросов;
@@ -30,7 +33,7 @@ function argValue(name, fallback) {
 
 const URL = argValue('--url', 'http://127.0.0.1:8000/ui/emulator.html');
 const PHRASE = argValue('--text', 'Я на Соборці, їду на Гравітон');
-const OUT = path.join(__dirname, 'out');
+const OUT = path.resolve(argValue('--out', path.join(__dirname, 'out')));
 fs.mkdirSync(OUT, { recursive: true });
 
 const report = { url: URL, phrase: PHRASE, checks: {}, errors: [], shots: [] };

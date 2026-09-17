@@ -46,22 +46,35 @@ end-to-end 1.77 → 0.22 с; `bfbac2d` — pytest-каркас с фиксиро
 (haversine 33 168 → 133, прод-цикл p50 230 → 76 мс, 6/6 эталонных планов
 byte-identical); `38ccdac` — разбор с метриками и правками к брифу.
 
+**Живые ТС на карте** (`b51b7e0`): `heading_deg` (симулятор считает из цепочки
+маршрута, реальный GPS — из `orientation`) пошёл в дело: маркеры ТС стали стрелками
+(`vehicleIcon()`, SVG `<g transform="rotate(...)">`, круг с номером маршрута не
+вращается), добавлен слой живого парка (`/api/live?only_fresh=false`, депо не
+показываем) и «машина времени» с режимом «▶ рух» (1 мин модели за 0.9 с, плавная
+интерполяция позиции на rAF). Данные и API не менялись. Дизайн стрелок отдан Gemini:
+`docs/BRIEF-emulator-vehicles-visual.md`.
+
 **Гигиена и инструменты:** `7d1eee7` — `.gitignore`, `.dockerignore`,
 `.env.example` (его требовал `DEPLOY_EMULATOR.md`, файла не было);
 `31d4dcc` — из индекса убран локальный мусор; `1e13bb3` — `tools/perf/`
-(замеры и сверки, см. `tools/perf/README.md`).
+(замеры и сверки, см. `tools/perf/README.md`); `b51b7e0` — `tools/ui/`
+(проверка эмулятора «глазами», см. ниже).
 
-## 3. Быстрые проверки (5 команд)
+## 3. Быстрые проверки (6 команд)
 
 ```powershell
 cd c:\Users\YA\.gemini\antigravity\scratch\chernivtsi-stops-editor
 python -m pytest -q
+node tools\ui\check_emulator.js
 python tools\perf\parity_http.py --text-file tools\perf\phrases\soborna_graviton.txt --now 2026-09-17T03:10:00
 python tools\perf\check_map_paths.py --text-file tools\perf\phrases\kalynka_universytet.txt --url http://169.58.82.105:8000
 python tools\perf\ab_prod_cycle.py --old 1e16f98
 ```
 
-Ожидаемое: `10 passed`; паритет JSON локально/VPS = `True`; по фразе «з Калінки
+Ожидаемое: `10 passed`; UI-проверка печатает 14 `OK` и `CHECK_EMULATOR_OK`
+(на 2026-09-17: 63 маркера, у всех ненулевой курс, 61 из 61 сменили позицию в
+режиме «рух», план рисует линию, консоль чистая, скриншоты в `tools/ui/out/`);
+паритет JSON локально/VPS = `True`; по фразе «з Калінки
 до Універу» нога 5 идёт 15 точками (`OK (trolley:5:A)`), «ног с разрывом: 0»;
 A/B ≈ 235 → 150 мс (со счётчиками) и haversine 33 168 → 133.
 
@@ -75,6 +88,14 @@ A/B ≈ 235 → 150 мс (со счётчиками) и haversine 33 168 → 133
    дают разные планы (разные часы и разный парк симулятора), а кириллица в
    `.cmd`-файле вообще ломается в OEM-кодировке — передавайте `--text-file`.
 4. `path` ноги — цепочка остановок; для трассировки по улицам нужны OSM way-линии.
+5. UI-проверку (`tools/ui/check_emulator.js`) запускать в headless Chromium, а не
+   «глазами по скриншоту»: она ловит и курс, и движение (сравнивает позиции
+   маркеров в пикселях), и 404/ошибки консоли. Из `run_commands` вывод длинного
+   node-процесса обрезается — гоняйте через `.cmd` в скрытом окне
+   (`Start-Process -WindowStyle Hidden`), результат читайте из файла.
+6. Поворот стрелки ТС — внутри SVG (`<g transform="rotate(a 17 17)">`), поэтому
+   круг с номером маршрута и попап остаются прямыми. Не вешайте CSS-`rotate` на
+   весь маркер: подписи поедут.
 
 ## 5. Открытые задачи
 
@@ -84,7 +105,9 @@ A/B ≈ 235 → 150 мс (со счётчиками) и haversine 33 168 → 133
 3. **Геометрия дорог на карте**: OSM way-линии вместо прямых между остановками.
 4. `docs/DECISIONS.md` / `AGENTS.md`: правило «писатель ≠ проверяющий»,
    порядок бриф (Gemini) → реализация (Cline) → разбор (Claude/Cline).
-5. Косметика: `/favicon.ico` отдаёт 404.
+5. **Дизайн маркеров ТС**: ждём спецификацию Gemini по
+   `docs/BRIEF-emulator-vehicles-visual.md`; править только `vehicleIcon()` и
+   стили `.veh-marker` / `.veh-wrap`, логику не трогать.
 
 ## 6. Если начинаете новую сессию
 
@@ -93,10 +116,12 @@ A/B ≈ 235 → 150 мс (со счётчиками) и haversine 33 168 → 133
 
 > Прочитай `docs/STATUS.md`, `docs/REVIEW-router-latency.md`,
 > `docs/REVIEW-router-perf.md`, `docs/REVIEW-router-correctness.md`,
-> `docs/REVIEW-router-map-paths.md` и `tools/perf/README.md`.
+> `docs/REVIEW-router-map-paths.md`, `tools/perf/README.md` и заголовок
+> `tools/ui/check_emulator.js`.
 > Правило проекта: **писатель ≠ проверяющий** — бриф пишет один (Gemini),
 > реализует другой (Cline), проверяем машинно (`python -m pytest -q`,
-> `tools/perf/compare_snapshots.py`, `tools/perf/ab_prod_cycle.py`), и только
+> `node tools/ui/check_emulator.js`, `tools/perf/compare_snapshots.py`,
+> `tools/perf/ab_prod_cycle.py`), и только
 > потом коммит → push → деплой на VPS.
 > Задача: <что делаем>.
 
