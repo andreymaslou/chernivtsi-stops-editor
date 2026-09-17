@@ -13,7 +13,18 @@ const EXAMPLES = [
   'як доїхати до Готелю Буковина',
 ];
 
-const state = { stops: {}, last: null };
+const state = {
+  stops: {},
+  last: null,
+  // Живые ТС: ключ «маршрут|борт» -> { marker, from, to, t0, vehicle }.
+  // Один словарь на всё: машины из плана и из живого парка не дублируются.
+  vehicles: new Map(),
+  fleetOn: false,
+  playing: false,
+  modelNow: null,      // «машина часу»: ISO без секунд, null = реальное время
+  fleetTimer: null,
+  animFrame: null,
+};
 
 // ---------------------------------------------------------------------------
 // Карта
@@ -25,6 +36,11 @@ L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
   attribution: '© OpenStreetMap',
 }).addTo(map);
 const layerGroup = L.layerGroup().addTo(map);
+
+// Слой живых ТС — отдельно от плана: маршрут можно перерисовать, а парк при
+// этом продолжал бы ехать. Машины из плана попадают сюда же (дублей нет:
+// ключ «маршрут|борт», см. upsertVehicle).
+const vehicleLayer = L.layerGroup().addTo(map);
 
 // На телефоне карта сначала может быть нулевой высоты — просим пересчитать.
 window.addEventListener('load', () => setTimeout(() => map.invalidateSize(), 200));
@@ -117,6 +133,224 @@ function markerFor(stop, color, label) {
     fillColor: '#fff',
     fillOpacity: 1,
   }).bindPopup(label || stop.name);
+}
+
+// ---------------------------------------------------------------------------
+// Живые ТС: стрелка по курсу машины + движение по модельному времени
+// ---------------------------------------------------------------------------
+//
+// Данные уже готовы на бекенде: у каждой машины есть heading_deg (симулятор
+// считает его из цепочки маршрута, реальный GPS берёт из поля orientation
+// перевозчика), route_colour_hex, board_number, speed_kmh, progress.
+// Оформление маркера живёт в одном месте — vehicleIcon() + класс .veh-marker.
+
+const FLEET_TICK_MS = 900;   // как часто обновляем парк в режиме «рух»
+const FLEET_STEP_MIN = 1;    // на сколько минут двигаем модель за один тик
+const ANIM_MS = 900;         // за сколько миллисекунд «доезжаем» до новой точки
+
+function vehicleKey(vehicle) {
+  return String(vehicle.route_label || '?') + '|' + String(vehicle.board_number || '?');
+}
+
+/**
+ * Стрелка направления (тот же приём, что в редакторе остановок): группа <g>
+ * поворачивается за курсом, круг и подпись остаются прямыми. 0° — на север.
+ */
+function vehicleIcon(vehicle) {
+  const heading = Number(vehicle.heading_deg);
+  const angle = Number.isFinite(heading) ? heading.toFixed(1) : '0.0';
+  const live = !!vehicle.is_live;
+  const colour = vehicle.route_colour_hex || '#4f8cff';
+  const fill = live ? colour : '#8b9096';
+  const label = String(vehicle.route_label || '').slice(0, 4);
+  const stopped = Number(vehicle.speed_kmh) < 3;
+  const html = `
+    <div class="veh-wrap${live ? ' live' : ' planned'}${stopped ? ' stopped' : ''}" data-heading="${angle}">
+      <svg width="34" height="34" viewBox="0 0 34 34">
+        <g transform="rotate(${angle} 17 17)">
+          <path d="M 17 1 L 26 15 L 8 15 Z" fill="${fill}" stroke="#ffffff" stroke-width="1.8" stroke-linejoin="round"/>
+        </g>
+        <circle cx="17" cy="17" r="9" fill="${live ? '#111318' : '#4a4f57'}" stroke="#ffffff" stroke-width="1.8"/>
+        <text x="17" y="20.5" text-anchor="middle" font-family="sans-serif" font-size="9" font-weight="700" fill="#ffffff">${label}</text>
+      </svg>
+    </div>`;
+  return L.divIcon({
+    className: 'veh-marker' + (live ? ' is-live' : ' is-planned'),
+    html,
+    iconSize: [34, 34],
+    iconAnchor: [17, 17],
+  });
+}
+
+function vehiclePopup(vehicle) {
+  const live = !!vehicle.is_live;
+  const parts = [
+    (live ? '🟢 живий GPS' : ' за розкладом') + ' — ' + (vehicle.route_label || '?') +
+    (vehicle.board_number ? ' (борт ' + vehicle.board_number + ')' : ''),
+  ];
+  if (Number.isFinite(Number(vehicle.speed_kmh))) parts.push('швидкість: ' + vehicle.speed_kmh + ' км/год');
+  if (Number.isFinite(Number(vehicle.heading_deg))) parts.push('курс: ' + Math.round(vehicle.heading_deg) + '°');
+  if (vehicle.gpstime) {
+    parts.push('GPS: ' + vehicle.gpstime +
+      (vehicle.age_seconds ? ' (' + Math.round(vehicle.age_seconds) + ' с тому)' : ''));
+  }
+  if (vehicle.progress !== undefined && vehicle.progress !== null) {
+    parts.push('рейс виконано на ' + Math.round(vehicle.progress * 100) + '%');
+  }
+  return parts.join('<br>');
+}
+
+/** Добавить машину или обновить её положение/курс (без дублей по борт-номеру). */
+function upsertVehicle(vehicle) {
+  if (vehicle.lat === undefined || vehicle.lon === undefined) return null;
+  const key = vehicleKey(vehicle);
+  const point = [Number(vehicle.lat), Number(vehicle.lon)];
+  const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+  let entry = state.vehicles.get(key);
+
+  if (!entry) {
+    const marker = L.marker(point, { icon: vehicleIcon(vehicle), zIndexOffset: 200 })
+      .bindPopup(vehiclePopup(vehicle))
+      .addTo(vehicleLayer);
+    entry = { marker, vehicle, from: L.latLng(point), to: null, t0: now };
+    state.vehicles.set(key, entry);
+  } else {
+    // Двигаемся от текущего положения (возможно, ещё в середине анимации) к новому.
+    entry.from = entry.marker.getLatLng();
+    entry.to = L.latLng(point);
+    entry.t0 = now;
+    entry.vehicle = vehicle;
+    entry.marker.setIcon(vehicleIcon(vehicle));  // новый курс и цвет
+    entry.marker.setPopupContent(vehiclePopup(vehicle));
+  }
+  return entry;
+}
+
+/** Убрать машины, которых нет в новом снимке парка (только для полного снимка). */
+function pruneVehicles(seen) {
+  state.vehicles.forEach((entry, key) => {
+    if (!seen.has(key)) {
+      entry.marker.remove();
+      state.vehicles.delete(key);
+    }
+  });
+}
+
+/** Плавно доехать до новых точек: rAF крутится только пока есть цель. */
+function ensureAnimation() {
+  if (state.animFrame !== null) return;
+  const step = (now) => {
+    state.animFrame = null;
+    let pending = false;
+    state.vehicles.forEach((entry) => {
+      if (!entry.to) return;
+      const t = Math.min(1, (now - entry.t0) / ANIM_MS);
+      entry.marker.setLatLng([
+        entry.from.lat + (entry.to.lat - entry.from.lat) * t,
+        entry.from.lng + (entry.to.lng - entry.from.lng) * t,
+      ]);
+      if (t < 1) pending = true;
+      else entry.to = null;  // доехали
+    });
+    if (pending) state.animFrame = requestAnimationFrame(step);
+  };
+  state.animFrame = requestAnimationFrame(step);
+}
+
+function updateFleetStatus(counts) {
+  const el = document.getElementById('fleet-status');
+  if (!el) return;
+  let live = 0;
+  let planned = 0;
+  state.vehicles.forEach((entry) => {
+    if (entry.vehicle.is_live) live += 1;
+    else planned += 1;
+  });
+  const time = state.modelNow ? state.modelNow.replace('T', ' ') : 'зараз';
+  el.textContent =
+    'ТС на карті: ' + live + ' живих' + (planned ? ' + ' + planned + ' за розкладом' : '') +
+    (counts && counts.total ? ' (у парку ' + counts.total + ')' : '') +
+    ' · час: ' + time + (state.playing ? ' ▶' : '') +
+    (state.fleetOn ? '' : ' · парк вимкнено');
+}
+
+/** Полный снимок парка: /api/live (с «машиной часу», если время задано). */
+async function loadFleet() {
+  const params = new URLSearchParams();
+  if (state.modelNow) params.set('now', state.modelNow);
+  params.set('only_fresh', 'false');  // «за розкладом» тоже показываем (серым)
+  try {
+    const res = await fetch('/api/live?' + params.toString());
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    const vehicles = (data.vehicles || []).filter((v) => !v.in_depo);
+    const seen = new Set();
+    vehicles.forEach((vehicle) => {
+      if (upsertVehicle(vehicle)) seen.add(vehicleKey(vehicle));
+    });
+    pruneVehicles(seen);
+    ensureAnimation();
+    updateFleetStatus(data.counts);
+  } catch (err) {
+    updateFleetStatus(null);
+    setStatus('не вдалось завантажити живий парк: ' + err.message, 'error');
+  }
+}
+
+/** ISO без секунд — формат для /api/live?now= и для input[datetime-local]. */
+function isoMinute(date) {
+  const pad = (value) => String(value).padStart(2, '0');
+  return date.getFullYear() + '-' + pad(date.getMonth() + 1) + '-' + pad(date.getDate()) +
+    'T' + pad(date.getHours()) + ':' + pad(date.getMinutes());
+}
+
+function modelDate() {
+  return state.modelNow ? new Date(state.modelNow) : new Date();
+}
+
+function syncTimeInput() {
+  const input = document.getElementById('model-time');
+  if (input) input.value = state.modelNow || isoMinute(new Date());
+}
+
+function toggleFleet(on) {
+  state.fleetOn = on;
+  const box = document.getElementById('fleet-toggle');
+  if (box) box.checked = on;
+  const play = document.getElementById('fleet-play');
+  if (play) play.disabled = !on;
+
+  if (on) {
+    syncTimeInput();
+    loadFleet();
+  } else {
+    setPlaying(false);
+    pruneVehicles(new Set());  // парк выключен — машин на карте быть не должно
+    updateFleetStatus(null);
+  }
+}
+
+/** «Рух»: каждый тик сдвигаем модельное время и забираем новый снимок парка. */
+function setPlaying(on) {
+  state.playing = on;
+  const button = document.getElementById('fleet-play');
+  if (button) button.textContent = on ? ' пауза' : '▶ рух';
+
+  if (on) {
+    if (!state.fleetOn) toggleFleet(true);
+    if (!state.modelNow) state.modelNow = isoMinute(modelDate());
+    syncTimeInput();
+    state.fleetTimer = setInterval(() => {
+      state.modelNow = isoMinute(new Date(modelDate().getTime() + FLEET_STEP_MIN * 60000));
+      syncTimeInput();
+      loadFleet();
+    }, FLEET_TICK_MS);
+    loadFleet();
+  } else if (state.fleetTimer) {
+    clearInterval(state.fleetTimer);
+    state.fleetTimer = null;
+  }
+  updateFleetStatus(null);
 }
 
 function render(endpoint, data) {
@@ -223,23 +457,14 @@ function renderPlan(plan) {
   setStatus('маршрут побудовано', 'ok');
 }
 
-/** Живые и симулированные ТС: зелёный — реальный GPS, серый — за розкладом. */
+/** ТС на маршрутах плана: та же стрелка, что и в живом парке (дублей нет). */
 function renderVehicles(vehicles, bounds) {
+  if (!Array.isArray(vehicles)) return;
   vehicles.forEach((vehicle) => {
-    if (vehicle.lat === undefined || vehicle.lon === undefined) return;
-    const live = !!vehicle.is_live;
-    L.circleMarker([vehicle.lat, vehicle.lon], {
-      radius: live ? 6 : 4,
-      color: vehicle.route_colour_hex || '#888',
-      weight: 2,
-      fillColor: live ? '#43c463' : '#9aa0a6',
-      fillOpacity: live ? 1 : .5,
-    }).bindPopup(
-      (live ? '🟢 живий' : '⚪ за розкладом') + ' — ' + (vehicle.route_label || '') +
-      ' (борт ' + (vehicle.board_number || '?') + ')'
-    ).addTo(layerGroup);
-    bounds.push([vehicle.lat, vehicle.lon]);
+    if (upsertVehicle(vehicle)) bounds.push([vehicle.lat, vehicle.lon]);
   });
+  ensureAnimation();
+  updateFleetStatus(null);
 }
 
 // ---------------------------------------------------------------------------
@@ -320,11 +545,46 @@ document.getElementById('report-send').onclick = sendReport;
 document.getElementById('report-cancel').onclick = closeReportForm;
 document.getElementById('clear-btn').onclick = () => {
   clearLayers();
+  clearVehicles();
   document.getElementById('answer').style.display = 'none';
   document.getElementById('report-btn').disabled = true;
   state.last = null;
   setStatus('карту очищено');
 };
+
+// --- Управление живым парком и «машиной часу» -------------------------------
+
+function clearVehicles() {
+  setPlaying(false);
+  pruneVehicles(new Set());
+  updateFleetStatus(null);
+}
+
+const fleetToggle = document.getElementById('fleet-toggle');
+if (fleetToggle) fleetToggle.onchange = (event) => toggleFleet(event.target.checked);
+
+const fleetPlay = document.getElementById('fleet-play');
+if (fleetPlay) fleetPlay.onclick = () => setPlaying(!state.playing);
+
+const fleetNow = document.getElementById('fleet-now');
+if (fleetNow) {
+  fleetNow.onclick = () => {
+    state.modelNow = null;
+    syncTimeInput();
+    if (state.fleetOn) loadFleet();
+    updateFleetStatus(null);
+  };
+}
+
+const modelTime = document.getElementById('model-time');
+if (modelTime) {
+  modelTime.onchange = (event) => {
+    state.modelNow = event.target.value ? event.target.value : null;
+    if (state.fleetOn) loadFleet();
+    updateFleetStatus(null);
+  };
+  syncTimeInput();
+}
 
 renderChips();
 loadStops();

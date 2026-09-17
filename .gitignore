@@ -39,3 +39,6 @@ router_demo_out.txt
 # Результаты замеров (tools/perf) — генерируются, в git не нужны
 tools/perf/out/
 
+# Скриншоты и отчёты UI-проверок (tools/ui) — тоже генерируются
+tools/ui/out/
+
