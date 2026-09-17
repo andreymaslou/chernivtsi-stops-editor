@@ -62,7 +62,9 @@ function stopCard(stop) {
   const info = document.createElement('div');
   info.innerHTML =
     '<div class="stop-name">' + stop.name + ' <span class="stop-meta">#' + stop.id + '</span></div>' +
-    '<div class="stop-meta">' + stop.lat.toFixed(5) + ', ' + stop.lon.toFixed(5) + '</div>' +
+    '<div class="stop-meta">' + 
+       '<a href="https://www.google.com/maps?q=' + stop.lat + ',' + stop.lon + '" target="_blank" style="text-decoration:none;" title="Відкрити на карті">🗺️ ' + stop.lat.toFixed(5) + ', ' + stop.lon.toFixed(5) + '</a>' + 
+    '</div>' +
     (override.updated ? '<div class="stop-meta">правка: ' + override.updated + '</div>' : '');
   grid.appendChild(info);
 

@@ -29,14 +29,30 @@
       font: 15px/1.45 -apple-system, "Segoe UI", Roboto, sans-serif;
       height: 100vh;
       display: flex;
-      flex-direction: column;
+      flex-direction: column-reverse; /* На мобільному: панель знизу, карта зверху */
+      overflow: hidden;
     }
 
     .panel {
       background: var(--panel);
       padding: 10px;
-      border-bottom: 1px solid #000;
+      border-top: 1px solid #000;
       z-index: 1000;
+      max-height: 45vh; /* На мобільному панель займає не більше 45% екрану */
+      overflow-y: auto; /* Додаємо скрол, якщо план маршруту довгий */
+    }
+
+    @media (min-width: 768px) {
+      body {
+        flex-direction: row; /* На ПК: панель зліва, карта справа */
+      }
+      .panel {
+        width: 380px;
+        max-height: none;
+        height: 100vh;
+        border-top: none;
+        border-right: 1px solid #000;
+      }
     }
 
     .head {
