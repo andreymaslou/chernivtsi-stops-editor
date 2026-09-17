@@ -20,6 +20,7 @@ python tools/perf/bench_counters.py                     # cProfile + масшт�
 python tools/perf/parity_http.py                        # локальный сервер vs VPS
 python tools/perf/check_map_paths.py                    # целы ли пути ног на карте
 python tools/perf/diag_stop_chain.py trolley:5:A        # цепочка остановок маршрута
+python tools/perf/probe_direction.py --rev 916c286    # встречные ТС в подборе «першого потрібного ТС»
 ```
 
 Фразы для дымовых проверок лежат в `tools/perf/phrases/` (UTF-8), их удобно
