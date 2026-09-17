@@ -37,6 +37,10 @@ function argValue(name, fallback) {
 
 const URL = argValue('--url', 'http://127.0.0.1:8000/ui/emulator.html');
 const PHRASE = argValue('--text', 'Я на Соборці, їду на Гравітон');
+// Час у моделі фіксуємо в робочому вікні маршрутів (06:00–22:00): симулятор
+// «затискає» ніч до середини дня, тобто поза вікном парк у моделі НЕРУХОМИЙ —
+// інакше перевірка «машины двигаются» залежала б від годинника машини.
+const MODEL_TIME = argValue('--model-time', '2026-09-17T12:00');
 const OUT = path.resolve(argValue('--out', path.join(__dirname, 'out')));
 fs.mkdirSync(OUT, { recursive: true });
 
@@ -376,6 +380,12 @@ const probe = () => ({
   await page.click('#fleet-toggle');
   await page.waitForFunction(
     () => document.querySelectorAll('.veh-marker').length > 5, { timeout: 30000 });
+  // Час моделі — фіксований (див. MODEL_TIME): поза вікном роботи маршрутів
+  // симулятор віддає одну й ту саму позицію парку, і «рух» довести неможливо.
+  await page.$eval('#model-time', (input, value) => {
+    input.value = value;
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  }, MODEL_TIME);
   await sleep(1200);
   const fleet = await page.evaluate(probe);
   const headings = fleet.wraps
