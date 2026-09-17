@@ -124,11 +124,36 @@
     }
 
     /* Маркер ТС: вся вёрстка стрелки — в vehicleIcon() (web/emulator.js),
-       здесь только внешние эффекты, чтобы дизайн менялся в одном месте. */
+       здесь только состояния из спецификации дизайна: live / planned /
+       stopped (пульс обводки) / target (золотой пульс «сідати сюди»). */
     .veh-marker { background: none; border: none; }
-    .veh-wrap { width: 34px; height: 34px; filter: drop-shadow(0 2px 3px rgba(0, 0, 0, .45)); }
-    .veh-wrap.planned { opacity: .6; }
-    .veh-wrap.stopped svg path { opacity: .7; }
+    /* Целевой ТС всегда поверх остальных машин */
+    .veh-marker.is-target { z-index: 1000 !important; }
+
+    .veh-wrap { width: 36px; height: 36px; transition: opacity .3s ease, filter .3s ease; opacity: 1; }
+    /* Тень держим на svg, чтобы filter у .planned/.target не срезал её */
+    .veh-wrap svg { filter: drop-shadow(0 2px 3px rgba(0, 0, 0, .45)); }
+
+    /* За розкладом — приглушённо и чуть серо */
+    .veh-wrap.planned { opacity: .6; filter: grayscale(40%); }
+
+    /* Зупинено (speed_kmh < 3): напрямок неактуальний — стрілку ховаємо,
+       а обводку пульсуємо. */
+    .veh-wrap.stopped .veh-arrow { display: none; }
+    @keyframes pulse-stopped {
+      0% { stroke-width: 2.5; }
+      50% { stroke-width: 5; filter: brightness(1.3); }
+      100% { stroke-width: 2.5; }
+    }
+    .veh-wrap.stopped circle { animation: pulse-stopped 2s infinite ease-in-out; }
+
+    /* Ціль плана: золоте пульсування + лёгкий рост */
+    @keyframes pulse-target {
+      0% { filter: drop-shadow(0 0 2px #ffd700); transform: scale(1); }
+      50% { filter: drop-shadow(0 0 12px #ffd700); transform: scale(1.15); }
+      100% { filter: drop-shadow(0 0 2px #ffd700); transform: scale(1); }
+    }
+    .veh-wrap.target svg { animation: pulse-target 1.5s infinite ease-in-out; }
 
     .hidden { display: none !important; }
 

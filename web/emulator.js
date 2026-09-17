@@ -19,6 +19,10 @@ const state = {
   // Живые ТС: ключ «маршрут|борт» -> { marker, from, to, t0, vehicle }.
   // Один словарь на всё: машины из плана и из живого парка не дублируются.
   vehicles: new Map(),
+  // Борт-номера «первых нужных ТС» из плана (leg.live_bus). Живёт отдельно от
+  // словаря машин: парк каждые 0.9 с приходит новыми объектами, а подсветка
+  // цели обязана пережить обновление снимка.
+  targetBoards: new Set(),
   fleetOn: false,
   playing: false,
   modelNow: null,      // «машина часу»: ISO без секунд, null = реальное время
@@ -153,33 +157,64 @@ function vehicleKey(vehicle) {
 }
 
 /**
- * Стрелка направления (тот же приём, что в редакторе остановок): группа <g>
- * поворачивается за курсом, круг и подпись остаются прямыми. 0° — на север.
+ * Маркер ТС (спецификация дизайна Gemini, docs/BRIEF-emulator-vehicles-visual.md):
+ * круг радиусом 11px с номером маршрута + выступающий сверху треугольник-стрелка.
+ * Стрелка повёрнута за курсом (0° — на север), круг и подпись — прямые.
+ *
+ * Состояния — классами на обёртке: live / planned (приглушён), stopped
+ * (стрілка ховається, обводка пульсує) / target (золоте пульсування цілі).
  */
 function vehicleIcon(vehicle) {
   const heading = Number(vehicle.heading_deg);
   const angle = Number.isFinite(heading) ? heading.toFixed(1) : '0.0';
   const live = !!vehicle.is_live;
   const colour = vehicle.route_colour_hex || '#4f8cff';
-  const fill = live ? colour : '#8b9096';
   const label = String(vehicle.route_label || '').slice(0, 4);
   const stopped = Number(vehicle.speed_kmh) < 3;
+  const isTarget = state.targetBoards.has(boardKey(vehicle));
+
+  let wrapClass = 'veh-wrap' + (live ? ' live' : ' planned');
+  if (stopped) wrapClass += ' stopped';
+  if (isTarget) wrapClass += ' target';
+
   const html = `
-    <div class="veh-wrap${live ? ' live' : ' planned'}${stopped ? ' stopped' : ''}" data-heading="${angle}">
-      <svg width="34" height="34" viewBox="0 0 34 34">
-        <g transform="rotate(${angle} 17 17)">
-          <path d="M 17 1 L 26 15 L 8 15 Z" fill="${fill}" stroke="#ffffff" stroke-width="1.8" stroke-linejoin="round"/>
+    <div class="${wrapClass}" data-heading="${angle}" data-board="${String(vehicle.board_number || '')}">
+      <svg width="36" height="36" viewBox="0 0 36 36">
+        <g class="veh-arrow-group" transform="rotate(${angle} 18 18)">
+          <path class="veh-arrow" d="M 18 2 L 24 10 L 12 10 Z" fill="${colour}" stroke="#14161a" stroke-width="1.5" stroke-linejoin="round"/>
         </g>
-        <circle cx="17" cy="17" r="9" fill="${live ? '#111318' : '#4a4f57'}" stroke="#ffffff" stroke-width="1.8"/>
-        <text x="17" y="20.5" text-anchor="middle" font-family="sans-serif" font-size="9" font-weight="700" fill="#ffffff">${label}</text>
+        <circle cx="18" cy="18" r="11" fill="#1e2126" stroke="${colour}" stroke-width="2.5"/>
+        <text x="18" y="21.5" text-anchor="middle" font-family="sans-serif" font-size="10" font-weight="700" fill="#ffffff">${label}</text>
       </svg>
     </div>`;
+
   return L.divIcon({
-    className: 'veh-marker' + (live ? ' is-live' : ' is-planned'),
+    className: 'veh-marker' + (isTarget ? ' is-target' : ''),
     html,
-    iconSize: [34, 34],
-    iconAnchor: [17, 17],
+    iconSize: [36, 36],
+    iconAnchor: [18, 18],
+    popupAnchor: [0, -18],
   });
+}
+
+/** Борт-номер как он приходит и в /api/live, и в leg.live_bus (одно и то же поле). */
+function boardKey(vehicle) {
+  return String(vehicle.board_number === undefined || vehicle.board_number === null
+    ? '' : vehicle.board_number);
+}
+
+/**
+ * Запомнить «первые нужные ТС» из плана и перекрасить уже нарисованные машины.
+ * Без параметра — цель снимается (карта очищена, план не построен).
+ */
+function setTargetBoards(legs) {
+  const boards = new Set();
+  (Array.isArray(legs) ? legs : []).forEach((leg) => {
+    const board = String(leg && leg.live_bus ? leg.live_bus : '').trim();
+    if (board && board !== '?') boards.add(board);
+  });
+  state.targetBoards = boards;
+  state.vehicles.forEach((entry) => entry.marker.setIcon(vehicleIcon(entry.vehicle)));
 }
 
 function vehiclePopup(vehicle) {
@@ -267,9 +302,11 @@ function updateFleetStatus(counts) {
     else planned += 1;
   });
   const time = state.modelNow ? state.modelNow.replace('T', ' ') : 'зараз';
+  const targets = [...state.targetBoards];
   el.textContent =
     'ТС на карті: ' + live + ' живих' + (planned ? ' + ' + planned + ' за розкладом' : '') +
     (counts && counts.total ? ' (у парку ' + counts.total + ')' : '') +
+    (targets.length ? ' · ціль: ' + targets.join(', ') : '') +
     ' · час: ' + time + (state.playing ? ' ▶' : '') +
     (state.fleetOn ? '' : ' · парк вимкнено');
 }
@@ -437,12 +474,22 @@ function renderPlan(plan) {
       const name = isWalk ? ' йдемо до «' + leg.at + '»' : ' пересадка на «' + leg.at + '»';
       const walkNote = leg.walk_min ? ' (' + leg.walk_min + ' хв пішки)' : '';
       const waitNote = leg.wait_min ? ', чекати ~' + leg.wait_min + ' хв' : '';
+      // Пішохідна частина: коли роутер почне віддавати геометрію пересадки
+      // (leg.path), малюємо її «як у Google Maps» — пунктир із кружечків.
+      const walkPath = isWalk && Array.isArray(leg.path) ? leg.path : [];
+      if (walkPath.length > 1) {
+        L.polyline(walkPath, {
+          color: '#808080', weight: 5, dashArray: '1, 10',
+          lineCap: 'round', lineJoin: 'round',
+        }).addTo(layerGroup);
+        walkPath.forEach((point) => bounds.push(point));
+      }
       lines.push(icon + name + walkNote + waitNote);
     }
   });
 
   if (Array.isArray(plan.vehicles)) {
-    renderVehicles(plan.vehicles, bounds);
+    renderVehicles(plan.vehicles, bounds, plan.legs);
   }
 
   if (bounds.length) map.fitBounds(bounds, { padding: [40, 40] });
@@ -458,7 +505,8 @@ function renderPlan(plan) {
 }
 
 /** ТС на маршрутах плана: та же стрелка, что и в живом парке (дублей нет). */
-function renderVehicles(vehicles, bounds) {
+function renderVehicles(vehicles, bounds, planLegs) {
+  if (planLegs !== undefined) setTargetBoards(planLegs);
   if (!Array.isArray(vehicles)) return;
   vehicles.forEach((vehicle) => {
     if (upsertVehicle(vehicle)) bounds.push([vehicle.lat, vehicle.lon]);
@@ -557,6 +605,7 @@ document.getElementById('clear-btn').onclick = () => {
 function clearVehicles() {
   setPlaying(false);
   pruneVehicles(new Set());
+  setTargetBoards(null);   // цель снимается вместе с картой
   updateFleetStatus(null);
 }
 

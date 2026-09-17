@@ -51,11 +51,63 @@ const probe = () => ({
   markers: document.querySelectorAll('.veh-marker').length,
   wraps: [...document.querySelectorAll('.veh-wrap')].map((el) => ({
     heading: el.getAttribute('data-heading'),
+    board: el.getAttribute('data-board'),
     planned: el.classList.contains('planned'),
     stopped: el.classList.contains('stopped'),
+    target: el.classList.contains('target'),
   })),
+  targetBoards: [...document.querySelectorAll('.veh-wrap.target')]
+    .map((el) => el.getAttribute('data-board')),
+  targetMarkers: document.querySelectorAll('.veh-marker.is-target').length,
+  // Геометрия маркера из спецификации: круг r=11, стрелка в <g> с rotate(...),
+  // подпись — вне группы (не крутится), цвет заливки стрелки = цвет обводки.
+  geometry: (() => {
+    const wrap = document.querySelector('.veh-wrap');
+    if (!wrap) return null;
+    const svg = wrap.querySelector('svg');
+    const circle = svg.querySelector('circle');
+    const arrow = svg.querySelector('.veh-arrow');
+    const group = svg.querySelector('.veh-arrow-group') || svg.querySelector('g');
+    const text = svg.querySelector('text');
+    return {
+      viewBox: svg.getAttribute('viewBox'),
+      radius: circle.getAttribute('r'),
+      strokeMatchesFill: circle.getAttribute('stroke') === arrow.getAttribute('fill'),
+      arrowInGroup: !!group && arrow.parentNode === group,
+      groupTransform: group ? group.getAttribute('transform') : '',
+      textOutsideGroup: !!text && text.parentNode !== group,
+      textAnchor: text ? text.getAttribute('text-anchor') : '',
+      heading: wrap.getAttribute('data-heading'),
+    };
+  })(),
   transforms: [...document.querySelectorAll('.veh-marker')].map((el) => el.style.transform),
   polylines: document.querySelectorAll('.leaflet-overlay-pane path').length,
+  // CSS спецификации: проверяем правила на одноразовых элементах, а не «на глаз».
+  // Данные симулятора не дают «зупинено» (speed_kmh — средняя скорость маршрута),
+  // поэтому правило stopped иначе не увидеть вообще.
+  css: (() => {
+    const host = document.createElement('div');
+    host.innerHTML =
+      '<div class="veh-wrap planned pr"><svg class="p"></svg></div>' +
+      '<div class="veh-wrap stopped st"><svg class="s"><circle class="c" r="11"/>' +
+      '<path class="veh-arrow" d="M0 0"/></svg></div>' +
+      '<div class="veh-wrap target tr"><svg class="t"></svg></div>';
+    document.body.appendChild(host);
+    const style = (selector) => getComputedStyle(host.querySelector(selector));
+    const out = {
+      // opacity/filter не наследуются, поэтому читаем обёртку .veh-wrap,
+      // а не вложенный svg (у него своя тень).
+      plannedOpacity: style('.pr').opacity,
+      plannedGrayscale: style('.pr').filter,
+      plannedSvgShadow: style('.p').filter,
+      stoppedArrowDisplay: style('.s .veh-arrow').display,
+      stoppedCircleAnimation: style('.s .c').animationName,
+      targetAnimation: style('.t').animationName,
+      targetShadow: style('.t').filter,
+    };
+    host.remove();
+    return out;
+  })(),
   answer: (document.getElementById('answer') || {}).textContent || '',
   fleetStatus: (document.getElementById('fleet-status') || {}).textContent || '',
   status: (document.getElementById('status') || {}).textContent || '',
@@ -133,6 +185,35 @@ const probe = () => ({
     plan.answer.replace(/\s+/g, ' ').slice(0, 120));
   check('на карте есть лінія маршруту', plan.polylines > 0, 'path-элементов: ' + plan.polylines);
   check('ТС плана тоже стрелками', plan.markers > 0, 'маркеров: ' + plan.markers);
+  check('маркер ТС за специфікацією',
+    !!plan.geometry && plan.geometry.viewBox === '0 0 36 36' && plan.geometry.radius === '11' &&
+    plan.geometry.strokeMatchesFill && plan.geometry.arrowInGroup && plan.geometry.textOutsideGroup &&
+    plan.geometry.textAnchor === 'middle',
+    JSON.stringify(plan.geometry));
+  check('стрілка повертається за курсом маркера',
+    !!plan.geometry && plan.geometry.groupTransform === 'rotate(' + plan.geometry.heading + ' 18 18)',
+    plan.geometry ? plan.geometry.groupTransform + ' при курсі ' + plan.geometry.heading : 'нет маркеров');
+  check('CSS станів за специфікацією',
+    plan.css.plannedOpacity === '0.6' && /grayscale/.test(plan.css.plannedGrayscale) &&
+    plan.css.stoppedArrowDisplay === 'none' && plan.css.stoppedCircleAnimation === 'pulse-stopped' &&
+    plan.css.targetAnimation === 'pulse-target' && /gold|rgb\(255, 215, 0\)/i.test(plan.css.targetShadow),
+    'planned=' + plan.css.plannedOpacity + '/' + plan.css.plannedGrayscale +
+    ' stopped=' + plan.css.stoppedArrowDisplay + '/' + plan.css.stoppedCircleAnimation +
+    ' target=' + plan.css.targetAnimation + '/' + plan.css.targetShadow);
+
+  // Цель плана («сідати: <борт>») обязана светиться тем же бортом, что в тексте плана.
+  const boarding = (plan.answer.match(/сідати: ([^,\s]+)/) || [])[1] || null;
+  if (boarding && boarding !== 'ТЗ') {
+    check('ціль плана підсвічена', plan.targetBoards.includes(boarding),
+      'у плані «сідати: ' + boarding + '», підсвічено: ' + (plan.targetBoards.join(', ') || 'нікого') +
+      ', маркерів із is-target: ' + plan.targetMarkers);
+  } else {
+    check('ціль плана підсвічена', true, 'у плані немає живого ТС для посадки — цілі немає');
+  }
+  const plannedCount = plan.wraps.filter((item) => item.planned).length;
+  const stoppedCount = plan.wraps.filter((item) => item.stopped).length;
+  console.log('       станів: live=' + (plan.wraps.length - plannedCount) + ' planned=' + plannedCount +
+    ' stopped=' + stoppedCount + ' target=' + plan.targetBoards.length);
   await page.screenshot({ path: path.join(OUT, 'plan.png') });
   report.shots.push('plan.png');
 
