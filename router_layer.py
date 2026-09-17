@@ -43,6 +43,15 @@ MAX_LIVE_SNAP_METERS = 600.0
 # GPS-треку). Менше значення — суворіша перевірка «встигаю чи ні».
 BOARD_TOLERANCE_MIN = 0.5
 
+# Відсів зустрічних ТС (Напрямок Б на маршруті А) — docs/BRIEF-router-direction.md.
+# Допуск на кут між курсом машини й азимутом сегмента: 90° — «їде не туди»,
+# менше — поворот, шум GPS або короткий сегмент (тоді перевірка не діє).
+OPPOSITE_HEADING_TOLERANCE_DEG = 90.0
+# Перевірка курсу має сенс лише для рухомої машини на довгому сегменті:
+# у стоячої (світлофор, кінцева) курс — випадкове число.
+HEADING_CHECK_MIN_SPEED_KMH = 5.0
+HEADING_CHECK_MIN_SEGMENT_M = 50.0
+
 # Резервна прив'язка зупинки до вузла графа за координатами, якщо саме цей
 # запис stops.json у граф не потрапив (дублікати однієї зупинки).
 MAX_STOP_SNAP_METERS = 200.0
@@ -81,6 +90,14 @@ class TransitRouter:
         # Нормализованная подпись маршрута для сверки с меткой ТС перевозчика.
         # Считаем один раз на маршрут, а не в каждом сравнении с машиной.
         self._route_wanted_norm: Dict[str, str] = {}
+        # Напрямок маршруту (A/B) — щоб відсіяти ТС, які їдуть у інший бік
+        # (див. docs/BRIEF-router-direction.md).
+        self.route_direction: Dict[str, str] = {}
+        # Азимут і довжина кожного сегмента ланцюжка: потрібні для перевірки
+        # курсу ТС — реальний трекер поля `direction` не віддає, тому напрямок
+        # доводиться визначати за курсом (precompute, щоб не рахувати в циклі).
+        self.route_bearings: Dict[str, List[float]] = {}
+        self.route_segment_m: Dict[str, List[float]] = {}
         for key, route in self.routes.items():
             chain = [int(node) for node in route["stops"]]
             self.route_stops[key] = chain
@@ -97,6 +114,18 @@ class TransitRouter:
             ]
             wanted = route.get("live_route_name") or route.get("route_name") or ""
             self._route_wanted_norm[key] = self.normalize_label(str(wanted))
+            # Напрямок беремо з ключа («trolley:2:A»), а не з полів ТС: це
+            # властивість маршруту, і вона є навіть коли трекер її не віддає.
+            self.route_direction[key] = self.normalize_direction(key.split(":")[-1])
+            bearings: List[float] = []
+            lengths: List[float] = []
+            for index in range(len(chain) - 1):
+                lat1, lon1 = self.route_coords[key][index]
+                lat2, lon2 = self.route_coords[key][index + 1]
+                bearings.append(self._bearing_deg(lat1, lon1, lat2, lon2))
+                lengths.append(self._haversine_m(lat1, lon1, lat2, lon2))
+            self.route_bearings[key] = bearings
+            self.route_segment_m[key] = lengths
 
         # Вузол -> маршрути, що через нього проходять.
         self.node_routes: Dict[int, Set[str]] = {node: set() for node in self.nodes}
@@ -177,8 +206,14 @@ class TransitRouter:
     # Поля ТС, от которых зависит пространственный кэш (_approaching_vehicles):
     # позиция, скорость, подпись маршрута и то, что попадает в ответ. Остальные
     # поля среза на геометрию не влияют.
+    #
+    # `direction` и `heading_deg` — исключение, которое обязано быть здесь: от
+    # них зависит, попадёт машина в кандидаты. Машина, яка на кінцевій
+    # розвернулася и стоит на месте, имеет те же lat/lon/speed/board, и без этих
+    # полей в подписи кэш остался бы с геометрией старого направления.
     _FLEET_KEY_FIELDS = (
         "lat", "lon", "speed_kmh", "board_number", "is_live", "route_label",
+        "direction", "heading_deg",
     )
 
     @classmethod
@@ -339,6 +374,68 @@ class TransitRouter:
             )
             return (distance / 1000.0) / WALK_SPEED_KMH * 60.0
         return 0.0
+
+    @staticmethod
+    def _bearing_deg(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+        """
+        Азимут сегмента (0° — північ, за годинниковою) — та сама формула, що в
+        симуляторі (`sim_layer._position_at`), тому курс ТС зіставляється з ним
+        напряму (і в симуляції, і в реальному трекері `orientation`).
+        """
+        mid_lat = math.radians((lat1 + lat2) / 2.0)
+        dlat = lat2 - lat1
+        dlon = (lon2 - lon1) * math.cos(mid_lat)
+        if dlat == 0.0 and dlon == 0.0:
+            return 0.0
+        return math.degrees(math.atan2(dlon, dlat)) % 360.0
+
+    @staticmethod
+    def _heading_matches_route(
+        vehicle: Dict[str, Any],
+        coords: Sequence[Tuple[float, float]],
+        bearings: Sequence[float],
+        segments: Sequence[float],
+        index: int,
+        snap_m: float,
+    ) -> bool:
+        """
+        Чи дивиться ТС уздовж ланцюжка — у бік нашої зупинки.
+
+        Курс порівнюємо з азимутом «від машини до наступного вузла ланцюжка», а
+        не з азимутом усього сегмента: сегменти бувають по кілометру, і хорда
+        такого сегмента на кривій розходиться з реальним напрямком дороги — на
+        замірі це давало до 90° похибки й зустрічні машини проходили фільтр.
+        Коли машина вже на самому вузлі (`snap_m` малий), беремо азимут
+        сегмента, а якщо сегмент короткий — не перевіряємо взагалі.
+
+        Перевірка діє лише там, де вона щось значить: рухома машина
+        (`speed_kmh > HEADING_CHECK_MIN_SPEED_KMH`). У стоячої (світлофор,
+        кінцева) курс — випадкове число, а без курсу в срезі ми взагалі не
+        маємо права відкидати машину: тоді повертаємо True і працює старий
+        геометричний підбір.
+        """
+        if index + 1 >= len(coords) or index >= len(bearings):
+            return True
+        speed = float(vehicle.get("speed_kmh") or 0.0)
+        if speed < HEADING_CHECK_MIN_SPEED_KMH:
+            return True
+        heading = vehicle.get("heading_deg")
+        lat, lon = vehicle.get("lat"), vehicle.get("lon")
+        if heading is None or lat is None or lon is None:
+            return True
+
+        if snap_m < HEADING_CHECK_MIN_SEGMENT_M:
+            if index >= len(segments) or segments[index] < HEADING_CHECK_MIN_SEGMENT_M:
+                return True
+            bearing = bearings[index]
+        else:
+            next_lat, next_lon = coords[index + 1]
+            bearing = TransitRouter._bearing_deg(
+                float(lat), float(lon), next_lat, next_lon
+            )
+
+        delta = abs((float(heading) - bearing + 180.0) % 360.0 - 180.0)
+        return delta <= OPPOSITE_HEADING_TOLERANCE_DEG
 
     @staticmethod
     def _haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -809,6 +906,12 @@ class TransitRouter:
         (`_fleet_version`): она растёт на каждом новом срезе, поэтому
         устаревшая геометрия не может попасть в ответ (важно для потоков
         FastAPI: один объект TransitRouter обслуживает несколько запросов).
+
+        Зустрічні ТС відсіюються двома незалежними перевірками (ланцюжки A і B
+        ідуть тими самими вулицями, тому геометрія сама їх не розрізняє):
+        поле `direction` среза парка (є в симуляторі) і курс ТС проти азимуту
+        сегмента (є й у реальному трекері, який `direction` не віддає).
+        Деталі й заміри — docs/BRIEF-router-direction.md.
         """
         key = (route_key, board_node)
         cached = self._spatial_cache.get(key)
@@ -820,9 +923,22 @@ class TransitRouter:
             wanted_norm = self._route_wanted_norm.get(route_key, "")
             coords = self.route_coords[route_key]
             prefix = self.route_prefix[route_key]
+            bearings = self.route_bearings[route_key]
+            segments = self.route_segment_m[route_key]
             board_pos = self.route_pos[route_key][board_node]
+            route_direction = self.route_direction.get(route_key, "")
 
             for vehicle in self._live_by_route.get(wanted_norm, ()):
+                # 1) Напрямок із среза парка (симулятор; трекер може віддати в
+                #    майбутньому). Стоїть ДО haversine: відсіюємо найдешевше.
+                vehicle_direction = self.normalize_direction(vehicle.get("direction"))
+                if (
+                    vehicle_direction
+                    and route_direction
+                    and vehicle_direction != route_direction
+                ):
+                    continue
+
                 lat, lon = vehicle.get("lat"), vehicle.get("lon")
                 if lat is None or lon is None:
                     continue
@@ -846,6 +962,15 @@ class TransitRouter:
                     continue
                 if best_idx >= board_pos:
                     continue  # вже проїхала нашу зупинку
+
+                # 2) Курс: ланцюжки A і B ідуть тими самими вулицями, тому
+                #    зустрічна машина прив'язується до НАШОГО ланцюжка. Її курс
+                #    протилежний азимуту сегмента — це єдина ознака напрямку в
+                #    реальному трекері, який поля `direction` не віддає.
+                if not self._heading_matches_route(
+                    vehicle, coords, bearings, segments, best_idx, best_dist
+                ):
+                    continue
 
                 minutes_away = prefix[board_pos] - prefix[best_idx]
                 speed = float(vehicle.get("speed_kmh") or 20.0)
@@ -894,6 +1019,21 @@ class TransitRouter:
             .replace("/", "")
             .replace("а", "a").replace("б", "b").replace("в", "v")
         )
+
+    @staticmethod
+    def normalize_direction(value: Any) -> str:
+        """
+        Напрямок маршруту («A»/«B») у єдиному вигляді.
+
+        Граф дає латинські A/B, але в підписах маршрутів проєкт уже зводить
+        кирилицю до латиниці (див. normalize_label) — напрямок приходить із
+        того самого світу. «Голе» порівняння було б небезпечним: кириличне «А»
+        відкинуло б УСІ машини маршруту й `live_bus` став би вічно `null`.
+        """
+        if value is None:
+            return ""
+        text = str(value).strip().upper()
+        return text.replace("А", "A").replace("Б", "B").replace("В", "V")
 
     @staticmethod
     def _route_labels_match(label: str, wanted: str) -> bool:

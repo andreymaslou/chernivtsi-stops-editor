@@ -277,3 +277,157 @@ def test_spatial_cache_drops_stale_fleet(router, data, fleet, now):
     )
 
 
+# ---------------------------------------------------------------------------
+# Направление ТС: docs/BRIEF-router-direction.md
+# ---------------------------------------------------------------------------
+
+def _fleet_vehicle(router, route_key, index, direction=None, heading=None,
+                   speed=25.0, board="T-001"):
+    """Одна машина на ланцюжку маршруту: стоїть рівно на вузлі (snap без похибки)."""
+    lat, lon = router.route_coords[route_key][index]
+    route = router.routes[route_key]
+    label = route.get("live_route_name") or route.get("route_name") or ""
+    vehicle = {
+        "board_number": board,
+        "route_label": str(label),
+        "route_name": str(label),
+        "lat": lat,
+        "lon": lon,
+        "speed_kmh": speed,
+        "heading_deg": heading,
+        "is_live": True,
+        "status": "live",
+    }
+    if direction is not None:
+        vehicle["direction"] = direction
+    return vehicle
+
+
+def _route_for_direction_tests(router, min_stops=6):
+    """Маршрут із достатньо довгим ланцюжком і відомим напрямком (A/B)."""
+    for key, chain in router.route_stops.items():
+        if len(chain) >= min_stops and router.route_direction.get(key):
+            return key
+    return None
+
+
+def test_opposite_direction_vehicle_is_not_approaching(data, now):
+    """Встречная машина (Напрямок Б) не «під'їжджає» до зупинки маршруту А.
+
+    Ланцюжки A і B ідуть тими самими вулицями, тому геометрично машина стоїть
+    «перед» зупинкою — але вона їде від неї.
+    """
+    graph, schedule, stops = data
+    router = TransitRouter(graph, schedule, stops=stops, assume_in_service=True)
+    route_key = _route_for_direction_tests(router)
+    assert route_key, "в графе нет маршрута с направлением"
+
+    board_node = router.route_stops[route_key][4]
+    behind = 2  # узел перед остановкой посадки
+    heading = router.route_bearings[route_key][behind]  # курс «в нашу сторону»
+    other = "B" if router.route_direction[route_key] == "A" else "A"
+
+    fleet = [_fleet_vehicle(router, route_key, behind, direction=other, heading=heading)]
+    router.set_live(fleet, snapshot_at=now)
+    assert router._approaching_vehicles(route_key, board_node) == [], (
+        "встречная машина попала в «подъезжающие»"
+    )
+
+    fleet[0]["direction"] = router.route_direction[route_key]
+    router.set_live(fleet, snapshot_at=now)
+    assert [c["live_bus"] for c in router._approaching_vehicles(route_key, board_node)] == ["T-001"]
+
+
+def test_direction_is_normalized(data, now):
+    """Кириллица и регистр в направлении не ломают подбор.
+
+    «Голое» сравнение отбросило бы ВСЕ машины маршрута, и `live_bus` стал бы
+    вечно `null` — это хуже бага, который чиним.
+    """
+    graph, schedule, stops = data
+    router = TransitRouter(graph, schedule, stops=stops, assume_in_service=True)
+    route_key = _route_for_direction_tests(router)
+    assert route_key, "в графе нет маршрута с направлением"
+
+    board_node = router.route_stops[route_key][4]
+    behind = 2
+    heading = router.route_bearings[route_key][behind]
+    wanted = router.route_direction[route_key]
+
+    for variant in (wanted, wanted.lower(), {"A": "А", "B": "Б"}[wanted]):
+        fleet = [_fleet_vehicle(router, route_key, behind, direction=variant, heading=heading)]
+        router.set_live(fleet, snapshot_at=now)
+        assert router._approaching_vehicles(route_key, board_node), (
+            f"направление {variant!r} ошибочно отбросило машину"
+        )
+
+
+def test_heading_filter_rejects_opposite_vehicle(data, now):
+    """Реальный трекер поля `direction` не отдаёт — направление видно по курсу."""
+    graph, schedule, stops = data
+    router = TransitRouter(graph, schedule, stops=stops, assume_in_service=True)
+
+    route_key = index = None
+    for key, chain in router.route_stops.items():
+        for position in range(0, len(chain) - 3):
+            if router.route_segment_m[key][position] >= 60.0:
+                route_key, index = key, position
+                break
+        if route_key:
+            break
+    assert route_key is not None, "нет маршрута с сегментом ≥ 60 м"
+
+    board_node = router.route_stops[route_key][index + 2]
+    bearing = router.route_bearings[route_key][index]
+
+    fleet = [_fleet_vehicle(router, route_key, index, heading=bearing)]
+    router.set_live(fleet, snapshot_at=now)
+    assert router._approaching_vehicles(route_key, board_node), "попутная машина отброшена"
+
+    fleet[0]["heading_deg"] = (bearing + 180.0) % 360.0
+    router.set_live(fleet, snapshot_at=now)
+    assert router._approaching_vehicles(route_key, board_node) == [], (
+        "встречный курс не отсечён, хотя поля direction в срезе нет"
+    )
+
+    # Стоящая машина (светофор, кінцева): курс — шум, отбрасывать нельзя.
+    fleet[0]["speed_kmh"] = 1.0
+    router.set_live(fleet, snapshot_at=now)
+    assert router._approaching_vehicles(route_key, board_node), (
+        "стоящую машину отбросили по курсу — а он у неё случайный"
+    )
+
+
+def test_vehicle_without_direction_and_heading_is_kept(data, now):
+    """Срез без `direction` и без курса — работает прежний геометрический подбор."""
+    graph, schedule, stops = data
+    router = TransitRouter(graph, schedule, stops=stops, assume_in_service=True)
+    route_key = _route_for_direction_tests(router)
+    assert route_key, "в графе нет маршрута с направлением"
+
+    board_node = router.route_stops[route_key][4]
+    fleet = [_fleet_vehicle(router, route_key, 2)]  # ни direction, ни heading_deg
+    router.set_live(fleet, snapshot_at=now)
+    assert [c["live_bus"] for c in router._approaching_vehicles(route_key, board_node)] == ["T-001"]
+
+
+def test_fleet_fingerprint_tracks_direction(router, fleet, now):
+    """Разворот на кінцевій (та сама позиція, інший напрямок) скидає кэш геометрии.
+
+    Інакше в `_spatial_cache` лишилася б геометрія, порахована для старого
+    напрямку: машина стоїть на місці, тож lat/lon/speed/board не змінилися.
+    """
+    router.plan(*PAIR_DIRECT, now=now)
+    version = router._fleet_version
+    assert router._spatial_cache, "геометрия должна была закэшироваться"
+
+    turned = [dict(vehicle) for vehicle in fleet]
+    for vehicle in turned:
+        if vehicle.get("direction"):
+            vehicle["direction"] = "B" if vehicle["direction"] == "A" else "A"
+    router.set_live(turned, snapshot_at=now)
+
+    assert router._fleet_version > version, "кэш не сброшен при смене направления"
+    assert not router._spatial_cache
+
+
