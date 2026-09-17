@@ -517,7 +517,11 @@ const probe = () => ({
   check('на 390 px легенда в межах екрана', mobile.legendFits,
     'ширина легенди ' + mobile.legendWidth + 'px з 390px');
 
-  report.errors = report.errors.filter((text) => !/favicon/.test(text));
+  // Плитки OSM — внешний и «best effort» ресурс: один не доехавший тайл не
+  // должен валить проверку (сеть на VPS/локалке флапает). Свои запросы и
+  // ошибки JS по-прежнему считаются ошибками.
+  report.errors = report.errors.filter((text) => !/favicon/.test(text)
+    && !/tile\.openstreetmap\.org/.test(text));
   check('ошибок консоли нет', report.errors.length === 0, report.errors.join(' | '));
 
   await browser.close();
