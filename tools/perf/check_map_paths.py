@@ -72,8 +72,8 @@ def resolve_text(text, text_file):
 
     Кириллицу в .cmd-файлах cmd читает в OEM-кодировке и передаёт аргумент
     битым, поэтому для «з Калинки до Універу» надёжнее файл:
-        echo з Калинки до Універу > phrase.txt   (или сохранить из редактора)
-        python tools/perf/check_map_paths.py --text-file phrase.txt
+        python tools/perf/check_map_paths.py --text-file tools/perf/phrases/kalynka_universytet.txt
+    Готовые фразы для дымовых проверок лежат в tools/perf/phrases/.
     """
     if not text_file:
         return text

@@ -22,6 +22,14 @@ python tools/perf/check_map_paths.py                    # целы ли пути
 python tools/perf/diag_stop_chain.py trolley:5:A        # цепочка остановок маршрута
 ```
 
+Фразы для дымовых проверок лежат в `tools/perf/phrases/` (UTF-8), их удобно
+передавать через `--text-file`, например:
+
+```bash
+python tools/perf/check_map_paths.py --text-file tools/perf/phrases/kalynka_universytet.txt \
+    --url http://169.58.82.105:8000
+```
+
 `--rev` понимает `HEAD` (текущее дерево), `HEAD~1`, хеш коммита: файл
 `router_layer.py` достаётся из истории git и импортируется отдельным модулем,
 поэтому сравнивать ревизии можно без копирования файлов руками.
