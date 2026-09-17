@@ -15,7 +15,10 @@
  *   3. чекбокс «живий парк» рисует машины стрелками (у каждой data-heading);
  *   4. режим «▶ рух» реально двигает машины (пиксельные позиции меняются);
  *   5. фраза -> план: полілінії маршруту + ТС плана теж стрелками;
- *   6. на 390 px контроли парка видны и легенда влезает в экран.
+ *   6. попап машини: структура, світлий бейдж, екранування зовнішніх рядків;
+ *   7. розвантаження при віддаленні: zoom < 13 — крапки без номера й стрілки,
+ *      zoom >= 13 — повний маркер, і крапка не з'їжджає з координати;
+ *   8. на 390 px контроли парка видны и легенда влезает в экран.
  *
  * Отчёт и PNG: tools/ui/out/ (в git не попадает).
  */
@@ -114,6 +117,71 @@ const probe = () => ({
     };
     host.remove();
     return out;
+  })(),
+  // Розвантаження при віддаленні: клас на <body> + реальна геометрія маркера.
+  // anchor — куди Leaflet мав поставити точку: зламаний transform-origin зсунув
+  // би центр на ~6 px (маркер 36 px стискається до 23 px).
+  zoom: (() => {
+    const wrap = document.querySelector('.veh-wrap');
+    const box = wrap ? wrap.getBoundingClientRect() : null;
+    const svg = wrap ? wrap.querySelector('svg') : null;
+    const text = svg ? svg.querySelector('text') : null;
+    const arrow = svg ? svg.querySelector('.veh-arrow-group') : null;
+    let anchor = null;
+    if (wrap && box) {
+      const icon = wrap.closest('.veh-marker');
+      let layer = null;
+      map.eachLayer((item) => { if (!layer && item._icon === icon) layer = item; });
+      if (layer) {
+        const area = map.getContainer().getBoundingClientRect();
+        const point = map.latLngToContainerPoint(layer.getLatLng());
+        anchor = [Math.round(area.left + point.x), Math.round(area.top + point.y)];
+      }
+    }
+    return {
+      level: map.getZoom(),
+      dots: document.body.classList.contains('zoom-out'),
+      width: box ? Math.round(box.width * 10) / 10 : 0,
+      transform: wrap ? getComputedStyle(wrap).transform : '',
+      transition: wrap ? getComputedStyle(wrap).transitionProperty : '',
+      textDisplay: text ? getComputedStyle(text).display : 'none',
+      arrowDisplay: arrow ? getComputedStyle(arrow).display : 'none',
+      centre: box ? [Math.round(box.left + box.width / 2), Math.round(box.top + box.height / 2)] : null,
+      anchor,
+    };
+  })(),
+  // Попап машини: структура (п. 2 специфікації) + екранування зовнішніх рядків.
+  // «hostile» — рядки, якими перевізник міг би вставити тег у попап.
+  popup: (() => {
+    const shot = (vehicle) => {
+      const host = document.createElement('div');
+      host.innerHTML = vehiclePopup(vehicle);
+      document.body.appendChild(host);
+      const head = host.querySelector('.veh-popup-head');
+      const badge = head ? head.querySelector('.badge') : null;
+      const out = {
+        head: !!head,
+        body: !!host.querySelector('.veh-popup-body'),
+        divider: head ? getComputedStyle(head).borderBottomWidth : '',
+        badge: badge ? badge.textContent.trim() : '',
+        badgeBackground: badge ? getComputedStyle(badge).backgroundColor : '',
+        tags: host.querySelectorAll('i, img, script').length,
+        text: host.textContent.replace(/\s+/g, ' ').trim(),
+      };
+      host.remove();
+      return out;
+    };
+    return {
+      live: shot({
+        is_live: true, route_label: '7', board_number: '7-014', speed_kmh: 22.5,
+        heading_deg: 123.4, gpstime: '12:30:05', age_seconds: 164, progress: 0.42,
+      }),
+      planned: shot({ is_live: false, route_label: '5', board_number: '5-010' }),
+      hostile: shot({
+        is_live: true, route_label: '<i>5</i>', board_number: '"><img src=x>',
+        gpstime: '<script>alert(1)</script>',
+      }),
+    };
   })(),
   // Легенда карти: 4 ряда из спецификации (п. 2) + свои цвета иконок и стили
   // контейнера (п. 2.2). Отдельно сравниваем прямоугольник с атрибуцией OSM:
@@ -279,6 +347,31 @@ const probe = () => ({
     ', після контрольного свайпу ' + centreAfterMapDrag +
     ' | _leaflet_disable_click=' + legendDisableFlag);
 
+  // --- 2.1 Попап машини (специфікація дизайну, п. 2) -----------------------
+  // Розмітка будується vehiclePopup() — читаємо те, що реально вийшло в DOM.
+  const livePopup = initial.popup.live;
+  check('попап структурований за специфікацією',
+    livePopup.head && livePopup.body && livePopup.divider === '1px' &&
+    /Маршрут 7/.test(livePopup.text) && /Борт: 7-014/.test(livePopup.text) &&
+    /Швидкість: 22\.5 км\/год/.test(livePopup.text) && /Курс: 123°/.test(livePopup.text) &&
+    /Рейс: 42%/.test(livePopup.text) && /Дані: 12:30:05 \(164 с тому\)/.test(livePopup.text),
+    livePopup.text.slice(0, 150));
+
+  check('попап екранує зовнішні рядки (XSS)',
+    initial.popup.hostile.tags === 0 && /<i>5<\/i>/.test(initial.popup.hostile.text) &&
+    /<script>alert\(1\)<\/script>/.test(initial.popup.hostile.text),
+    'тегів із даних перевізника: ' + initial.popup.hostile.tags + ' | текст: ' +
+    initial.popup.hostile.text.slice(0, 130));
+
+  // Бейдж живе на світлому попапі Leaflet: прозорий фон = невидимий підпис.
+  // Перевірка ловить помилку в імені класу (у спеці був `planned`, у CSS `.plan`).
+  const opaque = (value) => !!value && value !== 'transparent' && !/rgba\(0, 0, 0, 0\)/.test(value);
+  check('бейдж попапа читається на світлому тлі',
+    initial.popup.live.badge === 'GPS' && initial.popup.planned.badge === 'Розклад' &&
+    opaque(initial.popup.live.badgeBackground) && opaque(initial.popup.planned.badgeBackground),
+    '"GPS": ' + initial.popup.live.badgeBackground + ', "Розклад": ' +
+    initial.popup.planned.badgeBackground);
+
   // --- 3. Живой парк ------------------------------------------------------
   await page.click('#fleet-toggle');
   await page.waitForFunction(
@@ -310,6 +403,50 @@ const probe = () => ({
   await page.screenshot({ path: path.join(OUT, 'fleet_play.png') });
   report.shots.push('fleet_play.png');
   await page.click('#fleet-play');  // пауза
+
+  // --- 4.1 Розвантаження при віддаленні (специфікація дизайну, п. 4) ------
+  // Порог зуму живе в DOT_ZOOM_BELOW (web/emulator.js). Ставимо зум справжнім
+  // map.setZoom(), щоб перевіряти саме обробник 'zoomend', а не клас руками.
+  const atZoom = async (level) => {
+    await page.evaluate((value) => map.setZoom(value), level);
+    await sleep(700);
+    return page.evaluate(probe);
+  };
+  const dots = await atZoom(12);
+  await page.screenshot({ path: path.join(OUT, 'zoom12_dots.png') });
+  report.shots.push('zoom12_dots.png');
+  const full = await atZoom(14);
+  await page.screenshot({ path: path.join(OUT, 'zoom14_markers.png') });
+  report.shots.push('zoom14_markers.png');
+
+  check('при віддаленні маркери стають крапками',
+    dots.zoom.dots && /matrix\(0\.65/.test(dots.zoom.transform) &&
+    dots.zoom.textDisplay === 'none' && dots.zoom.arrowDisplay === 'none',
+    'зум ' + dots.zoom.level + ': клас zoom-out=' + dots.zoom.dots + ', transform=' +
+    dots.zoom.transform + ', номер=' + dots.zoom.textDisplay + ', стрілка=' + dots.zoom.arrowDisplay);
+
+  check('при наближенні маркер повертається',
+    !full.zoom.dots && full.zoom.textDisplay !== 'none' && full.zoom.arrowDisplay !== 'none' &&
+    full.zoom.width > dots.zoom.width,
+    'зум ' + full.zoom.level + ': номер=' + full.zoom.textDisplay + ', стрілка=' +
+    full.zoom.arrowDisplay + ', ширина маркера ' + full.zoom.width + ' px проти ' +
+    dots.zoom.width + ' px');
+
+  // Маркер має лишатись на своїй координаті: зламаний transform-origin зсунув би
+  // центр на пів-різниці стиснення (~6 px) і машини «з'їхали б» з вулиць.
+  const drift = (state) => (state.zoom.centre && state.zoom.anchor)
+    ? Math.max(Math.abs(state.zoom.centre[0] - state.zoom.anchor[0]),
+      Math.abs(state.zoom.centre[1] - state.zoom.anchor[1])) : null;
+  const driftFull = drift(full);
+  const driftDots = drift(dots);
+  check('крапка не з\'їжджає з координати',
+    driftFull !== null && driftDots !== null && driftFull <= 1 && driftDots <= 1,
+    'зсув центру маркера від точки Leaflet: ' + driftFull + ' px при 14, ' +
+    driftDots + ' px при 12');
+
+  check('стиснення маркера плавне (transition містить transform)',
+    /transform/.test(full.zoom.transition),
+    'transition-property: ' + full.zoom.transition);
 
   // --- 5. План маршрута ---------------------------------------------------
   await page.click('#ask-text');

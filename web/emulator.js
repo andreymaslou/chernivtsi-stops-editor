@@ -169,7 +169,8 @@ function vehicleIcon(vehicle) {
   const angle = Number.isFinite(heading) ? heading.toFixed(1) : '0.0';
   const live = !!vehicle.is_live;
   const colour = vehicle.route_colour_hex || '#4f8cff';
-  const label = String(vehicle.route_label || '').slice(0, 4);
+  // Підпис і борт теж приходять з API — обидва через esc() (див. vehiclePopup).
+  const label = esc(String(vehicle.route_label || '').slice(0, 4));
   const stopped = Number(vehicle.speed_kmh) < 3;
   const isTarget = state.targetBoards.has(boardKey(vehicle));
 
@@ -178,7 +179,7 @@ function vehicleIcon(vehicle) {
   if (isTarget) wrapClass += ' target';
 
   const html = `
-    <div class="${wrapClass}" data-heading="${angle}" data-board="${String(vehicle.board_number || '')}">
+    <div class="${wrapClass}" data-heading="${angle}" data-board="${esc(vehicle.board_number)}">
       <svg width="36" height="36" viewBox="0 0 36 36">
         <g class="veh-arrow-group" transform="rotate(${angle} 18 18)">
           <path class="veh-arrow" d="M 18 2 L 24 10 L 12 10 Z" fill="${colour}" stroke="#14161a" stroke-width="1.5" stroke-linejoin="round"/>
@@ -203,6 +204,23 @@ function boardKey(vehicle) {
     ? '' : vehicle.board_number);
 }
 
+// ---------------------------------------------------------------------------
+// Розвантаження карти при віддаленні (специфікація дизайну Gemini, п. 4)
+// ---------------------------------------------------------------------------
+//
+// Свідомо без MarkerCluster: нижче порога маркер стискається в кольорову
+// крапку (номер і стрілка ховаються) одним класом на <body>, а CSS читає його
+// (`body.zoom-out .veh-wrap` у web/emulator.html). Якір Leaflet при цьому не
+// чіпаємо: transform на обгортці не міняє ні box маркера (36 px), ні
+// popupAnchor, тож попап і координата лишаються на місці — це перевіряє UI-тест.
+
+const DOT_ZOOM_BELOW = 13;   // zoom < 13 → крапки, zoom >= 13 → повний маркер
+
+function updateZoomState() {
+  const dots = map.getZoom() < DOT_ZOOM_BELOW;
+  document.body.classList.toggle('zoom-out', dots);
+}
+
 /**
  * Запомнить «первые нужные ТС» из плана и перекрасить уже нарисованные машины.
  * Без параметра — цель снимается (карта очищена, план не построен).
@@ -217,22 +235,48 @@ function setTargetBoards(legs) {
   state.vehicles.forEach((entry) => entry.marker.setIcon(vehicleIcon(entry.vehicle)));
 }
 
+/**
+ * Екранування зовнішніх рядків: route_label, board_number, gpstime приходять
+ * від перевізника, а ми вставляємо їх і в текст, і в атрибут (data-board).
+ * `&` екрануємо першим — інакше власні `&amp;` подвояться.
+ */
+function esc(value) {
+  return String(value === undefined || value === null ? '' : value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+/**
+ * Попап машини (специфікація дизайну Gemini, п. 2): структурований HTML замість
+ * сирого тексту з <br>. Leaflet малює попапи світлими, тому верстка під світлу
+ * тему — CSS у web/emulator.html (.veh-popup-*).
+ */
 function vehiclePopup(vehicle) {
   const live = !!vehicle.is_live;
-  const parts = [
-    (live ? '🟢 живий GPS' : ' за розкладом') + ' — ' + (vehicle.route_label || '?') +
-    (vehicle.board_number ? ' (борт ' + vehicle.board_number + ')' : ''),
-  ];
-  if (Number.isFinite(Number(vehicle.speed_kmh))) parts.push('швидкість: ' + vehicle.speed_kmh + ' км/год');
-  if (Number.isFinite(Number(vehicle.heading_deg))) parts.push('курс: ' + Math.round(vehicle.heading_deg) + '°');
-  if (vehicle.gpstime) {
-    parts.push('GPS: ' + vehicle.gpstime +
-      (vehicle.age_seconds ? ' (' + Math.round(vehicle.age_seconds) + ' с тому)' : ''));
-  }
-  if (vehicle.progress !== undefined && vehicle.progress !== null) {
-    parts.push('рейс виконано на ' + Math.round(vehicle.progress * 100) + '%');
-  }
-  return parts.join('<br>');
+  const route = esc(vehicle.route_label || '?');
+  const board = esc(vehicle.board_number || '?');
+  const speed = Number.isFinite(Number(vehicle.speed_kmh))
+    ? '<div>Швидкість: <b>' + esc(vehicle.speed_kmh) + ' км/год</b></div>' : '';
+  const heading = Number.isFinite(Number(vehicle.heading_deg))
+    ? '<div>Курс: <b>' + Math.round(vehicle.heading_deg) + '°</b></div>' : '';
+  const progress = (vehicle.progress !== undefined && vehicle.progress !== null)
+    ? '<div class="veh-popup-progress">Рейс: ' + Math.round(vehicle.progress * 100) + '%</div>' : '';
+  const time = vehicle.gpstime
+    ? '<div class="veh-popup-age">Дані: ' + esc(vehicle.gpstime) +
+      (vehicle.age_seconds ? ' (' + Math.round(vehicle.age_seconds) + ' с тому)' : '') + '</div>' : '';
+
+  return '<div class="veh-popup">' +
+    '<div class="veh-popup-head">' +
+      '<span class="badge ' + (live ? 'live' : 'plan') + '">' + (live ? 'GPS' : 'Розклад') + '</span>' +
+      '<strong>Маршрут ' + route + '</strong>' +
+    '</div>' +
+    '<div class="veh-popup-body">' +
+      '<div>Борт: <b>' + board + '</b></div>' +
+      speed + heading + progress + time +
+    '</div>' +
+  '</div>';
 }
 
 /** Добавить машину или обновить её положение/курс (без дублей по борт-номеру). */
@@ -675,6 +719,12 @@ legend.onAdd = () => {
 };
 
 legend.addTo(map);
+
+// Розвантаження при віддаленні: стан рахуємо на кожному 'zoomend' (fitBounds у
+// плані теж його кидає) і один раз при старті — карта відкривається на zoom 13,
+// тож номери маршрутів видно одразу.
+map.on('zoomend', updateZoomState);
+updateZoomState();
 
 renderChips();
 loadStops();

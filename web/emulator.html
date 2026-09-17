@@ -130,7 +130,7 @@
     /* Целевой ТС всегда поверх остальных машин */
     .veh-marker.is-target { z-index: 1000 !important; }
 
-    .veh-wrap { width: 36px; height: 36px; transition: opacity .3s ease, filter .3s ease; opacity: 1; }
+    .veh-wrap { width: 36px; height: 36px; transition: opacity .3s ease, filter .3s ease, transform .25s ease; opacity: 1; }
     /* Тень держим на svg, чтобы filter у .planned/.target не срезал её */
     .veh-wrap svg { filter: drop-shadow(0 2px 3px rgba(0, 0, 0, .45)); }
 
@@ -154,6 +154,39 @@
       100% { filter: drop-shadow(0 0 2px #ffd700); transform: scale(1); }
     }
     .veh-wrap.target svg { animation: pulse-target 1.5s infinite ease-in-out; }
+
+    /* Розвантаження при віддаленні (специфікація дизайну, п. 4): без
+       MarkerCluster — маркер стискається в кольорову крапку, номер маршруту
+       і стрілка ховаються. Поріг зуму живе в DOT_ZOOM_BELOW (web/emulator.js),
+       клас zoom-out ставить updateZoomState() на 'zoomend'.
+       Трансформація — саме на .veh-wrap (36 px): якір Leaflet і popupAnchor
+       вважаються від неї, тому точка не з'їжджає з координати. */
+    body.zoom-out .veh-wrap { transform: scale(0.65); }
+    body.zoom-out .veh-wrap text { display: none; }
+    body.zoom-out .veh-arrow-group { display: none; }
+
+    /* Попап машини (специфікація дизайну, п. 2): попапи Leaflet світлі,
+       тому верстка під світлу тему. Розмітка — vehiclePopup() в emulator.js. */
+    .veh-popup-head {
+      border-bottom: 1px solid #ddd;
+      padding-bottom: 6px;
+      margin-bottom: 6px;
+      display: flex;
+      gap: 6px;
+      align-items: center;
+    }
+
+    .veh-popup-body {
+      font-size: 13px;
+      line-height: 1.5;
+      color: #333;
+    }
+
+    .veh-popup-age, .veh-popup-progress {
+      color: #666;
+      font-size: 12px;
+      margin-top: 4px;
+    }
 
     /* Легенда карти (специфікація дизайну, п. 2.2): темна напівпрозора
        панелька в правому нижньому куті, над атрибуцією OSM. */
