@@ -635,6 +635,47 @@ if (modelTime) {
   syncTimeInput();
 }
 
+// --- Легенда карти (специфікація дизайну, п. 2) ------------------------------
+//
+// Пояснює кольори маркерів ТС і пішохідні пересадки. Живе як звичайний контрол
+// Leaflet у нижньому правому куті: у цьому ж куті Leaflet тримає атрибуцію OSM,
+// і контроли одного кута стакуються вертикально, тому вони не перекриваються.
+// Позначки станів — ті самі значення, що в CSS маркера (живий/за розкладом/
+// ціль плана) і в стилі пішохідного переходу (dashArray '1, 10').
+
+const LEGEND_ROWS = [
+  { icon: '●', colour: '#43c463', text: 'Живий (GPS)' },
+  { icon: '●', colour: '#8b9096', text: 'За розкладом' },
+  { icon: '●', colour: '#ffd700', glow: '#ffd700', text: 'Ваша посадка' },
+  { icon: '--', spacing: '2px', text: 'Пішки' },
+];
+
+function legendIconStyle(row) {
+  const parts = ['color: ' + (row.colour || 'inherit')];
+  if (row.glow) parts.push('text-shadow: 0 0 5px ' + row.glow);
+  if (row.spacing) parts.push('letter-spacing: ' + row.spacing);
+  return parts.join('; ');
+}
+
+const legend = L.control({ position: 'bottomright' });
+
+// Leaflet віддає в onAdd сам контрол карти; розмітку будуємо з LEGEND_ROWS,
+// щоб текст і кольори жили в одному місці (і їх перевіряв UI-тест).
+legend.onAdd = () => {
+  const div = L.DomUtil.create('div', 'map-legend');
+  div.setAttribute('aria-label', 'Легенда карти');
+  div.innerHTML = LEGEND_ROWS.map((row) => (
+    '<div class="legend-row"><span class="legend-icon" style="' + legendIconStyle(row) + '">' +
+    row.icon + '</span> ' + row.text + '</div>'
+  )).join('');
+  // Клік і свайп по легенді не мають провалюватись у карту (не рухають і не
+  // зумлять її) — інакше на телефоні легенду неможливо прочитати.
+  L.DomEvent.disableClickPropagation(div);
+  return div;
+};
+
+legend.addTo(map);
+
 renderChips();
 loadStops();
 
