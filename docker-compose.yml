@@ -2,8 +2,14 @@ services:
   api_router:
     build: .
     container_name: api_router
+    # Порт слушаем ТОЛЬКО на петле хоста (127.0.0.1): снаружи приложение
+    # доступно исключительно через nginx (HTTPS + Basic Auth). Так
+    # http://<IP>:8000 больше не открыт в интернет и nginx не обойти.
+    # Сам nginx проксирует на http://127.0.0.1:8000 — см. deploy/README_HTTPS.md.
+    # healthcheck контейнера бьёт по 127.0.0.1:8000 внутри контейнера и не зависит
+    # от этого бинда.
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     env_file:
       - .env
     restart: always

@@ -7,12 +7,13 @@
 
 | Что | Где | Как поднять |
 |---|---|---|
-| Эмулятор + API (прод) | `http://169.58.82.105:8000` (контейнер `api_router`, `restart=always`) | `bash tools`-скрипт деплоя: `C:\Temp\remote_update.sh` через ssh (`git pull` → `docker compose up -d --build` → health) |
+| Эмулятор + API (прод) | `https://<домен>/` через nginx (Basic Auth, TLS); контейнер `api_router` слушает только `127.0.0.1:8000` | nginx: `deploy/setup-https.sh` / `deploy/README_HTTPS.md`; деплой: `git pull` → `docker compose up -d --build` |
 | UI | `/ui/emulator.html` (эмулятор), `/ui/admin.html` (сленг + жалобы), `/docs` (Swagger) | — |
 | Локальный dev | `0.0.0.0:8000` | `cd chernivtsi-stops-editor && python main.py` |
 | Тесты | локально | `python -m pytest -q` (сейчас 18 passed) |
 
-⚠️ Авторизации нет: порт 8000 открыт в интернет (см. открытые задачи).
+Доступ наружу — только через nginx: порт 8000 забинджен на `127.0.0.1`
+(`docker-compose.yml`), конфиги и инструкция — `deploy/` (см. открытые задачи).
 
 ## 2. Что уже сделано (история коммитов)
 
@@ -261,8 +262,11 @@ A/B ≈ 235 → 150 мс (со счётчиками) и haversine 33 168 → 133
 
 ## 5. Открытые задачи
 
-1. **HTTPS + basic auth** (нужен домен): `deploy/nginx-emulator.conf` +
-   `htpasswd` + `certbot --nginx`; после этого закрыть порт 8000 наружу.
+1. **HTTPS + basic auth** — конфиги готовы в `deploy/` (`nginx-emulator.conf`,
+   `nginx-emulator-http.conf`, `setup-https.sh`, `README_HTTPS.md`), порт `8000`
+   уже закрыт наружу биндом `127.0.0.1:8000:8000`. Осталось на сервере:
+   прописать домен (A-запись → `169.58.82.105`) и выполнить
+   `sudo bash deploy/setup-https.sh <домен> <email>` (htpasswd + certbot + reload).
 2. **Ротация ключа OpenRouter** (ключ ранее светился в открытом виде).
 3. **Геометрия дорог на карте**: OSM way-линии вместо прямых между остановками.
 4. `docs/DECISIONS.md` / `AGENTS.md`: правило «писатель ≠ проверяющий»,

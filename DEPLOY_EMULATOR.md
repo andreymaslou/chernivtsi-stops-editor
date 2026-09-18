@@ -43,23 +43,26 @@ docker compose logs -f api_router        # ждём «Живой слой зап
 curl -s localhost:8000/health            # {"status":"ok", ...}
 ```
 
-### nginx + логин + HTTPS
+### nginx + логин + HTTPS (обязательно)
+
+Контейнер `api_router` слушает только `127.0.0.1:8000` (см. `docker-compose.yml`),
+поэтому наружу приложение отдаёт **только nginx** — уже с логином и HTTPS.
+Один скрипт делает всё сам (пакеты → htpasswd → nginx → certbot → автопродление):
 
 ```bash
-sudo apt install -y nginx apache2-utils
-sudo htpasswd -c /etc/nginx/.htpasswd_transgps admin     # логин/пароль для входа
-
-sudo cp deploy/nginx-emulator.conf /etc/nginx/sites-available/transgps
-sudo nano /etc/nginx/sites-available/transgps            # вписать server_name (домен)
-sudo ln -s /etc/nginx/sites-available/transgps /etc/nginx/sites-enabled/transgps
-sudo nginx -t && sudo systemctl reload nginx
-
-sudo apt install -y certbot python3-certbot-nginx
-sudo certbot --nginx -d <домен>                          # HTTPS + автопродление
+cd /opt/transgps-emulator        # корень репозитория
+git pull
+sudo bash deploy/setup-https.sh <домен> <email>     # напр. emulator.transgps.cv.ua admin@transgps.cv.ua
 ```
 
-Нет домена? Можно быстро проверить по IP: открой `http://169.58.82.105:8000/ui/emulator.html`
-(но так нет HTTPS и логина — только как временный тест, не для постоянной работы).
+Дальше открывай `https://<домен>/` (редирект на `/ui/emulator.html`).
+
+**Полная инструкция** (ручной путь, проверки, частые ошибки, firewall):
+[`deploy/README_HTTPS.md`](deploy/README_HTTPS.md).
+
+Нет домена? HTTPS нельзя (Let's Encrypt требует домен), а «голый» порт `8000`
+теперь закрыт снаружи специально. Временный доступ без HTTPS возможен только
+с самого сервера: `curl -s http://127.0.0.1:8000/health`.
 
 ---
 
