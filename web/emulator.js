@@ -178,7 +178,9 @@ function vehicleIcon(vehicle) {
   const live = !!vehicle.is_live;
   const colour = vehicle.route_colour_hex || '#4f8cff';
   // Підпис і борт теж приходять з API — обидва через esc() (див. vehiclePopup).
-  const label = esc(String(vehicle.route_label || '').slice(0, 4));
+  let rawLabel = String(vehicle.route_label || '');
+  if (vehicle.vehicle_type === 'trolley') rawLabel += 'т';
+  const label = esc(rawLabel.slice(0, 4));
   const stopped = Number(vehicle.speed_kmh) < 3;
   const isTarget = state.targetBoards.has(boardKey(vehicle));
 
