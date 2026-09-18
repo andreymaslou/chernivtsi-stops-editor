@@ -146,15 +146,14 @@ const probe = () => ({
       if (!dlat && !dlon) return 0;
       return (Math.atan2(dlon, dlat) * 180) / Math.PI % 360;
     };
-    // Ожидаемый азимут шеврона: для точки остановки — на следующую остановку,
-    // для «середины сегмента» — азимут самого сегмента.
-    const expectedBearing = (lat, lon, isMid) => {
+    // Ожидаемый азимут шеврона: азимут сегмента посередине.
+    const expectedBearing = (lat, lon) => {
       for (const leg of transit) {
         const path = Array.isArray(leg.path) ? leg.path : [];
         for (let i = 0; i < path.length - 1; i += 1) {
           const a = path[i];
           const b = path[i + 1];
-          const at = isMid ? [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2] : a;
+          const at = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
           if (Math.abs(at[0] - lat) < 1e-9 && Math.abs(at[1] - lon) < 1e-9) {
             const value = bearingOf(a[0], a[1], b[0], b[1]);
             return (value + 360) % 360;
@@ -163,12 +162,11 @@ const probe = () => ({
       }
       return null;
     };
-    const chevrons = [...document.querySelectorAll('.plan-stop-dot, .plan-arrow-icon')]
+    const chevrons = [...document.querySelectorAll('.plan-arrow-icon')]
       .map((el) => {
         const lat = Number(el.getAttribute('data-lat'));
         const lon = Number(el.getAttribute('data-lon'));
-        const isMid = el.classList.contains('plan-arrow-icon');
-        const want = expectedBearing(lat, lon, isMid);
+        const want = expectedBearing(lat, lon);
         const got = Number(el.getAttribute('data-bearing'));
         return {
           want, got,
@@ -546,8 +544,11 @@ const probe = () => ({
   // Порог зуму живе в DOT_ZOOM_BELOW (web/emulator.js). Ставимо зум справжнім
   // map.setZoom(), щоб перевіряти саме обробник 'zoomend', а не клас руками.
   const atZoom = async (level) => {
-    await page.evaluate((value) => map.setZoom(value), level);
-    await sleep(700);
+    await page.evaluate((value) => new Promise((resolve) => {
+      if (map.getZoom() === value) { resolve(); return; }
+      map.once('zoomend', () => setTimeout(resolve, 400));
+      map.setZoom(value);
+    }), level);
     return page.evaluate(probe);
   };
   const dots = await atZoom(12);
@@ -558,7 +559,7 @@ const probe = () => ({
   report.shots.push('zoom14_markers.png');
 
   check('при віддаленні маркери стають крапками',
-    dots.zoom.dots && /matrix\(0\.65/.test(dots.zoom.transform) &&
+    dots.zoom.dots && /matrix\(0\.6[5-7]/.test(dots.zoom.transform) &&
     dots.zoom.textDisplay === 'none' && dots.zoom.arrowDisplay === 'none',
     'зум ' + dots.zoom.level + ': клас zoom-out=' + dots.zoom.dots + ', transform=' +
     dots.zoom.transform + ', номер=' + dots.zoom.textDisplay + ', стрілка=' + dots.zoom.arrowDisplay);

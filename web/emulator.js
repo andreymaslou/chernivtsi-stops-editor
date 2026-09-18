@@ -540,40 +540,40 @@ function sliceOffset(full, path) {
 }
 
 const CHEVRON_SVG = '<svg viewBox="0 0 12 12" aria-hidden="true">' +
-  '<path d="M 2 2 L 10 6 L 2 10 Z" fill="currentColor"/></svg>';
+  '<path d="M 3 2 L 9 6 L 3 10" fill="none" stroke="#ffffff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
 /**
- * Промежуточная остановка со шевроном направления: один маркер несёт и «здесь
- * остановка», и «маршрут едет туда». На длинной ноге это вдвое меньше
- * маркеров, чем отдельные точки остановок плюс отдельные стрелки.
+ * Промежуточная остановка: аккуратная белая точка с цветной обводкой маршрута.
  */
-function stopChevron(point, next, colour) {
-  const angle = (next ? bearingDeg(point[0], point[1], next[0], next[1]) : 0).toFixed(1);
+function stopDot(point, colour) {
   return L.marker(point, {
     interactive: false,
+    zIndexOffset: 100,
     icon: L.divIcon({
       className: 'plan-stop',
-      html: '<span class="plan-stop-dot" data-bearing="' + angle +
-        '" data-lat="' + point[0] + '" data-lon="' + point[1] +
-        '" style="--route-colour: ' + colour + '">' +
-        '<span class="plan-chevron" style="transform: rotate(' + angle + 'deg)">' +
-        CHEVRON_SVG + '</span></span>',
-      iconSize: [18, 18],
-      iconAnchor: [9, 9],
+      html: '<span class="plan-stop-dot" data-lat="' + point[0] + '" data-lon="' + point[1] +
+        '" style="--route-colour: ' + colour + '"></span>',
+      iconSize: [12, 12],
+      iconAnchor: [6, 6],
     }),
   });
 }
 
-/** Отдельный шеврон посередине длинного сегмента (между остановками). */
+/** Отдельный шеврон направления по центру сегмента линии. */
 function midChevron(point, bearing, colour) {
-  const angle = bearing.toFixed(1);
+  // Preserve original bearing for data attribute (used by tests),
+  // but rotate the chevron so that 0° (north) points upward.
+  // The SVG chevron points to the right (east) by default, so we offset by -90°.
+  const dataBearing = bearing.toFixed(1);
+  const rotation = ((bearing - 90) % 360).toFixed(1);
   return L.marker(point, {
     interactive: false,
+    zIndexOffset: 150,
     icon: L.divIcon({
       className: 'plan-arrow',
-      html: '<span class="plan-arrow-icon" data-bearing="' + angle +
+      html: '<span class="plan-arrow-icon" data-bearing="' + dataBearing +
         '" data-lat="' + point[0] + '" data-lon="' + point[1] +
-        '" style="color: ' + colour + '; transform: rotate(' + angle + 'deg)">' +
+        '" style="transform: rotate(' + rotation + 'deg)">' +
         CHEVRON_SVG + '</span>',
       iconSize: [14, 14],
       iconAnchor: [7, 7],
@@ -585,6 +585,7 @@ function midChevron(point, bearing, colour) {
 function stepBadge(step, point, colour) {
   return L.marker(point, {
     interactive: false,
+    zIndexOffset: 500,
     icon: L.divIcon({
       className: 'plan-step-wrap',
       html: '<div class="plan-step" data-step="' + step + '" data-colour="' + colour +
@@ -599,6 +600,7 @@ function stepBadge(step, point, colour) {
 function finishBadge(point) {
   return L.marker(point, {
     interactive: false,
+    zIndexOffset: 500,
     icon: L.divIcon({
       className: 'plan-finish-wrap',
       html: '<div class="plan-finish">🏁</div>',
@@ -612,6 +614,7 @@ function finishBadge(point) {
 function walkBadge(point) {
   return L.marker(point, {
     interactive: false,
+    zIndexOffset: 450,
     icon: L.divIcon({
       className: 'plan-walk-wrap',
       html: '<div class="plan-walk-icon">🚶</div>',
@@ -668,15 +671,15 @@ function renderPlan(plan) {
         path.forEach((point) => bounds.push(point));
       }
 
-      // Направление: шеврон в каждой промежуточной остановке + отдельный
-      // шеврон посередине длинного сегмента (там между остановками > 800 м).
+      // Промежуточные остановки: аккуратные точки на маршруте.
       for (let i = 1; i < path.length - 1; i += 1) {
-        stopChevron(path[i], path[i + 1], colour).addTo(legLayer);
+        stopDot(path[i], colour).addTo(legLayer);
       }
+      // Направление: заметные белые шевроны посередине каждого сегмента дороги.
       for (let i = 0; i < path.length - 1; i += 1) {
         const [aLat, aLon] = path[i];
         const [bLat, bLon] = path[i + 1];
-        if (distanceM(aLat, aLon, bLat, bLon) > ARROW_MIN_SEGMENT_M) {
+        if (distanceM(aLat, aLon, bLat, bLon) > 30) {
           midChevron([(aLat + bLat) / 2, (aLon + bLon) / 2],
             bearingDeg(aLat, aLon, bLat, bLon), colour).addTo(legLayer);
         }
@@ -699,7 +702,7 @@ function renderPlan(plan) {
           (leg.vehicle_state ? ' [' + esc(leg.vehicle_state) + ']' : ''));
       }
     } else if (leg.type === 'transfer') {
-      const isWalk = leg.kind === 'walk';
+      const isWalk = leg.kind === 'walk' || (leg.walk_min && leg.walk_min > 0);
       const icon = isWalk ? '🚶' : '⇄';
       const name = isWalk ? ' йдемо до «' + esc(leg.at) + '»' : ' пересадка на «' + esc(leg.at) + '»';
       const walkNote = leg.walk_min ? ' (' + leg.walk_min + ' хв пішки)' : '';
@@ -708,8 +711,8 @@ function renderPlan(plan) {
 
       // Пешая часть: пунктир «як у Google Maps» (кружечки). Своей геометрии у
       // роутера пока нет — берём прямую между остановками ног по обе стороны.
-      let walkPath = isWalk && Array.isArray(leg.path) ? leg.path : [];
-      if (isWalk && walkPath.length < 2) {
+      let walkPath = Array.isArray(leg.path) && leg.path.length > 1 ? leg.path : [];
+      if (walkPath.length < 2) {
         const fromPoint = legEnds.slice(0, index).reverse().find(Boolean);
         const toPoint = legStarts.slice(index + 1).find(Boolean);
         if (fromPoint && toPoint) walkPath = [fromPoint, toPoint];
@@ -720,7 +723,7 @@ function renderPlan(plan) {
           lineCap: 'round', lineJoin: 'round', className: 'plan-walk-line',
         }).addTo(legLayer);
         walkPath.forEach((point) => bounds.push(point));
-        if (isWalk) walkBadge(walkPath[Math.floor(walkPath.length / 2)]).addTo(legLayer);
+        walkBadge(walkPath[Math.floor(walkPath.length / 2)]).addTo(legLayer);
       }
       lines.push(icon + name + walkNote + waitNote);
     }
