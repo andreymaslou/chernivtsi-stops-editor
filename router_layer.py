@@ -451,6 +451,7 @@ class TransitRouter:
         coords: Sequence[Tuple[float, float]],
         bearings: Sequence[float],
         segments: Sequence[float],
+        stop_indices: Sequence[int],
         index: int,
         snap_m: float,
     ) -> bool:
@@ -470,7 +471,9 @@ class TransitRouter:
         маємо права відкидати машину: тоді повертаємо True і працює старий
         геометричний підбір.
         """
-        if index + 1 >= len(coords) or index >= len(bearings):
+        # index — індекс ЗУПИНКИ в ланцюжку (не точки OSRM-геометрії), тому
+        # наступний вузол ланцюжка беремо через stop_indices.
+        if index + 1 >= len(stop_indices) or index >= len(bearings):
             return True
         speed = float(vehicle.get("speed_kmh") or 0.0)
         if speed < HEADING_CHECK_MIN_SPEED_KMH:
@@ -485,7 +488,7 @@ class TransitRouter:
                 return True
             bearing = bearings[index]
         else:
-            next_lat, next_lon = coords[index + 1]
+            next_lat, next_lon = coords[stop_indices[index + 1]]
             bearing = TransitRouter._bearing_deg(
                 float(lat), float(lon), next_lat, next_lon
             )
@@ -774,6 +777,17 @@ class TransitRouter:
         # з активною лінією.
         full_geom = [[lat, lon] for lat, lon in self.route_coords[route_key]]
 
+        # Проміжні зупинки ноги (між посадкою та висадкою, виключно) — окремим
+        # масивом координат. path тепер — це OSRM-геометрія з сотнями точок
+        # форми дороги, тож крапка на кожній точці дала б «пил» на карті замість
+        # маршруту. Крапки малюються лише за координатами реальних зупинок
+        # (вони вже пораховані в route_coords, а їхні індекси — у stop_indices).
+        leg_coords = self.route_coords[route_key]
+        stops: List[List[float]] = []
+        for position in range(pos_first + 1, pos_last):
+            if 0 <= position < len(stop_indices):
+                lat, lon = leg_coords[stop_indices[position]]
+                stops.append([lat, lon])
 
         wait = self._wait_info(route_key, path_nodes[0], now, wait_cache)
         wait_min = wait.get("wait_min") or 0.0
@@ -804,6 +818,7 @@ class TransitRouter:
             "from": from_name,
             "to": to_name,
             "path": path,
+            "stops": stops,
             "full_geom": full_geom,
             "travel_min": round(travel_min, 1),
             "wait_min": round(wait_min, 1),
@@ -1029,13 +1044,24 @@ class TransitRouter:
                 # точки — ответ не меняется.
                 lat_window = MAX_LIVE_SNAP_METERS / 111320.0
                 lon_window = lat_window / max(0.2, math.cos(math.radians(vlat)))
+                # Прив'язка йде до ЗУПИНОК ланцюжка, а не до точок OSRM-геометрії:
+                # board_pos, route_prefix, route_bearings і route_segment_m живуть
+                # у просторі зупинок (довжина == len(chain)), тоді як coords після
+                # OSRM розширений формою доріг (сотні точок). Індекс найближчої
+                # ЗУПИНКИ — це і є best_idx (як і було до OSRM, коли coords == stops),
+                # тільки тоді коректні й порівняння з board_pos, і зрізи prefix/
+                # bearings/segments нижче.
+                stop_indices = self.route_stop_indices.get(
+                    route_key, list(range(len(coords)))
+                )
                 best_idx, best_dist = None, None
-                for index, (nlat, nlon) in enumerate(coords):
+                for position in range(len(stop_indices)):
+                    nlat, nlon = coords[stop_indices[position]]
                     if abs(nlat - vlat) > lat_window or abs(nlon - vlon) > lon_window:
                         continue
                     distance = self._haversine_m(vlat, vlon, nlat, nlon)
                     if best_dist is None or distance < best_dist:
-                        best_idx, best_dist = index, distance
+                        best_idx, best_dist = position, distance
                 if best_dist is None or best_dist > MAX_LIVE_SNAP_METERS:
                     continue
                 if best_idx >= board_pos:
@@ -1046,7 +1072,7 @@ class TransitRouter:
                 #    протилежний азимуту сегмента — це єдина ознака напрямку в
                 #    реальному трекері, який поля `direction` не віддає.
                 if not self._heading_matches_route(
-                    vehicle, coords, bearings, segments, best_idx, best_dist
+                    vehicle, coords, bearings, segments, stop_indices, best_idx, best_dist
                 ):
                     continue
 

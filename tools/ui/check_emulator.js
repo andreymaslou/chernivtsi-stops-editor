@@ -217,7 +217,7 @@ const probe = () => ({
         .map((el) => el.textContent.trim()),
       stopDots: document.querySelectorAll('.plan-stop-dot').length,
       expectedStops: transit.reduce((sum, leg) =>
-        sum + Math.max(0, (Array.isArray(leg.path) ? leg.path : []).length - 2), 0),
+        sum + (Array.isArray(leg.stops) ? leg.stops.length : 0), 0),
     };
   })(),
   // CSS спецификации: проверяем правила на одноразовых элементах, а не «на глаз».

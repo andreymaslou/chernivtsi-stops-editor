@@ -681,17 +681,26 @@ function renderPlan(plan) {
         path.forEach((point) => bounds.push(point));
       }
 
-      // Промежуточные остановки: аккуратные точки на маршруте.
-      for (let i = 1; i < path.length - 1; i += 1) {
-        stopDot(path[i], colour).addTo(legLayer);
+      // Промежуточные остановки: крапки тільки за координатами реальних
+      // зупинок ноги (leg.stops від бекенда). path — це OSRM-геометрія
+      // (сотні точок форми дороги), і крапка на кожній із них давала б
+      // «пил» замість маршруту.
+      if (Array.isArray(leg.stops)) {
+        leg.stops.forEach((point) => stopDot(point, colour).addTo(legLayer));
       }
-      // Направление: заметные белые шевроны посередине каждого сегмента дороги.
+      // Направление: помітні білі шеврони. Накопичуємо довжину по точках
+      // полілінії та ставимо шеврон у кінці кожної ділянки від ARROW_MIN_SEGMENT_M
+      // — інакше на OSRM-геометрії (багато коротких сегментів) шеврони
+      // злипаються в одну купу.
+      let sinceChevronM = 0;
       for (let i = 0; i < path.length - 1; i += 1) {
         const [aLat, aLon] = path[i];
         const [bLat, bLon] = path[i + 1];
-        if (distanceM(aLat, aLon, bLat, bLon) > 30) {
+        sinceChevronM += distanceM(aLat, aLon, bLat, bLon);
+        if (sinceChevronM >= ARROW_MIN_SEGMENT_M) {
           midChevron([(aLat + bLat) / 2, (aLon + bLon) / 2],
             bearingDeg(aLat, aLon, bLat, bLon), colour).addTo(legLayer);
+          sinceChevronM = 0;
         }
       }
 

@@ -314,7 +314,14 @@ def test_spatial_cache_drops_stale_fleet(router, data, fleet, now):
 def _fleet_vehicle(router, route_key, index, direction=None, heading=None,
                    speed=25.0, board="T-001"):
     """Одна машина на ланцюжку маршруту: стоїть рівно на вузлі (snap без похибки)."""
-    lat, lon = router.route_coords[route_key][index]
+    # `index` — індекс ЗУПИНКИ в ланцюжку (так само, як board_pos/bearings у
+    # тестах нижче). Після OSRM route_coords розширений формою доріг, тому
+    # координати зупинки беремо через route_stop_indices — інакше машина
+    # встане на точку геометрії дороги, а прив'яжеться до іншої зупинки.
+    stop_indices = router.route_stop_indices.get(
+        route_key, list(range(len(router.route_coords[route_key])))
+    )
+    lat, lon = router.route_coords[route_key][stop_indices[index]]
     route = router.routes[route_key]
     label = route.get("live_route_name") or route.get("route_name") or ""
     vehicle = {
@@ -429,6 +436,41 @@ def test_heading_filter_rejects_opposite_vehicle(data, now):
     assert router._approaching_vehicles(route_key, board_node), (
         "стоящую машину отбросили по курсу — а он у неё случайный"
     )
+
+
+def test_live_snap_stays_in_stop_index_space(data, now):
+    """Регресія OSRM-геометрії: прив'язка машини рахується в просторі ЗУПИНОК.
+
+    `route_coords` після OSRM розширений формою доріг (сотні точок), а `board_pos`,
+    `route_prefix`, `route_bearings` і `route_segment_m` — індекси зупинок
+    (довжина == len(chain)). Коли цикл прив'язки ітерував по точках геометрії,
+    `best_idx` ~200 порівнювався з `board_pos` ~12, кожна машина відкидалась як
+    «та, що вже проїхала нашу зупинку», `live_bus` ставав вічно None — і золотий
+    бейдж «ваша посадка» нікому було підсвічувати. Прив'язка має йти по
+    `route_stop_indices`, тоді `best_idx` — знову індекс зупинки.
+    """
+    graph, schedule, stops = data
+    router = TransitRouter(graph, schedule, stops=stops, assume_in_service=True)
+    route_key = _route_for_direction_tests(router, min_stops=6)
+    assert route_key, "у графі немає маршруту з напрямком і довгим ланцюжком"
+    chain = router.route_stops[route_key]
+    coords = router.route_coords[route_key]
+    stop_indices = router.route_stop_indices.get(
+        route_key, list(range(len(coords))))
+    # Інакше простори збігаються — і цей тест регресію не піймає.
+    assert len(coords) > len(chain) * 2, "граф без OSRM-розширення геометрії"
+
+    behind = len(chain) // 2 - 1               # зупинка посередині ланцюжка
+    board_node = chain[behind + 2]
+    fleet = [_fleet_vehicle(router, route_key, behind,
+                            direction=router.route_direction[route_key])]
+    router.set_live(fleet, snapshot_at=now)
+
+    found = [item["live_bus"]
+             for item in router._approaching_vehicles(route_key, board_node)]
+    assert found == ["T-001"], (
+        "машина стоїть на зупинці %d (це ~%d-а точка геометрії), а посадка %d: %s" % (
+            behind, stop_indices[behind], behind + 2, found))
 
 
 def test_same_number_different_vehicle_type_stays_separate(router, now):
