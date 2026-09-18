@@ -146,8 +146,13 @@ const probe = () => ({
       if (!dlat && !dlon) return 0;
       return (Math.atan2(dlon, dlat) * 180) / Math.PI % 360;
     };
-    // Ожидаемый азимут шеврона: азимут сегмента посередине.
-    const expectedBearing = (lat, lon) => {
+    // Очiкуваний азимут шеврона: азимут сегмента посередині. Маршрут може
+    // проходити одну й ту саму дорогу «туди-назад» (вилет/петля) — тоді у
+    // різних сегментів однаковий центр, але азимути розходяться на 180°.
+    // Шеврон малюється на конкретному сегменті, тому збираємо всіх кандидатів
+    // i засчитуємо збіг із будь-яким з них.
+    const expectedBearings = (lat, lon) => {
+      const out = [];
       for (const leg of transit) {
         const path = Array.isArray(leg.path) ? leg.path : [];
         for (let i = 0; i < path.length - 1; i += 1) {
@@ -156,21 +161,22 @@ const probe = () => ({
           const at = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
           if (Math.abs(at[0] - lat) < 1e-9 && Math.abs(at[1] - lon) < 1e-9) {
             const value = bearingOf(a[0], a[1], b[0], b[1]);
-            return (value + 360) % 360;
+            out.push((value + 360) % 360);
           }
         }
       }
-      return null;
+      return out.length ? out : null;
     };
     const chevrons = [...document.querySelectorAll('.plan-arrow-icon')]
       .map((el) => {
         const lat = Number(el.getAttribute('data-lat'));
         const lon = Number(el.getAttribute('data-lon'));
-        const want = expectedBearing(lat, lon);
+        const want = expectedBearings(lat, lon);
         const got = Number(el.getAttribute('data-bearing'));
         return {
           want, got,
-          ok: want !== null && Number.isFinite(got) && Math.abs(want - got) < 0.6,
+          ok: want !== null && Number.isFinite(got) &&
+            want.some((item) => Math.abs(item - got) < 0.6),
         };
       });
     const steps = [...document.querySelectorAll('.plan-step')].map((el) => {

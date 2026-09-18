@@ -90,6 +90,11 @@ class TransitRouter:
         # Нормализованная подпись маршрута для сверки с меткой ТС перевозчика.
         # Считаем один раз на маршрут, а не в каждом сравнении с машиной.
         self._route_wanted_norm: Dict[str, str] = {}
+        # Тип ТС маршрута («bus»/«trolley»). Номера маршрутов у автобусов и
+        # троллейбусов независимы: «5» есть и там, и там — это два разных
+        # маршрута с разными ланцюжками, поэтому подпись для сверки с парком
+        # всегда дополняется типом (см. set_live).
+        self.route_vehicle_type: Dict[str, str] = {}
         # Напрямок маршруту (A/B) — щоб відсіяти ТС, які їдуть у інший бік
         # (див. docs/BRIEF-router-direction.md).
         self.route_direction: Dict[str, str] = {}
@@ -156,6 +161,7 @@ class TransitRouter:
 
             wanted = route.get("live_route_name") or route.get("route_name") or ""
             self._route_wanted_norm[key] = self.normalize_label(str(wanted))
+            self.route_vehicle_type[key] = str(route.get("vehicle_type") or "bus").strip().lower()
             # Напрямок беремо з ключа («trolley:2:A»), а не з полів ТС: це
             # властивість маршруту, і вона є навіть коли трекер її не віддає.
             self.route_direction[key] = self.normalize_direction(key.split(":")[-1])
@@ -207,7 +213,7 @@ class TransitRouter:
         self._live_vehicles: List[Dict[str, Any]] = []
         # Индекс «нормализованная подпись маршрута -> машины». Строится в
         # set_live(), чтобы поиск «першого потрібного ТС» не перебирал парк.
-        self._live_by_route: Dict[str, List[Dict[str, Any]]] = {}
+        self._live_by_route: Dict[Tuple[str, str], List[Dict[str, Any]]] = {}
         # Момент, на который построен срез живого парка. Нужен, чтобы понять,
         # успевает ли пассажир на конкретную машину: срез «сейчас», а посадка
         # будет через несколько минут после старта поездки.
@@ -254,9 +260,11 @@ class TransitRouter:
     # них зависит, попадёт машина в кандидаты. Машина, яка на кінцевій
     # розвернулася и стоит на месте, имеет те же lat/lon/speed/board, и без этих
     # полей в подписи кэш остался бы с геометрией старого направления.
+    # `vehicle_type` — из того же ряда: кандидат ищется по паре (тип, подпись),
+    # так что смена типа машины обязана сбрасывать кэш.
     _FLEET_KEY_FIELDS = (
         "lat", "lon", "speed_kmh", "board_number", "is_live", "route_label",
-        "direction", "heading_deg",
+        "direction", "heading_deg", "vehicle_type",
     )
 
     @classmethod
@@ -277,10 +285,12 @@ class TransitRouter:
         """
         Приймає нормалізований срез живого шару (список ТЗ).
 
-        Заодно строит индекс «нормализованная подпись маршрута -> машины»:
-        поиск «першого потрібного ТС» вызывается из Дейкстры тысячи раз за
-        один запрос, поэтому перебор всего парка на каждый вызов заменён на
-        выборку из словаря.
+        Заодно строит индекс «(тип ТС, нормализованная подпись маршрута) ->
+        машины»: поиск «першого потрібного ТС» вызывается из Дейкстры тысячи
+        раз за один запрос, поэтому перебор всего парка на каждый вызов заменён
+        на выборку из словаря. Тип ТС обязан входить в ключ: номера маршрутов
+        у автобусов и троллейбусов не пересекаются («5» = два разных маршрута),
+        и по голой подписи они бы склеились в одну кучу.
 
         `snapshot_at` — момент, на который построен срез. Для симулятора это
         время, переданное в `snapshot(now=...)` (парк строится относительно
@@ -301,12 +311,15 @@ class TransitRouter:
             self._fleet_key = fingerprint
             self._fleet_version += 1
             self._spatial_cache.clear()
-        by_route: Dict[str, List[Dict[str, Any]]] = {}
+        # Ключ индекса — пара (тип ТС, подпись): «bus:5» и «trolley:5» —
+        # разные маршруты, по одной только подписи они бы слились.
+        by_route: Dict[Tuple[str, str], List[Dict[str, Any]]] = {}
         for vehicle in self._live_vehicles:
             label = vehicle.get("route_label") or vehicle.get("route_name") or ""
             key = self.normalize_label(str(label))
             if key:
-                by_route.setdefault(key, []).append(vehicle)
+                vtype = str(vehicle.get("vehicle_type") or "").strip().lower()
+                by_route.setdefault((vtype, key), []).append(vehicle)
         self._live_by_route = by_route
 
     def _resolve_to_nodes(self, stop_id: int) -> List[int]:
@@ -771,8 +784,13 @@ class TransitRouter:
             price_grn = int(float(sched["tariff"]))
 
         live_route_name = route.get("live_route_name")
+        route_vtype = str(route.get("vehicle_type") or "bus").strip().lower()
         colour = "#4f8cff"
         for vehicle in self._live_vehicles:
+            # Тільки свій тип ТС: колір «5» автобуса не може прийти від
+            # тролейбуса «5» (маршрути різні, хоч підпис і збігається).
+            if str(vehicle.get("vehicle_type") or "").strip().lower() != route_vtype:
+                continue
             if self._route_labels_match(
                 str(vehicle.get("route_label") or ""), str(live_route_name or "")
             ):
@@ -984,8 +1002,11 @@ class TransitRouter:
             segments = self.route_segment_m[route_key]
             board_pos = self.route_pos[route_key][board_node]
             route_direction = self.route_direction.get(route_key, "")
+            # Только машины своего типа: «5» автобус и «5» троллейбус —
+            # разные маршруты, хотя подпись у них одинаковая.
+            route_vtype = self.route_vehicle_type.get(route_key, "")
 
-            for vehicle in self._live_by_route.get(wanted_norm, ()):
+            for vehicle in self._live_by_route.get((route_vtype, wanted_norm), ()):
                 # 1) Напрямок із среза парка (симулятор; трекер може віддати в
                 #    майбутньому). Стоїть ДО haversine: відсіюємо найдешевше.
                 vehicle_direction = self.normalize_direction(vehicle.get("direction"))
@@ -1112,19 +1133,24 @@ class TransitRouter:
 
     def _vehicles_for_routes(self, route_keys: Set[str]) -> List[Dict[str, Any]]:
         """Живі машини на задіяних маршрутах — щоб емулятор показав їх на карті."""
-        wanted_labels: Set[str] = set()
+        # Ключ — пара (тип ТС, нормалізована підпис): «5» є і в автобусів, і
+        # у тролейбусів, і без типу на карту плану автобусного 5 потрапили б
+        # тролейбуси 5 (і навпаки).
+        wanted: Set[Tuple[str, str]] = set()
         for key in route_keys:
             route = self.routes.get(key) or {}
             label = route.get("live_route_name") or route.get("route_name")
             if label:
-                wanted_labels.add(str(label))
-        if not wanted_labels:
+                vtype = str(route.get("vehicle_type") or "bus").strip().lower()
+                wanted.add((vtype, self.normalize_label(str(label))))
+        if not wanted:
             return []
 
         picked: List[Dict[str, Any]] = []
         for vehicle in self._live_vehicles:
+            vtype = str(vehicle.get("vehicle_type") or "").strip().lower()
             label = str(vehicle.get("route_label") or vehicle.get("route_name") or "")
-            if any(self._route_labels_match(label, w) for w in wanted_labels):
+            if (vtype, self.normalize_label(label)) in wanted:
                 picked.append(vehicle)
         return picked
     def earliest_service_minutes(self, stop_id: int) -> Optional[float]:

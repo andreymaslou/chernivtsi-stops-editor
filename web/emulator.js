@@ -47,7 +47,7 @@ const layerGroup = L.layerGroup().addTo(map);
 
 // Слой живых ТС — отдельно от плана: маршрут можно перерисовать, а парк при
 // этом продолжал бы ехать. Машины из плана попадают сюда же (дублей нет:
-// ключ «маршрут|борт», см. upsertVehicle).
+// ключ «тип|маршрут|борт», см. upsertVehicle).
 const vehicleLayer = L.layerGroup().addTo(map);
 
 // На телефоне карта сначала может быть нулевой высоты — просим пересчитать.
@@ -157,7 +157,11 @@ const FLEET_STEP_MIN = 1;    // на сколько минут двигаем м
 const ANIM_MS = 900;         // за сколько миллисекунд «доезжаем» до новой точки
 
 function vehicleKey(vehicle) {
-  return String(vehicle.route_label || '?') + '|' + String(vehicle.board_number || '?');
+  // Тип ТС обов'язковий у ключі: «5» є і в автобусів, і в тролейбусів, і
+  // бортові номери в них можуть збігатися. Без типу маркери двох різних
+  // маршрутів перезаписували б один одного.
+  return String(vehicle.vehicle_type || '?') + '|' +
+    String(vehicle.route_label || '?') + '|' + String(vehicle.board_number || '?');
 }
 
 /**
@@ -202,10 +206,13 @@ function vehicleIcon(vehicle) {
   });
 }
 
-/** Борт-номер как он приходит и в /api/live, и в leg.live_bus (одно и то же поле). */
+/** Борт-номер как он приходит и в /api/live, и в leg.live_bus (одно и то же поле).
+ *  Дополненный типом ТС: цель подсветки — «садись на автобус 5, борт X»,
+ *  и троллейбус 5 с тем же бортом целью не является. */
 function boardKey(vehicle) {
-  return String(vehicle.board_number === undefined || vehicle.board_number === null
+  const board = String(vehicle.board_number === undefined || vehicle.board_number === null
     ? '' : vehicle.board_number);
+  return String(vehicle.vehicle_type || '') + '|' + board;
 }
 
 // ---------------------------------------------------------------------------
@@ -230,10 +237,13 @@ function updateZoomState() {
  * Без параметра — цель снимается (карта очищена, план не построен).
  */
 function setTargetBoards(legs) {
+  // Ключ — «тип|борт» (см. boardKey): у автобуса 5 и троллейбуса 5 борта
+  // могут совпадать, а цель подсветки — только один конкретный маршрут.
   const boards = new Set();
   (Array.isArray(legs) ? legs : []).forEach((leg) => {
     const board = String(leg && leg.live_bus ? leg.live_bus : '').trim();
-    if (board && board !== '?') boards.add(board);
+    const vtype = String(leg && leg.vehicle ? leg.vehicle : '').trim();
+    if (board && board !== '?') boards.add(vtype + '|' + board);
   });
   state.targetBoards = boards;
   state.vehicles.forEach((entry) => entry.marker.setIcon(vehicleIcon(entry.vehicle)));

@@ -319,6 +319,9 @@ def _fleet_vehicle(router, route_key, index, direction=None, heading=None,
     label = route.get("live_route_name") or route.get("route_name") or ""
     vehicle = {
         "board_number": board,
+        # Тип ТС обов'язковий: пошук машини маршруту йде за парою
+        # (тип, підпис) — інакше «5» автобуса і тролейбуса плутались би.
+        "vehicle_type": route.get("vehicle_type", "bus"),
         "route_label": str(label),
         "route_name": str(label),
         "lat": lat,
@@ -425,6 +428,63 @@ def test_heading_filter_rejects_opposite_vehicle(data, now):
     router.set_live(fleet, snapshot_at=now)
     assert router._approaching_vehicles(route_key, board_node), (
         "стоящую машину отбросили по курсу — а он у неё случайный"
+    )
+
+
+def test_same_number_different_vehicle_type_stays_separate(router, now):
+    """Регрессия: «5» автобус і «5» тролейбус — це два різні маршрути.
+
+    Номери маршрутів у автобусів і тролейбусів незалежні, тому прив'язка
+    парку до маршруту завжди доповнюється типом ТС. Раніше індекс парку
+    будувався за голеною підписою маршруту: машини «5» обох типів склеювалися
+    в одну купу, і план автобусом 5 показував тролейбуси 5 (і навпаки).
+    """
+    bus_key, trolley_key = "bus:5:A", "trolley:5:A"
+    for key in (bus_key, trolley_key):
+        assert key in router.routes, f"у графі немає маршруту {key}"
+    assert router.routes[bus_key]["route_name"] == router.routes[trolley_key]["route_name"]
+    assert router.routes[bus_key]["vehicle_type"] != router.routes[trolley_key]["vehicle_type"]
+
+    # Індекс парку не змішує типи за однією лише підписою маршруту.
+    mixed = [
+        label
+        for (vtype, label), vehicles in router._live_by_route.items()
+        if len({str(v.get("vehicle_type")) for v in vehicles}) > 1
+    ]
+    assert not mixed, f"маршрути склеєні за підписою без обліку типу: {mixed}"
+
+    # На карту плану автобусного 5 не мають потрапляти тролейбуси 5.
+    bus_only = router._vehicles_for_routes({bus_key})
+    trolley_only = router._vehicles_for_routes({trolley_key})
+    assert bus_only and trolley_only, "обох маршрутів має бути хоча б по машині"
+    assert all(v["vehicle_type"] == "bus" for v in bus_only), "у план автобуса 5 попали тролейбуси"
+    assert all(v["vehicle_type"] == "trolley" for v in trolley_only), "у план тролейбуса 5 попали автобуси"
+    assert not set(map(id, bus_only)) & set(map(id, trolley_only))
+
+
+def test_foreign_vehicle_type_is_not_first_bus(data, now):
+    """Тролейбус «5», що стоїть на ланцюжку автобусного 5 — не «перший потрібний ТС»."""
+    graph, schedule, stops = data
+    router = TransitRouter(graph, schedule, stops=stops, assume_in_service=True)
+
+    route_key = "bus:5:A"
+    assert route_key in router.routes
+    board_node = router.route_stops[route_key][4]
+
+    # Тролейбус із тою самою підписою маршруту, фізично на нашому ланцюжку.
+    foreign = _fleet_vehicle(router, route_key, 2, board="T-777")
+    foreign["vehicle_type"] = "trolley"
+    router.set_live([foreign], snapshot_at=now)
+    assert [c["live_bus"] for c in router._approaching_vehicles(route_key, board_node)] == [], (
+        "тролейбус 5 привязался к автобусному маршруту 5"
+    )
+
+    # Та сама машина, але свого типу — обязана быть «першим потрібним ТС».
+    own = dict(foreign)
+    own["vehicle_type"] = "bus"
+    router.set_live([own], snapshot_at=now)
+    assert [c["live_bus"] for c in router._approaching_vehicles(route_key, board_node)] == ["T-777"], (
+        "своя машина маршрута отброшена"
     )
 
 
