@@ -106,12 +106,54 @@ class TransitRouter:
             for segment in route.get("segments", []):
                 prefix.append(prefix[-1] + float(segment.get("minutes", 0.0)))
             self.route_prefix[key] = prefix
-            self.route_coords[key] = [
-                (float(self.nodes[node]["lat"]), float(self.nodes[node]["lon"]))
-                if node in self.nodes
-                else (0.0, 0.0)  # битый узел: ТС к нему просто не привяжется
-                for node in chain
-            ]
+
+            # --- route_coords: розгортаємо shape-точки сегментів ---
+            # Якщо в сегменті є OSRM-геометрія (shape), беремо її.
+            # Перша точка кожного наступного сегмента = остання попереднього,
+            # тому дубль не додаємо (overlap=1).
+            segments = route.get("segments", [])
+            coords: List[Tuple[float, float]] = []
+            # stop_coord_indices[i] = індекс у coords для i-ї зупинки в chain
+            stop_coord_indices: List[int] = []
+
+            if segments:
+                for seg_idx, seg in enumerate(segments):
+                    shape = seg.get("shape") or []
+                    if not shape:
+                        # Fallback: просто вузлові координати
+                        from_node = seg["from"]
+                        to_node = seg["to"]
+                        fn = self.nodes.get(from_node, {})
+                        tn = self.nodes.get(to_node, {})
+                        shape = [
+                            [fn.get("lat", 0.0), fn.get("lon", 0.0)],
+                            [tn.get("lat", 0.0), tn.get("lon", 0.0)],
+                        ]
+
+                    if seg_idx == 0:
+                        stop_coord_indices.append(len(coords))
+                        for pt in shape:
+                            coords.append((float(pt[0]), float(pt[1])))
+                    else:
+                        # Перша точка сегмента = остання попередня — пропускаємо
+                        stop_coord_indices.append(len(coords) - 1)
+                        for pt in shape[1:]:
+                            coords.append((float(pt[0]), float(pt[1])))
+
+                # Остання зупинка ланцюжка
+                stop_coord_indices.append(len(coords) - 1)
+            else:
+                # Маршрут без сегментів — старий спосіб
+                for node in chain:
+                    stop_coord_indices.append(len(coords))
+                    nd = self.nodes.get(node, {})
+                    coords.append((float(nd.get("lat", 0.0)), float(nd.get("lon", 0.0))))
+
+            self.route_coords[key] = coords
+            # Зберігаємо індекси зупинок у route_coords (для path-slicing)
+            self.route_stop_indices: Dict[str, List[int]] = getattr(self, "route_stop_indices", {})
+            self.route_stop_indices[key] = stop_coord_indices
+
             wanted = route.get("live_route_name") or route.get("route_name") or ""
             self._route_wanted_norm[key] = self.normalize_label(str(wanted))
             # Напрямок беремо з ключа («trolley:2:A»), а не з полів ТС: це
@@ -120,12 +162,13 @@ class TransitRouter:
             bearings: List[float] = []
             lengths: List[float] = []
             for index in range(len(chain) - 1):
-                lat1, lon1 = self.route_coords[key][index]
-                lat2, lon2 = self.route_coords[key][index + 1]
+                lat1, lon1 = self.route_coords[key][stop_coord_indices[index]]
+                lat2, lon2 = self.route_coords[key][stop_coord_indices[index + 1]]
                 bearings.append(self._bearing_deg(lat1, lon1, lat2, lon2))
                 lengths.append(self._haversine_m(lat1, lon1, lat2, lon2))
             self.route_bearings[key] = bearings
             self.route_segment_m[key] = lengths
+
 
         # Вузол -> маршрути, що через нього проходять.
         self.node_routes: Dict[int, Set[str]] = {node: set() for node in self.nodes}
@@ -701,17 +744,23 @@ class TransitRouter:
         # розгортаємо ногу в повну ланцюжок зупинок маршруту між ними —
         # інакше emulator.js малює хорду крізь пів міста замість маршруту
         # (координати вже пораховані: route_coords у тому ж порядку).
+        # Переводимо індекси зупинок у індекси route_coords (може бути більше точок через OSRM-shape)
+        stop_indices = self.route_stop_indices.get(route_key, list(range(len(self.route_coords[route_key]))))
+        coord_first = stop_indices[pos_first] if pos_first < len(stop_indices) else pos_first
+        coord_last = stop_indices[pos_last] if pos_last < len(stop_indices) else pos_last
+
         path = [
             [lat, lon]
-            for lat, lon in self.route_coords[route_key][pos_first : pos_last + 1]
+            for lat, lon in self.route_coords[route_key][coord_first : coord_last + 1]
         ]
         # Повна геометрія напрямку (від початкової кінцевої до кінцевої) — для
         # «хвостів» на карті: пасажир бачить, куди маршрут іде до і після його
         # ділянки. `path` завжди є НЕПЕРЕРВНИМ срізом `full_geom`
-        # (`full_geom[pos_first:pos_last+1]`, це перевіряє
+        # (`full_geom[coord_first:coord_last+1]`, це перевіряє
         # test_leg_full_geom_covers_active_path) — інакше хвіст не стикувався б
         # з активною лінією.
         full_geom = [[lat, lon] for lat, lon in self.route_coords[route_key]]
+
 
         wait = self._wait_info(route_key, path_nodes[0], now, wait_cache)
         wait_min = wait.get("wait_min") or 0.0

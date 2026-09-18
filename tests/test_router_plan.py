@@ -184,11 +184,17 @@ def test_ride_path_contains_all_intermediate_stops(router, now):
     assert pos_last > pos_first, "эталонные остановки идут не по порядку"
 
     leg = router._transit_leg(route_key, [board, alight], now)
-    expected = [list(point) for point in router.route_coords[route_key][pos_first:pos_last + 1]]
+
+    # З OSRM-геометрією шлях будується через stop_coord_indices,
+    # тому очікуваний зріз теж рахуємо через них.
+    stop_indices = router.route_stop_indices.get(route_key, list(range(len(router.route_coords[route_key]))))
+    coord_first = stop_indices[pos_first] if pos_first < len(stop_indices) else pos_first
+    coord_last = stop_indices[pos_last] if pos_last < len(stop_indices) else pos_last
+    expected = [list(point) for point in router.route_coords[route_key][coord_first:coord_last + 1]]
 
     assert leg["path"] == expected
-    assert len(leg["path"]) == pos_last - pos_first + 1 > 2, (
-        "в путь ноги не попали промежуточные остановки"
+    assert len(leg["path"]) > pos_last - pos_first + 1 > 2, (
+        "path повинен містити OSRM-точки між зупинками (більше ніж просто зупинки)"
     )
     assert leg["travel_min"] > 0
 
