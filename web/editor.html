@@ -5,10 +5,16 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Редактор зупинок — Транспорт Онлайн Чернівці</title>
+  <!-- Иконка в data:-URL: без неё браузер просит /favicon.ico и даёт 404 в консоли -->
+  <link rel="icon"
+    href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🚌</text></svg>" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="style.css" />
+  <!-- Панель эмулятора: стили скоупированы под #emu-panel (см. файл), чтобы
+       не переопределять разметку/цвета редактора. -->
+  <link rel="stylesheet" href="emulator-panel.css" />
   <script>
     (function () {
       var valid = false;
@@ -128,7 +134,7 @@
             Зупинки <span id="route-label" style="color:var(--accent-light);">/ А</span>
             <span class="badge" id="stop-count" style="margin-left:2px;">0</span>
           </span>
-          <button class="btn-icon" id="clear-btn" title="Очистити" style="font-size:11px; padding:2px 3px;">🗑</button>
+          <button class="btn-icon" id="editor-clear-btn" title="Очистити список зупинок" style="font-size:11px; padding:2px 3px;">🗑</button>
           <input type="file" id="import-file-input" accept=".json" style="display:none;" />
           <button class="btn-icon" id="import-json-btn" title="Імпорт JSON"
             style="font-size:11px; padding:2px 3px;">⬆️</button>
@@ -145,12 +151,71 @@
       </div>
     </aside>
 
-    <!-- RIGHT: Map fills remaining space -->
-    <main class="map-container">
+    <!-- RIGHT: карта редактора + панель эмулятора поверх неё.
+         position:relative нужен, чтобы #emu-panel (absolute) встала справа
+         поверх карты, а не отдельной колонкой. -->
+    <main class="map-container" style="position:relative;">
       <div id="map"></div>
       <div class="map-hint">
-        <span>🖱 Клік на карті — встановлює координати нової зупинки</span>
+        <span id="edit-mode-hint">🖱 Клік на карті — встановлює координати нової зупинки</span>
+        <!-- pointer-events:auto обязателен: у .map-hint стоит pointer-events:none
+             (это подсказка, а не контрол), поэтому кнопку включаем явно. -->
+        <button id="edit-mode-btn" class="btn-icon" title="Перемкнути режим кліка по карті"
+          style="font-size:11px; padding:2px 6px; margin-left:6px; pointer-events:auto;">✏️ редактор</button>
       </div>
+
+      <!-- Панель эмулятора (перенесена из web/emulator.html).
+           id сохранены как в эмуляторе: их читает web/emulator.js и
+           проверяет tools/ui/check_emulator.js. -->
+      <aside id="emu-panel">
+        <div class="head">
+          <span>🚌 AI-емулятор маршруту</span>
+          <span>
+            <a href="/ui/admin.html">⚙️ Сленг і скарги</a>
+            <a href="/docs" style="margin-left:10px;">API</a>
+          </span>
+        </div>
+
+        <textarea id="ask-text" placeholder="Наприклад: Я на Соборці, треба на Гравітон"></textarea>
+
+        <div class="chips" id="chips"></div>
+
+        <div class="row">
+          <button id="ask-btn">🤖 AI, запитай мене</button>
+          <button id="report-btn" class="danger" disabled>🚩 Це бред</button>
+          <button id="clear-btn" class="secondary">Очистити карту</button>
+        </div>
+
+        <!-- Живий парк + «машина часу»: дивимось, як рухаються ТС по місту -->
+        <div class="row" style="margin-top:8px; align-items:center;">
+          <label class="toggle"><input type="checkbox" id="fleet-toggle" /> 🚌 живий парк</label>
+          <input type="datetime-local" id="model-time" step="60" />
+          <button id="fleet-now" class="secondary">зараз</button>
+          <button id="fleet-play" class="secondary" disabled>▶ рух</button>
+        </div>
+        <div id="fleet-status" class="status"></div>
+
+        <div id="status" class="status">готовий до роботи</div>
+        <div id="answer" class="answer"></div>
+
+        <!-- Форма скарги: відкривається кнопкою «Це бред» -->
+        <div id="report-form" class="hidden" style="margin-top:10px;">
+          <div class="row" style="margin-bottom:6px;">
+            <select id="report-kind" style="flex:1; background:var(--emu-panel2); color:var(--emu-text); border:1px solid #333941; border-radius:8px; padding:7px;">
+              <option value="nonsense">Повна нісенітниця</option>
+              <option value="wrong_route">Не той маршрут</option>
+              <option value="wrong_stop">Не та зупинка</option>
+              <option value="wrong_time">Не той час / очікування</option>
+              <option value="other">Інше</option>
+            </select>
+          </div>
+          <textarea id="report-comment" placeholder="Що саме не так? (необов'язково)"></textarea>
+          <div class="row" style="margin-top:6px;">
+            <button id="report-send" class="danger">Надіслати в логи</button>
+            <button id="report-cancel" class="secondary">Скасувати</button>
+          </div>
+        </div>
+      </aside>
     </main>
 
   </div>
@@ -174,7 +239,11 @@
   </div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <!-- Порядок важен: app.js создаёт карту и публикует её как
+       window.TRANSPORT_MAP; emulator.js подхватывает эту карту (а на
+       отдельной странице /ui/emulator.html создаёт свою). -->
   <script src="app.js"></script>
+  <script src="emulator.js"></script>
 </body>
 
 </html>

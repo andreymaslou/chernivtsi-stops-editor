@@ -146,6 +146,6 @@ case "${code}" in
     *)   warn "  https://${DOMAIN}/health -> HTTP ${code} (ожидался 401)" ;;
 esac
 
-say "Готово. Открывайте: https://${DOMAIN}/ (редирект на /ui/emulator.html)"
+say "Готово. Открывайте: https://${DOMAIN}/ (редирект на /ui/editor.html — редактор маршрутов + панель эмулятора)"
 echo "  логин/пароль — из ${HTPASSWD_FILE}"
 echo "  сертификаты продлеваются автоматически (certbot.timer); проверка: systemctl list-timers | grep certbot"

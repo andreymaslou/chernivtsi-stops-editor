@@ -48,6 +48,11 @@ const map = L.map('map', {
   zoomControl: true,
 });
 
+// Карта публикуется для встроенной панели эмулятора (web/emulator.js): на
+// объединённой странице (web/editor.html) редактор и эмулятор обязаны работать
+// с ОДНИМ Leaflet-инстансом — второй L.map на том же #map конфликтует.
+window.TRANSPORT_MAP = map;
+
 // азові шари карти
 const baseLayers = {
   'OSM — нові назви вулиць (актуально)': L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -402,8 +407,47 @@ window.toggleOsmStops = function () {
   }
 };
 
+// ===== Режим клика: редактор остановок vs просмотр маршрута =====
+// Клик по карте в редакторе ставит координаты новой остановки. Когда на карте
+// показан план эмулятора, клики (посмотреть попап машины, приблизить участок)
+// не должны рождать остановки — поэтому панель эмулятора гасит этот режим на
+// время просмотра через window.RouteEditor.setEditMode(false).
+state.editMode = true;
+
+function updateEditModeUi() {
+  const hint = document.getElementById('edit-mode-hint');
+  const button = document.getElementById('edit-mode-btn');
+  if (hint) {
+    hint.textContent = state.editMode
+      ? '🖱 Клік на карті — встановлює координати нової зупинки'
+      : '👀 Просмотр маршрута: клік по карті зупинки не додає';
+  }
+  if (button) {
+    button.textContent = state.editMode ? '✏️ редактор' : '👀 перегляд';
+    button.style.opacity = state.editMode ? '1' : '.6';
+  }
+}
+
+// Публичный мини-API для панели эмулятора (web/emulator.js).
+window.RouteEditor = {
+  setEditMode(on) {
+    state.editMode = !!on;
+    updateEditModeUi();
+  },
+  isEditMode() { return state.editMode; },
+};
+
+const editModeBtn = document.getElementById('edit-mode-btn');
+if (editModeBtn) {
+  editModeBtn.addEventListener('click', () => window.RouteEditor.setEditMode(!state.editMode));
+}
+updateEditModeUi();
+
 // ===== Map Click =====
 map.on('click', function (e) {
+  // Просмотр маршрута эмулятора: карта не должна добавлять остановки.
+  if (!state.editMode) return;
+
   const { lat, lng } = e.latlng;
   document.getElementById('stop-lat').value = lat.toFixed(6);
   document.getElementById('stop-lon').value = lng.toFixed(6);
@@ -928,7 +972,9 @@ async function loadRouteDataSet(type, num, dir, notify = false) {
 }
 
 // ===== Clear =====
-document.getElementById('clear-btn').addEventListener('click', () => {
+// id переименован (editor-clear-btn): на объединённой странице у панели
+// эмулятора есть своя кнопка #clear-btn («Очистити карту»).
+document.getElementById('editor-clear-btn').addEventListener('click', () => {
   if (!getCurrentStops().length) return;
   if (!confirm('Очистити всі зупинки поточного напрямку?')) return;
   const key = getRouteKey();

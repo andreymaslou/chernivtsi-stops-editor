@@ -4,7 +4,14 @@
  * Принцип: сторінка НЕ вважає маршрут сама — вона показує те, що порахував
  * сервер. Кнопка «🚩 Це бред» відправляє кейс у data/feedback, щоб потім
  * розібрати його без здогадок («що саме тоді повернув сервер»).
+ *
+ * Встраиваемость (web/editor.html): файл завёрнут в IIFE, потому что редактор
+ * и эмулятор делят глобальную область — два `const map`/`const state` в ней не
+ * уживаются (второй скрипт падал бы с SyntaxError). Карту берём общую:
+ * window.TRANSPORT_MAP публикует web/app.js; если её нет (отдельная страница
+ * /ui/emulator.html) — создаём свою, как раньше.
  */
+(function () {
 
 const EXAMPLES = [
   'Я на Соборці, треба на Гравітон',
@@ -38,11 +45,17 @@ const state = {
 // Карта
 // ---------------------------------------------------------------------------
 
-const map = L.map('map', { zoomControl: true }).setView([48.2921, 25.9358], 13);
-L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-  maxZoom: 19,
-  attribution: '© OpenStreetMap',
-}).addTo(map);
+// Карта: на объединённой странице берём инстанс редактора (один Leaflet на
+// #map), на отдельной странице создаём свой — вместе со слоем тайлов.
+const sharedMap = window.TRANSPORT_MAP;
+const map = sharedMap || L.map('map', { zoomControl: true }).setView([48.2921, 25.9358], 13);
+if (!sharedMap) window.map = map;
+if (!sharedMap) {
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '© OpenStreetMap',
+  }).addTo(map);
+}
 const layerGroup = L.layerGroup().addTo(map);
 
 // Слой живых ТС — отдельно от плана: маршрут можно перерисовать, а парк при
@@ -56,6 +69,20 @@ window.addEventListener('resize', () => map.invalidateSize());
 
 function clearLayers() {
   layerGroup.clearLayers();
+  // Карта снова свободна — редактору можно возвращать режим добавления
+  // остановок (на отдельной странице редактора нет, вызов ничего не делает).
+  setEditorEditMode(true);
+}
+
+/**
+ * Просмотр плана на объединённой странице: пока на карте маршрут или живой
+ * парк, редактор не должен добавлять остановки по клику. Если панель встроена
+ * в редактор (window.RouteEditor публикует web/app.js) — переключаем его режим.
+ */
+function setEditorEditMode(on) {
+  if (window.RouteEditor && typeof window.RouteEditor.setEditMode === 'function') {
+    window.RouteEditor.setEditMode(on);
+  }
 }
 
 function setStatus(text, kind) {
@@ -638,6 +665,10 @@ function walkBadge(point) {
 
 /** Основной режим: сервер посчитал маршрут (возможно, с пересадкой). */
 function renderPlan(plan) {
+  // Гасим режим добавления остановок: клики по карте теперь смотрят план
+  // (попапы машин, приближение участка), а не ставят новую точку.
+  setEditorEditMode(false);
+
   const bounds = [];
   const lines = [];
   state.lastPlan = plan;
@@ -969,5 +1000,11 @@ updateZoomState();
 
 renderChips();
 loadStops();
+
+// Публичный мини-API: отладка и UI-тесты (убедиться, что модуль загрузился и
+// получил карту — свою на /ui/emulator.html или общую на /ui/editor.html).
+window.Emulator = { map, clearLayers, clearVehicles, renderPlan };
+
+})(); // конец IIFE: внутренние имена не текут в глобальную область редактора
 
 

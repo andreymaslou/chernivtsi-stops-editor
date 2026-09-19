@@ -28,6 +28,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from openai import OpenAI
 from pydantic import BaseModel
@@ -1146,7 +1147,32 @@ def get_feedback(
 
 # Наружу открываем ТОЛЬКО папку web: в корне репозитория лежит .env, и монтаж
 # корня как статики выставил бы его в открытый доступ.
+#
+# Порядок монтажей важен: конкретные пути (/ui/scraped_data) регистрируем ДО
+# общего /ui — иначе их перехватит монтаж папки web (Starlette матчит префиксы
+# в порядке регистрации).
 WEB_DIR = BASE_DIR / "web"
+
+# Редактор маршрутов (web/editor.html) читает исходники EasyWay из
+# scraped_data/ и osm_stops.json. Оба лежат в корне (их пишут пайплайны
+# graph_layer / overpass_test.js), поэтому отдаём их точечно, а не корень целиком.
+SCRAPED_DIR = BASE_DIR / "scraped_data"
+if SCRAPED_DIR.is_dir():
+    app.mount("/ui/scraped_data", StaticFiles(directory=SCRAPED_DIR), name="scraped_data")
+else:
+    logger.warning("Папка %s не найдена — редактор не увидит исходники маршрутов", SCRAPED_DIR)
+
+OSM_STOPS_PATH = BASE_DIR / "osm_stops.json"
+
+
+@app.get("/ui/osm_stops.json", include_in_schema=False)
+def editor_osm_stops() -> FileResponse:
+    """Файл OSM-остановок для редактора (лежит в корне репозитория)."""
+    if not OSM_STOPS_PATH.is_file():
+        raise HTTPException(status_code=404, detail="osm_stops.json не найден")
+    return FileResponse(OSM_STOPS_PATH, media_type="application/json")
+
+
 if WEB_DIR.is_dir():
     app.mount("/ui", StaticFiles(directory=WEB_DIR, html=True), name="ui")
 else:

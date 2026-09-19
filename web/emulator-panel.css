@@ -1,0 +1,269 @@
+/* Панель эмулятора, встроенная в редактор маршрутов (web/editor.html).
+ *
+ * Почему отдельный файл, а не <style> из emulator.html: тот содержит
+ * глобальные правила (body{...}, button{...}, textarea{...}, .badge, .hidden),
+ * которые переопределили бы стили редактора (style.css). Поэтому:
+ *   * всё, что относится к ПАНЕЛИ, скоупим под #emu-panel;
+ *   * палитру выносим в --emu-* переменные, чтобы не спорить с переменными
+ *     редактора (--bg/--panel/--text у него свои);
+ *   * классы, которые живут в DOM КАРТЫ (маркеры, легенда, попапы, линии
+ *     плана), оставляем глобальными: имена уникальны, пересечений с
+ *     редактором нет (проверено: только .badge/.hidden, и те скоупированы).
+ *
+ * emulator.html (отдельная страница) продолжает жить на своём inline-CSS —
+ * этот файл его не заменяет.
+ */
+
+:root {
+  --emu-panel: #1e2126;
+  --emu-panel2: #262a31;
+  --emu-text: #e8eaed;
+  --emu-muted: #9aa0a6;
+  --emu-accent: #4f8cff;
+  --emu-danger: #ff5c5c;
+  --emu-ok: #43c463;
+}
+
+/* --- Панель: колонка справа поверх карты (родитель — .map-container,
+       у него в разметке position:relative) --- */
+#emu-panel {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 340px;
+  z-index: 1100;
+  box-sizing: border-box;
+  padding: 10px;
+  background: var(--emu-panel);
+  color: var(--emu-text);
+  border-left: 1px solid #000;
+  overflow-y: auto;
+  font: 13px/1.45 -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+#emu-panel.hidden { display: none !important; }
+#emu-panel .hidden { display: none !important; }
+
+#emu-panel .head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  font-weight: 600;
+}
+
+#emu-panel .head a { color: var(--emu-accent); text-decoration: none; font-size: 13px; font-weight: 500; }
+
+#emu-panel textarea {
+  width: 100%;
+  min-height: 58px;
+  resize: vertical;
+  background: var(--emu-panel2);
+  color: var(--emu-text);
+  border: 1px solid #333941;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font: inherit;
+}
+
+#emu-panel .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+
+#emu-panel .chip {
+  background: var(--emu-panel2);
+  border: 1px solid #333941;
+  border-radius: 14px;
+  padding: 3px 9px;
+  font-size: 12px;
+  color: var(--emu-muted);
+  cursor: pointer;
+}
+
+#emu-panel .row { display: flex; gap: 8px; flex-wrap: wrap; }
+
+#emu-panel button {
+  font: inherit;
+  border: 0;
+  border-radius: 8px;
+  padding: 9px 14px;
+  cursor: pointer;
+  background: var(--emu-accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+#emu-panel button.secondary { background: var(--emu-panel2); color: var(--emu-text); border: 1px solid #333941; }
+#emu-panel button.danger { background: var(--emu-danger); }
+#emu-panel button:disabled { opacity: .45; cursor: not-allowed; }
+
+#emu-panel .status { margin-top: 8px; font-size: 13px; color: var(--emu-muted); }
+#emu-panel .status.error { color: var(--emu-danger); }
+#emu-panel .status.ok { color: var(--emu-ok); }
+
+#emu-panel .answer {
+  margin-top: 8px;
+  background: var(--emu-panel2);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 14px;
+  display: none;
+  white-space: pre-wrap;
+}
+
+#emu-panel .badge { display: inline-block; padding: 1px 7px; border-radius: 10px; font-size: 12px; margin-right: 6px; }
+#emu-panel .badge.live { background: #1e4620; color: #9ae6a8; }
+#emu-panel .badge.plan { background: #3a3320; color: #ffd88a; }
+
+#emu-panel .toggle { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--emu-muted); }
+#emu-panel .toggle input { accent-color: var(--emu-accent); width: 16px; height: 16px; }
+
+#emu-panel input[type="datetime-local"] {
+  background: var(--emu-panel2);
+  color: var(--emu-text);
+  border: 1px solid #333941;
+  border-radius: 8px;
+  padding: 7px 8px;
+  font: inherit;
+  font-size: 13px;
+}
+
+/* Цифра кроку в текстовій панелі (той самий колір, що й бейдж на карті) */
+#emu-panel .step-dot {
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  color: #fff;
+  text-align: center;
+  cursor: pointer;
+  font: 700 12px/18px -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+@media (max-width: 760px) {
+  #emu-panel {
+    top: auto;
+    left: 0;
+    width: auto;
+    height: 45vh;
+    border-left: 0;
+    border-top: 1px solid #000;
+  }
+}
+
+/* --- Стили, живущие в DOM КАРТЫ (внутри #map, не в панели) -----------------
+ * Имена классов уникальны в проекте, поэтому оставлены глобальными.
+ * Приходят из <style> emulator.html без изменений, кроме переменных палитры.
+ */
+
+/* Маркер ТС: вся вёрстка стрелки — в vehicleIcon() (web/emulator.js),
+   здесь только состояния: live / planned / stopped / target. */
+.veh-marker { background: none; border: none; }
+.veh-marker.is-target { z-index: 1000 !important; }
+
+.veh-wrap { width: 36px; height: 36px; transition: opacity .3s ease, filter .3s ease, transform .25s ease; opacity: 1; }
+.veh-wrap svg { filter: drop-shadow(0 2px 3px rgba(0, 0, 0, .45)); }
+
+/* За розкладом — приглушённо и чуть серо */
+.veh-wrap.planned { opacity: .6; filter: grayscale(40%); }
+
+/* Зупинено (speed_kmh < 3): стрілку ховаємо, обводку пульсуємо. */
+.veh-wrap.stopped .veh-arrow { display: none; }
+@keyframes emu-pulse-stopped {
+  0% { stroke-width: 2.5; }
+  50% { stroke-width: 5; filter: brightness(1.3); }
+  100% { stroke-width: 2.5; }
+}
+.veh-wrap.stopped circle { animation: emu-pulse-stopped 2s infinite ease-in-out; }
+
+/* Ціль плана: золоте пульсування + лёгкий рост */
+@keyframes emu-pulse-target {
+  0% { filter: drop-shadow(0 0 2px #ffd700); transform: scale(1); }
+  50% { filter: drop-shadow(0 0 12px #ffd700); transform: scale(1.15); }
+  100% { filter: drop-shadow(0 0 2px #ffd700); transform: scale(1); }
+}
+.veh-wrap.target svg { animation: emu-pulse-target 1.5s infinite ease-in-out; }
+
+/* Розвантаження при віддаленні: маркер стискається в крапку.
+   Трансформація — саме на .veh-wrap (36 px): якір Leaflet і popupAnchor
+   вважаються від неї, тому точка не з'їжджає з координати. */
+body.zoom-out .veh-wrap { transform: scale(0.65); }
+body.zoom-out .veh-wrap text { display: none; }
+body.zoom-out .veh-arrow-group { display: none; }
+
+/* Попап машини (попапи Leaflet світлі — верстка під світлу тему) */
+.veh-popup-head {
+  border-bottom: 1px solid #ddd;
+  padding-bottom: 6px;
+  margin-bottom: 6px;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.veh-popup-body { font-size: 13px; line-height: 1.5; color: #333; }
+
+.veh-popup-age, .veh-popup-progress { color: #666; font-size: 12px; margin-top: 4px; }
+
+/* План маршруту на карті: хвости, шеврони, бейджі кроків, фініш, пішки */
+.plan-stop, .plan-arrow, .plan-step-wrap, .plan-finish-wrap, .plan-walk-wrap {
+  background: none;
+  border: none;
+}
+
+.plan-stop-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2.5px solid var(--route-colour, #4f8cff);
+  display: block;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .45);
+}
+
+.plan-arrow-icon { display: flex; align-items: center; justify-content: center; width: 14px; height: 14px; }
+.plan-arrow-icon svg { width: 12px; height: 12px; filter: drop-shadow(0 1px 2px rgba(0, 0, 0, .7)); }
+
+.plan-step {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 2px solid #fff;
+  color: #fff;
+  text-align: center;
+  font: 700 15px/26px -apple-system, "Segoe UI", Roboto, sans-serif;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, .45);
+  animation: emu-pulse-step 1.6s infinite ease-in-out;
+}
+
+@keyframes emu-pulse-step {
+  0% { transform: scale(1); box-shadow: 0 2px 6px rgba(0, 0, 0, .45); }
+  50% { transform: scale(1.18); box-shadow: 0 0 14px rgba(255, 255, 255, .8); }
+  100% { transform: scale(1); box-shadow: 0 2px 6px rgba(0, 0, 0, .45); }
+}
+
+.plan-finish { font-size: 22px; line-height: 24px; filter: drop-shadow(0 1px 2px rgba(0, 0, 0, .5)); }
+.plan-walk-icon { font-size: 16px; line-height: 20px; text-align: center; }
+
+/* Легенда карти: темна напівпрозора панелька в правому нижньому куті */
+.map-legend {
+  background: rgba(30, 33, 38, 0.85);
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid #333941;
+  font-size: 12px;
+  color: var(--emu-text);
+  line-height: 1.6;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, .4);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+
+.map-legend .legend-row { display: flex; align-items: center; gap: 8px; }
+.map-legend .legend-icon { width: 14px; text-align: center; font-size: 14px; }
+
+/* Пульсації — лише якщо користувач не просив їх вимкнути */
+@media (prefers-reduced-motion: reduce) {
+  .plan-step { animation: none; }
+  .veh-wrap.stopped circle { animation: none; }
+  .veh-wrap.target svg { animation: none; }
+}
