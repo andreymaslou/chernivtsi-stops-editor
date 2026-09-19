@@ -185,16 +185,18 @@ def test_ride_path_contains_all_intermediate_stops(router, now):
 
     leg = router._transit_leg(route_key, [board, alight], now)
 
-    # З OSRM-геометрією шлях будується через stop_coord_indices,
-    # тому очікуваний зріз теж рахуємо через них.
+    # Геометрия маршрута — прямая между остановками, но path всё равно
+    # обязан быть НЕПРЕРЫВНЫМ срезом цепочки: все промежуточные остановки
+    # на месте (старый баг — в path оставались только посадка и высадка).
+    # Через stop_indices, чтобы тест пережил и возврат расширенной геометрии.
     stop_indices = router.route_stop_indices.get(route_key, list(range(len(router.route_coords[route_key]))))
     coord_first = stop_indices[pos_first] if pos_first < len(stop_indices) else pos_first
     coord_last = stop_indices[pos_last] if pos_last < len(stop_indices) else pos_last
     expected = [list(point) for point in router.route_coords[route_key][coord_first:coord_last + 1]]
 
     assert leg["path"] == expected
-    assert len(leg["path"]) > pos_last - pos_first + 1 > 2, (
-        "path повинен містити OSRM-точки між зупинками (більше ніж просто зупинки)"
+    assert len(leg["path"]) >= pos_last - pos_first + 1 > 2, (
+        "path обязан содержать все промежуточные остановки ноги"
     )
     assert leg["travel_min"] > 0
 
@@ -439,15 +441,15 @@ def test_heading_filter_rejects_opposite_vehicle(data, now):
 
 
 def test_live_snap_stays_in_stop_index_space(data, now):
-    """Регресія OSRM-геометрії: прив'язка машини рахується в просторі ЗУПИНОК.
+    """Прив'язка машини рахується в просторі ЗУПИНОК (регресія «вічний None»).
 
-    `route_coords` після OSRM розширений формою доріг (сотні точок), а `board_pos`,
-    `route_prefix`, `route_bearings` і `route_segment_m` — індекси зупинок
-    (довжина == len(chain)). Коли цикл прив'язки ітерував по точках геометрії,
-    `best_idx` ~200 порівнювався з `board_pos` ~12, кожна машина відкидалась як
-    «та, що вже проїхала нашу зупинку», `live_bus` ставав вічно None — і золотий
-    бейдж «ваша посадка» нікому було підсвічувати. Прив'язка має йти по
-    `route_stop_indices`, тоді `best_idx` — знову індекс зупинки.
+    `board_pos`, `route_prefix`, `route_bearings` і `route_segment_m` живуть в
+    індексах ЗУПИНОК (довжина == len(chain)). Коли цикл прив'язки ітерував по
+    точках розширеної геометрії, `best_idx` був індексом точки геометрії й
+    порівнювався з `board_pos` зупинки — кожна машина відкидалась як «та, що
+    вже проїхала нашу зупинку», `live_bus` ставав вічно None, і золотий бейдж
+    «ваша посадка» нікому було підсвічувати. З прямою геометрією простори
+    збігаються, але інваріант `route_stop_indices` тримаємо явно.
     """
     graph, schedule, stops = data
     router = TransitRouter(graph, schedule, stops=stops, assume_in_service=True)
@@ -457,8 +459,15 @@ def test_live_snap_stays_in_stop_index_space(data, now):
     coords = router.route_coords[route_key]
     stop_indices = router.route_stop_indices.get(
         route_key, list(range(len(coords))))
-    # Інакше простори збігаються — і цей тест регресію не піймає.
-    assert len(coords) > len(chain) * 2, "граф без OSRM-розширення геометрії"
+    # Інваріант просторів: route_stop_indices переводить індекси зупинок у
+    # індекси route_coords. Пряма геометрія дає тотожність; якщо геометрію
+    # колись знову розширять — мапінг мусить лишитись тієї ж довжини й
+    # строго зростаючим, інакше прив'язка машин знову поїде.
+    assert len(stop_indices) == len(chain), "route_stop_indices не покриває ланцюжок"
+    assert stop_indices == sorted(stop_indices), "route_stop_indices не зростає"
+    if len(coords) == len(chain):
+        assert stop_indices == list(range(len(chain))), (
+            "пряма геометрія: індекси зупинок мають бути тотожні")
 
     behind = len(chain) // 2 - 1               # зупинка посередині ланцюжка
     board_node = chain[behind + 2]

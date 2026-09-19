@@ -113,7 +113,9 @@ class TransitRouter:
             self.route_prefix[key] = prefix
 
             # --- route_coords: розгортаємо shape-точки сегментів ---
-            # Якщо в сегменті є OSRM-геометрія (shape), беремо її.
+            # shape сегмента — пряма між двумя остановками (OSRM вимкнено),
+            # тому coords зазвичай == зупинки ланцюжка. Код лишається загальним:
+            # якщо геометрію знову розширять, розгортання працює так само.
             # Перша точка кожного наступного сегмента = остання попереднього,
             # тому дубль не додаємо (overlap=1).
             segments = route.get("segments", [])
@@ -471,7 +473,7 @@ class TransitRouter:
         маємо права відкидати машину: тоді повертаємо True і працює старий
         геометричний підбір.
         """
-        # index — індекс ЗУПИНКИ в ланцюжку (не точки OSRM-геометрії), тому
+        # index — індекс ЗУПИНКИ в ланцюжку (не точки route_coords), тому
         # наступний вузол ланцюжка беремо через stop_indices.
         if index + 1 >= len(stop_indices) or index >= len(bearings):
             return True
@@ -760,7 +762,8 @@ class TransitRouter:
         # розгортаємо ногу в повну ланцюжок зупинок маршруту між ними —
         # інакше emulator.js малює хорду крізь пів міста замість маршруту
         # (координати вже пораховані: route_coords у тому ж порядку).
-        # Переводимо індекси зупинок у індекси route_coords (може бути більше точок через OSRM-shape)
+        # Переводимо індекси зупинок у індекси route_coords (з прямою
+        # геометрією це тотожність, але мапінг лишаємо загальним).
         stop_indices = self.route_stop_indices.get(route_key, list(range(len(self.route_coords[route_key]))))
         coord_first = stop_indices[pos_first] if pos_first < len(stop_indices) else pos_first
         coord_last = stop_indices[pos_last] if pos_last < len(stop_indices) else pos_last
@@ -778,10 +781,9 @@ class TransitRouter:
         full_geom = [[lat, lon] for lat, lon in self.route_coords[route_key]]
 
         # Проміжні зупинки ноги (між посадкою та висадкою, виключно) — окремим
-        # масивом координат. path тепер — це OSRM-геометрія з сотнями точок
-        # форми дороги, тож крапка на кожній точці дала б «пил» на карті замість
-        # маршруту. Крапки малюються лише за координатами реальних зупинок
-        # (вони вже пораховані в route_coords, а їхні індекси — у stop_indices).
+        # масивом координат. Крапки малюються лише за координатами РЕАЛЬНИХ
+        # зупинок, а не за точками геометрії: якщо геометрію колись знову
+        # розширять (форма доріг), крапка на кожній точці дала б «пил» на карті.
         leg_coords = self.route_coords[route_key]
         stops: List[List[float]] = []
         for position in range(pos_first + 1, pos_last):
@@ -1044,13 +1046,13 @@ class TransitRouter:
                 # точки — ответ не меняется.
                 lat_window = MAX_LIVE_SNAP_METERS / 111320.0
                 lon_window = lat_window / max(0.2, math.cos(math.radians(vlat)))
-                # Прив'язка йде до ЗУПИНОК ланцюжка, а не до точок OSRM-геометрії:
+                # Прив'язка йде до ЗУПИНОК ланцюжка, а не до точок route_coords:
                 # board_pos, route_prefix, route_bearings і route_segment_m живуть
-                # у просторі зупинок (довжина == len(chain)), тоді як coords після
-                # OSRM розширений формою доріг (сотні точок). Індекс найближчої
-                # ЗУПИНКИ — це і є best_idx (як і було до OSRM, коли coords == stops),
-                # тільки тоді коректні й порівняння з board_pos, і зрізи prefix/
-                # bearings/segments нижче.
+                # у просторі зупинок (довжина == len(chain)). З прямою геометрією
+                # coords == зупинки і простори збігаються, але мапінг через
+                # stop_indices лишаємо: він коректний за будь-якої геометрії —
+                # тільки тоді працюють і порівняння з board_pos, і зрізи
+                # prefix/bearings/segments нижче.
                 stop_indices = self.route_stop_indices.get(
                     route_key, list(range(len(coords)))
                 )

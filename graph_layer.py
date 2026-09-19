@@ -19,6 +19,8 @@
                  для пассажира, ради неё и сливаем.
     routes     — маршрут + направление: порядок узлов, сегменты с длиной
                  и временем хода, итоговая длина и время «туда».
+                 shape сегмента — ПРЯМАЯ между остановками (геометрия дорог
+                 не запрашивается: см. «Важные решения» ниже).
     transfers  — узлы, между которыми можно перейти пешком
                  (<= TRANSFER_MAX_METERS), с временем перехода.
     index      — обратные ссылки: какие маршруты проходят через узел.
@@ -36,14 +38,17 @@
       (гаверсинус × DETOUR_FACTOR) / COMMERCIAL_SPEED_KMH + выдержка
       на остановке DWELL_SECONDS. Коэффициенты вынесены в параметры,
       чтобы позже подставить измеренные по GPS значения.
+    * Геометрия сегмента — прямая между остановками (две точки). Внешняя
+      служба (OSRM) не нужна: сборка графа не ходит в сеть, результат
+      детерминирован, а петли/чужие улицы невозможны по построению.
+      Длину и время это не меняет — они и раньше считались по прямой
+      с DETOUR_FACTOR, а форма дороги использовалась только для рисования.
 """
 
 import json
 import logging
 import math
 import re
-import time
-import urllib.request
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
@@ -78,12 +83,10 @@ WALK_SPEED_KMH = 4.5
 # Радиус привязки узла графа к канонической остановке из stops.json.
 STOP_ID_MATCH_METERS = 60.0
 
-# OSRM public API для получения геометрии дороги между остановками.
-# Можно заменить на локальный OSRM: "http://localhost:5000"
-OSRM_BASE_URL = "http://router.project-osrm.org"
-
-# Пауза между OSRM-запросами (публичный сервер — не флудим).
-OSRM_REQUEST_DELAY_S = 0.15
+# Геометрия сегмента — ПРЯМАЯ между остановками (координаты EasyWay из
+# scraped_data/, ровно как их рисует редактор маршрутов app.js). OSRM-форму
+# дорог убрали: петли и «левые улицы» не стоят усложнения, а прямые линии
+# пользователя полностью устраивают (см. docs/STATUS.md, п. 19).
 
 # Шаг пространственной сетки: 0.002° ≈ 220 м по широте — при обходе 3×3
 # клеток это ~440 м, с запасом покрывает и слияние, и пересадки.
@@ -486,83 +489,8 @@ def attach_stop_ids(
 # Построение графа
 # ---------------------------------------------------------------------------
 
-def fetch_osrm_shapes(
-    segments_info: List[Dict[str, Any]],
-    nodes: List[Dict[str, Any]],
-    cache_path: Optional[Path] = None,
-) -> Dict[str, List[List[float]]]:
-    """
-    Для каждого уникального сегмента (from_node, to_node) запрашивает
-    у OSRM реальную геометрию дороги.
-
-    Возвращает dict: "<from>-<to>" -> [[lat, lon], ...]
-    Результаты кешируются на диск (cache_path), чтобы при повторном
-    rebuild не делать лишних HTTP-запросов.
-    """
-    # --- Загрузить кеш ---
-    cache: Dict[str, List[List[float]]] = {}
-    if cache_path and cache_path.exists():
-        try:
-            cache = json.loads(cache_path.read_text(encoding="utf-8"))
-            logger.info("OSRM-кеш загружен: %d сегментов", len(cache))
-        except Exception:
-            cache = {}
-
-    node_map = {n["node_id"]: n for n in nodes}
-    result: Dict[str, List[List[float]]] = {}
-    new_fetches = 0
-
-    for seg in segments_info:
-        key = f"{seg['from']}-{seg['to']}"
-        if key in cache:
-            result[key] = cache[key]
-            continue
-
-        a = node_map.get(seg["from"])
-        b = node_map.get(seg["to"])
-        if not a or not b:
-            result[key] = [[a["lat"], a["lon"]], [b["lat"], b["lon"]]] if a and b else []
-            continue
-
-        # Прямая линия — fallback
-        fallback = [[a["lat"], a["lon"]], [b["lat"], b["lon"]]]
-
-        try:
-            url = (
-                f"{OSRM_BASE_URL}/route/v1/driving/"
-                f"{a['lon']},{a['lat']};{b['lon']},{b['lat']}"
-                f"?overview=full&geometries=geojson"
-            )
-            req = urllib.request.Request(url, headers={"User-Agent": "chernivtsi-transit-graph/1.0"})
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-
-            coords = data["routes"][0]["geometry"]["coordinates"]  # [[lon, lat], ...]
-            shape = [[lat, lon] for lon, lat in coords]
-            result[key] = shape
-            cache[key] = shape
-            new_fetches += 1
-
-            if new_fetches % 50 == 0:
-                logger.info("OSRM: загружено %d новых сегментов...", new_fetches)
-
-            time.sleep(OSRM_REQUEST_DELAY_S)
-
-        except Exception as exc:
-            logger.warning("OSRM ошибка для %s: %s — используем прямую линию", key, exc)
-            result[key] = fallback
-            cache[key] = fallback
-
-    # --- Сохранить кеш ---
-    if cache_path and new_fetches > 0:
-        try:
-            cache_path.parent.mkdir(parents=True, exist_ok=True)
-            cache_path.write_text(json.dumps(cache, ensure_ascii=False), encoding="utf-8")
-            logger.info("OSRM-кеш сохранён: %d сегментов (%d новых)", len(cache), new_fetches)
-        except Exception as exc:
-            logger.warning("Не удалось сохранить OSRM-кеш: %s", exc)
-
-    return result
+# fetch_osrm_shapes() удалена вместе с OSRM: геометрия сегмента — прямая между
+# остановками (см. build_graph). Кеш data/osrm_cache.json больше не создаётся.
 
 
 def segment_minutes(meters: float) -> float:
@@ -765,30 +693,20 @@ def build_graph(
             "live_route_name": None,
         }
 
-    # --- OSRM: получить геометрию дороги для каждого сегмента ---
-    all_segments = [seg for route in routes.values() for seg in route["segments"]]
-    # Дедупликация: каждый уникальный from-to запрашиваем один раз
-    seen: set = set()
-    unique_segments = []
-    for seg in all_segments:
-        k = (seg["from"], seg["to"])
-        if k not in seen:
-            seen.add(k)
-            unique_segments.append(seg)
-
-    logger.info("OSRM: запрашиваем геометрию для %d уникальных сегментов...", len(unique_segments))
-    base_dir = Path(__file__).resolve().parent
-    shapes = fetch_osrm_shapes(
-        unique_segments,
-        list(nodes),
-        cache_path=base_dir / "data" / "osrm_cache.json",
-    )
-
-    # Записываем shape в каждый сегмент
+    # --- Геометрия сегмента: прямая между остановками ---
+    # Раньше здесь запрашивалась форма дорог у OSRM (кеш — data/osrm_cache.json).
+    # Отказались: линии рисуются ровно как в редакторе маршрутов (app.js) —
+    # [[lat, lon], [lat, lon]] по координатам EasyWay. Никакой сети, никаких
+    # петель и «левых улиц»; длина/время сегмента как и раньше считаются по
+    # прямой с DETOUR_FACTOR, так что модель времени не изменилась.
     for route in routes.values():
         for seg in route["segments"]:
-            seg_key = f"{seg['from']}-{seg['to']}"
-            seg["shape"] = shapes.get(seg_key, [])
+            left_node = nodes[seg["from"]]
+            right_node = nodes[seg["to"]]
+            seg["shape"] = [
+                [left_node["lat"], left_node["lon"]],
+                [right_node["lat"], right_node["lon"]],
+            ]
 
     # Обратный индекс: через какие маршруты проходит узел.
     for key, route in routes.items():
