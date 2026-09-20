@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from openai import OpenAI
@@ -609,6 +609,24 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+
+
+@app.middleware("http")
+async def ui_static_no_cache(request: Request, call_next):
+    """Статика /ui/* — заставляем браузер ревалидировать, а не отдавать кэш.
+
+    Зачем: после деплоя адаптива телефон продолжал рисовать СТАРЫЙ CSS (панель
+    45vh, схлопнутая карта), хотя сервер уже отдавал новый файл — проверяли
+    curl-ом. Причина: Chrome закэшировал style.css без версии в URL.
+    `no-cache` не запрещает кэш, а требует ревалидацию: файл берётся из кэша
+    только при совпадении ETag/Last-Modified, поэтому после сборки сразу
+    прилетает свежий. В HTML к этому добавлены ?v=... у css/js (см.
+    web/editor.html — их нужно поднимать при правках этих файлов).
+    """
+    response = await call_next(request)
+    if request.url.path.startswith("/ui/"):
+        response.headers["Cache-Control"] = "no-cache, must-revalidate"
+    return response
 
 
 # ---------------------------------------------------------------------------
