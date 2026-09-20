@@ -194,8 +194,11 @@ A/B ≈ 235 → 150 мс (со счётчиками) и haversine 33 168 → 133
    игнорирует сам движок карты. Слушать `.leaflet-container` в UI-тесте бессмысленно —
    клик туда долетит. Проверяйте поведение: `map.on('click')` и `map.getCenter()` до/после
    драга (обязательно с контрольным измерением мимо легенды, иначе тест ничего не
-   доказывает). Карта доступна из `page.evaluate()` по имени `map` — это `const` верхнего
-   уровня в классическом скрипте, а не свойство `window`.
+   доказывает). Карта из `page.evaluate()`: на автономной `/ui/emulator.html` —
+   по имени `map` (эмулятор публикует `window.map`, т.к. сам он в IIFE), на
+   объединённой `/ui/editor.html` — `window.Emulator.map` (или
+   `window.TRANSPORT_MAP`, публикует `web/app.js`). Голого `const map` верхнего
+   уровня больше нет: `web/emulator.js` завёрнут в IIFE (см. п. 20).
 9. Легенда живёт в `web/emulator.html` (`.map-legend`, `.legend-row`, `.legend-icon`),
    разметка — в `LEGEND_ROWS` + `legendIconStyle()` в `web/emulator.js`. Меняете
    подписи/цвета — правьте `LEGEND_ROWS`, а не HTML, иначе UI-тест разойдётся с кодом.
