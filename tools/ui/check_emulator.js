@@ -849,6 +849,22 @@ const probe = () => ({
     });
     check('кнопка «Редактор» відкриває верхню шторку',
       editorSheet.visible && editorSheet.scrim, 'top ' + editorSheet.top);
+
+    // Шторка має бути НАД затемненням: інакше вона видима, але «неактивна» —
+    // усі кліки/тапи ловить .sheet-scrim (z-index 1240), а базовий z-index
+    // панелі емулятора 1100 (у .drawer 1245 — тому верхня працювала).
+    const drawerHit = await page.evaluate((id) => {
+      const el = document.getElementById(id);
+      const r = el.getBoundingClientRect();
+      const target = document.elementFromPoint(
+        Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2));
+      return {
+        target: target ? (target.id || String(target.className) || target.tagName) : null,
+        inside: !!(target && el.contains(target)),
+      };
+    }, 'drawer-editor');
+    check('верхня шторка ловить кліки (а не затемнення)', drawerHit.inside,
+      'у центрі шторки лежить: ' + drawerHit.target);
     await page.screenshot({ path: path.join(OUT, 'mobile-sheet-editor.png') });
     report.shots.push('mobile-sheet-editor.png');
 
@@ -868,6 +884,45 @@ const probe = () => ({
       emuSheet.visible && emuSheet.bottom >= layout.vh - 2, 'bottom ' + emuSheet.bottom);
     check('одночасно відкрита лише одна шторка', emuSheet.editorBottom <= 0,
       'редактор bottom ' + emuSheet.editorBottom);
+
+    // Та сама перевірка для нижньої шторки + «живий» тест: у поле запиту
+    // всередині шторки мусить доходити ввід (без звернення до AI — Enter не тиснемо).
+    const emuHit = await page.evaluate((id) => {
+      const el = document.getElementById(id);
+      const inside = (target) => !!(target && el.contains(target));
+      const r = el.getBoundingClientRect();
+      const target = document.elementFromPoint(
+        Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2));
+      const field = document.getElementById('ask-text');
+      const f = field.getBoundingClientRect();
+      const fieldTarget = document.elementFromPoint(
+        Math.round(f.left + f.width / 2), Math.round(f.top + f.height / 2));
+      return {
+        target: target ? (target.id || String(target.className) || target.tagName) : null,
+        inside: inside(target),
+        fieldInside: inside(fieldTarget),
+      };
+    }, 'emu-panel');
+    check('нижня шторка ловить кліки (а не затемнення)',
+      emuHit.inside && emuHit.fieldInside,
+      'у центрі шторки: ' + emuHit.target + ', над полем запиту: ' + emuHit.fieldInside);
+
+    await page.click('#ask-text');
+    await page.type('#ask-text', '!');
+    await sleep(200);
+    const typed = await page.evaluate(() => {
+      const field = document.getElementById('ask-text');
+      return {
+        endsWithBang: field.value.endsWith('!'),
+        focused: document.activeElement && document.activeElement.id,
+        open: document.getElementById('emu-panel').classList.contains('open'),
+      };
+    });
+    check('поле запиту в шторці приймає ввід і шторка не закривається',
+      typed.endsWithBang && typed.focused === 'ask-text' && typed.open,
+      'текст закінчується «!»: ' + typed.endsWithBang + ', фокус: ' + typed.focused +
+      ', шторка відкрита: ' + typed.open);
+
     await page.screenshot({ path: path.join(OUT, 'mobile-sheet-emu.png') });
     report.shots.push('mobile-sheet-emu.png');
 

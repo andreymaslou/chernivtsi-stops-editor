@@ -760,7 +760,9 @@ input[type=number] {
  * анімація і не ламаються UI-перевірки, які міряють елементи панелі на 390px
  * (tools/ui/check_emulator.js, п.6: getBoundingClientRect дає ненульову ширину). */
 @media (max-width: 760px) {
-  /* Карта — база: fixed на весь вьюпорт, у неї нічого не «відгризають» */
+  /* Обгортка — «сцена» під шторки: сама вона не скролиться, а тільки тримає
+     карту на весь вьюпорт. `position: relative` (без z-index) — щоб
+     `.map-container` з absolute рахувався від неї й не створював контекстів. */
   .app {
     display: block;
     position: relative;
@@ -769,10 +771,17 @@ input[type=number] {
     overflow: hidden;
   }
 
+  /* Карта — база: на весь вьюпорт, у неї нічого не «відгризають».
+     ⚠️ Саме `absolute` і БЕЗ `z-index`: `position: fixed` (як і будь-який
+     ненульовий/auto-значення, що створює stacking context) замикає всіх
+     нащадків у власному контексті. А в нащадках лежить нижня шторка
+     (`#emu-panel`), тому її `z-index: 1250` рахувався б усередині контексту
+     карти (z-index 0) — і шторка лишалася ПІД затемненням `.sheet-scrim`
+     (1240): видно, але неактивно (тапи ловить скрим). `absolute` з
+     `z-index: auto` контексту не створює, тож 1250 справді піднімає шторку. */
   .map-container {
-    position: fixed;
+    position: absolute;
     inset: 0;
-    z-index: 0;
   }
 
   #map {
