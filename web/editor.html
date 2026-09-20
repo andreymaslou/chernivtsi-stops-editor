@@ -15,24 +15,10 @@
   <!-- Панель эмулятора: стили скоупированы под #emu-panel (см. файл), чтобы
        не переопределять разметку/цвета редактора. -->
   <link rel="stylesheet" href="emulator-panel.css" />
-  <script>
-    (function () {
-      var valid = false;
-      while (!valid) {
-        var p = prompt('Введіть пароль для доступу:');
-        if (p === null) {
-          document.documentElement.innerHTML = '<h2 style="color:white; font-family:sans-serif; text-align:center; margin-top:50px;">Доступ заборонено</h2>';
-          window.stop();
-          break;
-        }
-        if (btoa(p) === 'MTUyMDE1MjA=') {
-          valid = true;
-        } else {
-          alert('Пароль не вірний, введіть ще раз!');
-        }
-      }
-    })();
-  </script>
+  <!-- Шторка-пароль (`prompt` + `btoa`) убрана: она не защищала (пароль виден
+       в исходнике страницы), но блокировала отрисовку до ответа на промпт и
+       требовала `page.on('dialog', … accept(...))` в UI-тестах. Реальная защита
+       при передаче стенда в прод — `auth_basic` в nginx (deploy/README_HTTPS.md). -->
 </head>
 
 <body>
