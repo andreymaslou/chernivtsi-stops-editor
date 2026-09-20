@@ -21,7 +21,8 @@
  *   6. попап машини: структура, світлий бейдж, екранування зовнішніх рядків;
  *   7. розвантаження при віддаленні: zoom < 13 — крапки без номера й стрілки,
  *      zoom >= 13 — повний маркер, і крапка не з'їжджає з координати;
- *   8. на 390 px: контроли парка видны, легенда влезает в экран, а на
+ *   8. на 390 px: контроли парка видны, легенда влезает в экран, нижняя полоса
+ *      (подсказка о клике / легенда / кнопка «Емулятор») не перекрывается, а на
  *      /ui/editor.html ещё и адаптив — карта на весь экран, панели открываются
  *      шторками (сверху редактор, снизу эмулятор).
  *
@@ -756,6 +757,50 @@ const probe = () => ({
   check('на 390 px контроли парка видны', mobile.visible, 'ширина ' + Math.round(mobile.width) + 'px');
   check('на 390 px легенда в межах екрана', mobile.legendFits,
     'ширина легенди ' + mobile.legendWidth + 'px з 390px');
+
+  // Нижня смуга екрана: підказка про клік (.map-hint), легенда карти
+  // (.map-legend) і кнопка «🤖 Емулятор» ділять один кут. Правила підйому
+  // легенди — mobile-блок у emulator-panel.css, підказки — у style.css.
+  const bottomBand = await page.evaluate(() => {
+    const box = (sel) => {
+      const el = document.querySelector(sel);
+      if (!el) return null;
+      const r = el.getBoundingClientRect();
+      return {
+        left: Math.round(r.left), right: Math.round(r.right),
+        top: Math.round(r.top), bottom: Math.round(r.bottom),
+      };
+    };
+    const hit = (a, b) => !!a && !!b &&
+      a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+    const hint = box('.map-hint');
+    const legend = box('.map-legend');
+    const fab = box('#sheet-toggle-emu');
+    return {
+      hint, legend, fab,
+      hintInsideScreen: !!hint && hint.left >= 0 && hint.right <= window.innerWidth &&
+        hint.top >= 0 && hint.bottom <= window.innerHeight,
+      hintVsLegend: hit(hint, legend),
+      hintVsFab: hit(hint, fab),
+      legendVsFab: hit(legend, fab),
+    };
+  });
+  if (bottomBand.hint && bottomBand.legend) {
+    check('на 390 px підказка не налазить на легенду', !bottomBand.hintVsLegend,
+      'підказка ' + JSON.stringify(bottomBand.hint) + ', легенда ' + JSON.stringify(bottomBand.legend));
+    check('на 390 px підказка в межах екрана', bottomBand.hintInsideScreen,
+      JSON.stringify(bottomBand.hint));
+  } else {
+    console.log('        (підказка про клік: пропущено — на цій сторінці немає .map-hint)');
+  }
+  if (bottomBand.fab && bottomBand.hint) {
+    check('на 390 px кнопка емулятора не налазить на підказку', !bottomBand.hintVsFab,
+      'кнопка ' + JSON.stringify(bottomBand.fab) + ', підказка ' + JSON.stringify(bottomBand.hint));
+  }
+  if (bottomBand.fab && bottomBand.legend) {
+    check('на 390 px кнопка емулятора не налазить на легенду', !bottomBand.legendVsFab,
+      'кнопка ' + JSON.stringify(bottomBand.fab) + ', легенда ' + JSON.stringify(bottomBand.legend));
+  }
 
   // --- 6.1 Адаптив объединённой страницы: карта + шторки -------------------
   // Шторки есть только на /ui/editor.html (на отдельной /ui/emulator.html нет

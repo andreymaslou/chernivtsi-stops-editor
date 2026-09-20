@@ -895,9 +895,15 @@ input[type=number] {
     pointer-events: none;
   }
 
-  /* Справа вгорі — там, де немає штатного zoom-контролу Leaflet (він зліва) */
-  .sheet-fab-top { top: 8px; right: 8px; }
-  .sheet-fab-bottom { bottom: 10px; left: 10px; }
+  /* Справа вгорі — там, де немає штатного zoom-контролу Leaflet (він зліва).
+     `max(…, env(safe-area-inset-*))` — щоб на iPhone кнопки не уїжджали під
+     «брову» та смужку-індикатор; перша строка — фолбэк для браузерів без env(). */
+  .sheet-fab-top { top: 8px; top: max(8px, env(safe-area-inset-top)); right: 8px; }
+  .sheet-fab-bottom {
+    bottom: 10px;
+    bottom: max(10px, env(safe-area-inset-bottom));
+    left: 10px;
+  }
   .sheet-fab[aria-expanded="true"] { border-color: var(--accent); color: var(--accent-light); }
 
   /* --- Затемнення під відкритою шторкою --- */
@@ -917,14 +923,43 @@ input[type=number] {
     pointer-events: auto;
   }
 
-  /* Підказка про клік на телефоні в один рядок не влазить і заважала б кнопці
-     емулятора — підіймаємо її та дозволяємо перенос. */
+  /* Підказка про клік. Тут зійшлися два граблі:
+       * `left: 50%` без ширини затискав бокс у 189px — рівно стільки лишається
+         від середини контейнера до його краю (абсолютний елемент = shrink-to-fit),
+         тому текст ламався на три рядки й обрізався («встан… зуп… редак»);
+       * легенда карти (`.map-legend` у emulator-panel.css) малюється зверху й
+         накривала ці рядки.
+     Тепер підказка тягнеться по ширині екрана (left+right замість transform) і
+     сидить у нижній смузі НАД кнопкою емулятора, а легенду піднято над нею
+     (mobile-правило `.map-legend` у emulator-panel.css). */
   .map-hint {
-    bottom: 54px;
-    max-width: calc(100vw - 24px);
-    padding: 6px 12px;
+    left: 12px;
+    right: 12px;
+    transform: none;
+    bottom: 52px;
+    bottom: calc(52px + env(safe-area-inset-bottom));
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 6px 10px;
     font-size: 11px;
+    line-height: 1.35;
     white-space: normal;
     text-align: center;
+  }
+
+  /* Кнопка режиму в підказці: на десктопі це квадрат 30×30 з підписом
+     «✏️ редактор», що вилазить за його межі (на широкій пілюлі виглядало як
+     частина тексту). У flex таке «вилиття» наїхало б на текст, тому на телефоні
+     кнопка стає звичайною пілюлею по ширині підпису й не переноситься окремим
+     рядком (інакше підказка виростала з 42px до 59px). */
+  .map-hint .btn-icon {
+    flex: 0 0 auto;
+    width: auto;
+    height: 26px;
+    padding: 0 8px;
+    font-size: 11px;
+    white-space: nowrap;
   }
 }

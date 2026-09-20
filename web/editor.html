@@ -11,10 +11,10 @@
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css?v=2026-09-20" />
+  <link rel="stylesheet" href="style.css?v=2026-09-20b" />
   <!-- Панель эмулятора: стили скоупированы под #emu-panel (см. файл), чтобы
        не переопределять разметку/цвета редактора. -->
-  <link rel="stylesheet" href="emulator-panel.css?v=2026-09-20" />
+  <link rel="stylesheet" href="emulator-panel.css?v=2026-09-20b" />
   <!-- ⚠️ ?v=... у css/js — защита от кэша браузера. Без него телефон после
        деплоя продолжал рисовать СТАРЫЙ CSS (панель 45vh вместо шторок): сервер
        отдавал новый файл, а Chrome — свою копию. Поднимайте версию при правках
@@ -269,8 +269,8 @@
   <!-- Порядок важен: app.js создаёт карту и публикует её как
        window.TRANSPORT_MAP; emulator.js подхватывает эту карту (а на
        отдельной странице /ui/emulator.html создаёт свою). -->
-  <script src="app.js?v=2026-09-20"></script>
-  <script src="emulator.js?v=2026-09-20"></script>
+  <script src="app.js?v=2026-09-20b"></script>
+  <script src="emulator.js?v=2026-09-20b"></script>
 </body>
 
 </html>

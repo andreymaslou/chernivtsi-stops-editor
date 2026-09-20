@@ -322,6 +322,27 @@ body.zoom-out .veh-arrow-group { display: none; }
 .map-legend .legend-row { display: flex; align-items: center; gap: 8px; }
 .map-legend .legend-icon { width: 14px; text-align: center; font-size: 14px; }
 
+/* Легенда на телефоні: нижню смугу екрана ділить із підказкою про клік
+ * (`.map-hint` у style.css сидить на `bottom: 52px` і тягнеться на всю ширину).
+ * Легенда малюється ЗВЕРХУ й обрізала текст підказки — тому піднімаємо її над
+ * підказкою: 116px ≥ кнопка емулятора (32) + підказка в 2 рядки (42) + зазор.
+ * Типографіка трохи компактніша, щоб легенда не з'їдала пів карти.
+ *
+ * ⚠️ Селектор саме `.leaflet-bottom .map-legend`, а не `.map-legend`: Leaflet
+ * вішає клас `leaflet-control` на ТОЙ САМИЙ div, який повертає `onAdd`
+ * (`Control.addTo`), тому позицію задає `leaflet.css` →
+ * `.leaflet-bottom .leaflet-control { margin-bottom: 10px }` — специфічність
+ * (0,2,0) б'є `.map-legend` (0,1,0), і підйом просто не застосовується. */
+@media (max-width: 760px) {
+  .leaflet-bottom .map-legend {
+    margin-bottom: 116px;
+    margin-bottom: calc(116px + env(safe-area-inset-bottom));
+    padding: 6px 10px;
+    font-size: 11px;
+    line-height: 1.45;
+  }
+}
+
 /* Пульсації — лише якщо користувач не просив їх вимкнути */
 @media (prefers-reduced-motion: reduce) {
   .plan-step { animation: none; }
