@@ -24,118 +24,135 @@
 <body>
   <div class="app">
 
-    <!-- LEFT PANEL: Forms -->
-    <aside class="sidebar sidebar-forms">
+    <!-- ШТОРКА РЕДАКТОРА: на десктопе это две обычные колонки (формы + список
+         остановок), на телефоне (≤760px) — ОДНА панель, выезжающая сверху.
+         Обёртка нужна именно для мобильного вида: две aside должны открываться
+         и закрываться как одна шторка (стили — .drawer в style.css, логика —
+         window.MobileSheets в app.js). На десктопе обёртка прозрачна: она просто
+         flex-контейнер вокруг тех же двух колонок. -->
+    <div id="drawer-editor" class="drawer">
 
-      <!-- Header: logo + route selector ALL IN ONE ROW -->
-      <div class="sidebar-header" style="padding: 7px 8px;">
-        <div style="display:flex; align-items:center; gap:5px; flex-wrap:wrap;">
-          <span style="font-size:15px; flex-shrink:0;">🚌</span>
-          <div style="display:flex; background:#2A2A2A; border-radius:6px; padding:2px; flex-shrink:0;">
-            <button id="btn-bus" class="type-btn active" onclick="setTransportType('bus')"
-              style="padding:3px 6px; font-size:11px;">🚌</button>
-            <button id="btn-trolley" class="type-btn" onclick="setTransportType('trolley')"
-              style="padding:3px 6px; font-size:11px;">🚎</button>
-          </div>
-          <div style="flex-shrink:0;">
-            <button id="routes-btn" type="button" class="input-field select-field"
-              onclick="toggleRoutesDropdown(event)"
-              style="width:64px; padding:3px 2px; font-size:12px; cursor:pointer; display:flex; align-items:center; gap:3px; justify-content:center;">
-              <span id="routes-btn-label">0</span><span>☑</span>
-            </button>
-          </div>
-          <select id="direction" class="input-field select-field" style="width:52px; padding:3px 2px; font-size:11px;"
-            onchange="handleRouteChange()">
-            <option value="A">А ➡</option>
-            <option value="B">Б ⬅</option>
-          </select>
-        </div>
+      <!-- «Ручка» шторки: на десктопе скрыта (display:none в style.css) -->
+      <div class="sheet-bar">
+        <span>✏️ Редактор зупинок</span>
+        <button type="button" class="sheet-bar-close" data-sheet-close="editor"
+          aria-label="Згорнути редактор">▾</button>
       </div>
 
-      <!-- Routes multi-select (розкривається в потоці, не накриває решту) -->
-      <div class="section" style="padding: 3px 8px;">
-        <div id="routes-panel" class="routes-panel hidden">
-          <div id="routes-checkboxes"></div>
-        </div>
-      </div>
+      <!-- LEFT PANEL: Forms -->
+      <aside class="sidebar sidebar-forms">
 
-      <!-- Route color palette -->
-      <div class="section" style="padding: 5px 8px;">
-        <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;" id="color-palette">
-          <span style="font-size:10px; color:#aaa; white-space:nowrap;">🎨 Колір:</span>
-        </div>
-      </div>
-
-      <!-- Search -->
-      <div class="section" style="padding: 6px 8px;">
-        <div class="search-wrap">
-          <input type="text" id="search-input" class="input-field" placeholder="🔍 Пошук зупинки..."
-            style="font-size:11px; padding:5px 6px;" />
-          <button class="btn btn-secondary" id="search-btn" style="padding:5px 7px; font-size:12px;">🔍</button>
-        </div>
-        <div id="search-results" class="search-results hidden"></div>
-      </div>
-
-      <!-- Add/Edit stop form -->
-      <div class="section" style="padding: 6px 8px;">
-        <div style="display:flex; gap:4px; margin-bottom:5px; align-items:center;">
-          <div class="stop-num" id="current_stop_order"
-            style="display:flex; margin-top:0; min-width:26px; height:26px; font-size:11px;" title="Порядковий номер">+
-          </div>
-          <input type="text" id="stop-name" class="input-field" placeholder="Назва зупинки"
-            style="flex:1; font-size:11px; padding:5px 6px;" />
-        </div>
-        <div style="display:flex; flex-direction:column; gap:4px; margin-bottom:6px;">
-          <div style="display:flex; gap:4px; align-items:center;">
-            <input type="number" id="stop-lat" class="input-field coord-input" placeholder="Широта" step="0.000001"
-              style="padding:4px 6px; font-size:10px;" />
-            <button class="btn-icon copy-mini" onclick="copyField('stop-lat')" title="Копіювати широту"
-              style="width:24px; height:24px; font-size:11px; flex-shrink:0;">📋</button>
-          </div>
-          <div style="display:flex; gap:4px; align-items:center;">
-            <input type="number" id="stop-lon" class="input-field coord-input" placeholder="Довгота" step="0.000001"
-              style="padding:4px 6px; font-size:10px;" />
-            <button class="btn-icon copy-mini" onclick="copyField('stop-lon')" title="Копіювати довготу"
-              style="width:24px; height:24px; font-size:11px; flex-shrink:0;">📋</button>
-          </div>
-          <div style="display:flex; gap:4px; align-items:center;">
-            <input type="number" id="stop-angle" class="input-field coord-input" placeholder="Кут °" step="1"
-              style="padding:4px 6px; font-size:10px;" />
-            <button class="btn-icon copy-mini" onclick="copyField('stop-angle')" title="Копіювати кут"
-              style="width:24px; height:24px; font-size:11px; flex-shrink:0;">📋</button>
+        <!-- Header: logo + route selector ALL IN ONE ROW -->
+        <div class="sidebar-header" style="padding: 7px 8px;">
+          <div style="display:flex; align-items:center; gap:5px; flex-wrap:wrap;">
+            <span style="font-size:15px; flex-shrink:0;">🚌</span>
+            <div style="display:flex; background:#2A2A2A; border-radius:6px; padding:2px; flex-shrink:0;">
+              <button id="btn-bus" class="type-btn active" onclick="setTransportType('bus')"
+                style="padding:3px 6px; font-size:11px;">🚌</button>
+              <button id="btn-trolley" class="type-btn" onclick="setTransportType('trolley')"
+                style="padding:3px 6px; font-size:11px;">🚎</button>
+            </div>
+            <div style="flex-shrink:0;">
+              <button id="routes-btn" type="button" class="input-field select-field"
+                onclick="toggleRoutesDropdown(event)"
+                style="width:64px; padding:3px 2px; font-size:12px; cursor:pointer; display:flex; align-items:center; gap:3px; justify-content:center;">
+                <span id="routes-btn-label">0</span><span>☑</span>
+              </button>
+            </div>
+            <select id="direction" class="input-field select-field" style="width:52px; padding:3px 2px; font-size:11px;"
+              onchange="handleRouteChange()">
+              <option value="A">А ➡</option>
+              <option value="B">Б ⬅</option>
+            </select>
           </div>
         </div>
-        <button class="btn btn-primary" id="add-stop-btn"
-          style="width:60%; padding:5px; font-size:11px; margin:0 auto; display:block;">+
-          Додати</button>
-      </div>
 
-    </aside>
-
-    <!-- MIDDLE PANEL: Stops List (glued to forms, before map) -->
-    <aside class="sidebar sidebar-list">
-      <div class="stops-header" style="padding:6px 8px; border-bottom:1px solid var(--border); flex-shrink:0;">
-        <div style="display:flex; align-items:center; gap:3px; flex-wrap:wrap;">
-          <span style="font-size:10px; color:var(--text-secondary); white-space:nowrap; flex:1;">
-            Зупинки <span id="route-label" style="color:var(--accent-light);">/ А</span>
-            <span class="badge" id="stop-count" style="margin-left:2px;">0</span>
-          </span>
-          <button class="btn-icon" id="editor-clear-btn" title="Очистити список зупинок" style="font-size:11px; padding:2px 3px;">🗑</button>
-          <input type="file" id="import-file-input" accept=".json" style="display:none;" />
-          <button class="btn-icon" id="import-json-btn" title="Імпорт JSON"
-            style="font-size:11px; padding:2px 3px;">⬆️</button>
-          <button class="btn-icon" id="export-csv-btn" title="Експорт CSV"
-            style="font-size:11px; padding:2px 3px;">📥</button>
-          <button class="btn-icon" id="export-json-btn" title="Експорт JSON" style="font-size:11px; padding:2px 3px;">{
-            }</button>
-          <button class="btn-icon" id="btn-osm" title="Показати OSM зупинки" onclick="toggleOsmStops()"
-            style="font-size:11px; padding:2px 3px;">🗺</button>
+        <!-- Routes multi-select (розкривається в потоці, не накриває решту) -->
+        <div class="section" style="padding: 3px 8px;">
+          <div id="routes-panel" class="routes-panel hidden">
+            <div id="routes-checkboxes"></div>
+          </div>
         </div>
-      </div>
-      <div id="stops-list" class="stops-list" style="flex:1; overflow-y:auto;">
-        <div class="empty-state">Клікніть на карті щоб додати першу зупинку</div>
-      </div>
-    </aside>
+
+        <!-- Route color palette -->
+        <div class="section" style="padding: 5px 8px;">
+          <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;" id="color-palette">
+            <span style="font-size:10px; color:#aaa; white-space:nowrap;">🎨 Колір:</span>
+          </div>
+        </div>
+
+        <!-- Search -->
+        <div class="section" style="padding: 6px 8px;">
+          <div class="search-wrap">
+            <input type="text" id="search-input" class="input-field" placeholder="🔍 Пошук зупинки..."
+              style="font-size:11px; padding:5px 6px;" />
+            <button class="btn btn-secondary" id="search-btn" style="padding:5px 7px; font-size:12px;">🔍</button>
+          </div>
+          <div id="search-results" class="search-results hidden"></div>
+        </div>
+
+        <!-- Add/Edit stop form -->
+        <div class="section" style="padding: 6px 8px;">
+          <div style="display:flex; gap:4px; margin-bottom:5px; align-items:center;">
+            <div class="stop-num" id="current_stop_order"
+              style="display:flex; margin-top:0; min-width:26px; height:26px; font-size:11px;" title="Порядковий номер">+
+            </div>
+            <input type="text" id="stop-name" class="input-field" placeholder="Назва зупинки"
+              style="flex:1; font-size:11px; padding:5px 6px;" />
+          </div>
+          <div style="display:flex; flex-direction:column; gap:4px; margin-bottom:6px;">
+            <div style="display:flex; gap:4px; align-items:center;">
+              <input type="number" id="stop-lat" class="input-field coord-input" placeholder="Широта" step="0.000001"
+                style="padding:4px 6px; font-size:10px;" />
+              <button class="btn-icon copy-mini" onclick="copyField('stop-lat')" title="Копіювати широту"
+                style="width:24px; height:24px; font-size:11px; flex-shrink:0;">📋</button>
+            </div>
+            <div style="display:flex; gap:4px; align-items:center;">
+              <input type="number" id="stop-lon" class="input-field coord-input" placeholder="Довгота" step="0.000001"
+                style="padding:4px 6px; font-size:10px;" />
+              <button class="btn-icon copy-mini" onclick="copyField('stop-lon')" title="Копіювати довготу"
+                style="width:24px; height:24px; font-size:11px; flex-shrink:0;">📋</button>
+            </div>
+            <div style="display:flex; gap:4px; align-items:center;">
+              <input type="number" id="stop-angle" class="input-field coord-input" placeholder="Кут °" step="1"
+                style="padding:4px 6px; font-size:10px;" />
+              <button class="btn-icon copy-mini" onclick="copyField('stop-angle')" title="Копіювати кут"
+                style="width:24px; height:24px; font-size:11px; flex-shrink:0;">📋</button>
+            </div>
+          </div>
+          <button class="btn btn-primary" id="add-stop-btn"
+            style="width:60%; padding:5px; font-size:11px; margin:0 auto; display:block;">+
+            Додати</button>
+        </div>
+
+      </aside>
+
+      <!-- MIDDLE PANEL: Stops List (glued to forms, before map) -->
+      <aside class="sidebar sidebar-list">
+        <div class="stops-header" style="padding:6px 8px; border-bottom:1px solid var(--border); flex-shrink:0;">
+          <div style="display:flex; align-items:center; gap:3px; flex-wrap:wrap;">
+            <span style="font-size:10px; color:var(--text-secondary); white-space:nowrap; flex:1;">
+              Зупинки <span id="route-label" style="color:var(--accent-light);">/ А</span>
+              <span class="badge" id="stop-count" style="margin-left:2px;">0</span>
+            </span>
+            <button class="btn-icon" id="editor-clear-btn" title="Очистити список зупинок" style="font-size:11px; padding:2px 3px;">🗑</button>
+            <input type="file" id="import-file-input" accept=".json" style="display:none;" />
+            <button class="btn-icon" id="import-json-btn" title="Імпорт JSON"
+              style="font-size:11px; padding:2px 3px;">⬆️</button>
+            <button class="btn-icon" id="export-csv-btn" title="Експорт CSV"
+              style="font-size:11px; padding:2px 3px;">📥</button>
+            <button class="btn-icon" id="export-json-btn" title="Експорт JSON" style="font-size:11px; padding:2px 3px;">{
+              }</button>
+            <button class="btn-icon" id="btn-osm" title="Показати OSM зупинки" onclick="toggleOsmStops()"
+              style="font-size:11px; padding:2px 3px;">🗺</button>
+          </div>
+        </div>
+        <div id="stops-list" class="stops-list" style="flex:1; overflow-y:auto;">
+          <div class="empty-state">Клікніть на карті щоб додати першу зупинку</div>
+        </div>
+      </aside>
+
+    </div><!-- /#drawer-editor -->
 
     <!-- RIGHT: карта редактора + панель эмулятора поверх неё.
          position:relative нужен, чтобы #emu-panel (absolute) встала справа
@@ -160,6 +177,11 @@
             <a href="/ui/admin.html">⚙️ Сленг і скарги</a>
             <a href="/docs" style="margin-left:10px;">API</a>
           </span>
+          <!-- Мобильные: «свернуть» нижнюю шторку. На десктопе кнопка скрыта
+               (см. emulator-panel.css → #emu-panel .sheet-bar-close), поэтому
+               вид .head там не меняется. -->
+          <button type="button" class="sheet-bar-close" data-sheet-close="emu"
+            aria-label="Згорнути емулятор">▾</button>
         </div>
 
         <textarea id="ask-text" placeholder="Наприклад: Я на Соборці, треба на Гравітон"></textarea>
@@ -203,6 +225,19 @@
         </div>
       </aside>
     </main>
+
+    <!-- Затемнення під відкритою шторкою: видно лише на ≤760px, клик закриває
+         обидві шторки (див. .sheet-scrim у style.css). -->
+    <div id="sheet-scrim" class="sheet-scrim"></div>
+
+    <!-- Кнопки-перемикачі шторок. На десктопі сховані css-ом; на телефоні
+         верхня (справа вгорі) відкриває редактор, нижня (зліва внизу) —
+         емулятор. Праворуч угорі живе zoom самого Leaflet, тому кнопка
+         редактора стоїть там, де немає конфлікту зі штатними контролами. -->
+    <button type="button" id="sheet-toggle-editor" class="sheet-fab sheet-fab-top"
+      aria-expanded="false" aria-controls="drawer-editor">✏️ Редактор</button>
+    <button type="button" id="sheet-toggle-emu" class="sheet-fab sheet-fab-bottom"
+      aria-expanded="false" aria-controls="emu-panel">🤖 Емулятор</button>
 
   </div>
 

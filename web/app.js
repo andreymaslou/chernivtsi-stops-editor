@@ -1116,6 +1116,105 @@ window.copyField = function (id) {
   });
 };
 
+// ===== Мобильные шторки (≤760px) ============================================
+// На телефоне карта занимает весь экран, а обе панели превращаются в шторки:
+// редактор выезжает СВЕРХУ (#drawer-editor), эмулятор — СНИЗУ (#emu-panel).
+// Открыта может быть только одна: иначе нижняя шторка накрыла бы верхнюю.
+// Здесь только переключение класса `.open` — вся геометрия в CSS
+// (style.css для верхней шторки, emulator-panel.css для нижней), поэтому на
+// десктопе поведение не меняется: шторки открывать нечего и не нужно.
+const SHEET_MQ = window.matchMedia('(max-width: 760px)');
+
+// имя шторки → id самой шторки и id её кнопки-переключателя
+const SHEETS = {
+  editor: { sheetId: 'drawer-editor', btnId: 'sheet-toggle-editor' },
+  emu: { sheetId: 'emu-panel', btnId: 'sheet-toggle-emu' },
+};
+
+function sheetEl(name) {
+  return document.getElementById(SHEETS[name].sheetId);
+}
+
+function sheetBtn(name) {
+  return document.getElementById(SHEETS[name].btnId);
+}
+
+function isSheetOpen(name) {
+  const el = sheetEl(name);
+  return !!el && el.classList.contains('open');
+}
+
+// Кнопки получают aria-expanded, затемнение показывается, если открыта любая
+// шторка (клик по затемнению закрывает). На body вешаются классы состояния:
+// по ним CSS прячет кнопку УЖЕ ОТКРЫТОЙ шторки (у неё есть свой «▾», а вторая
+// кнопка остаётся — ею переключаются на соседнюю панель).
+function syncSheets() {
+  Object.keys(SHEETS).forEach((name) => {
+    const btn = sheetBtn(name);
+    if (btn) btn.setAttribute('aria-expanded', String(isSheetOpen(name)));
+  });
+  const scrim = document.getElementById('sheet-scrim');
+  if (scrim) scrim.classList.toggle('show', Object.keys(SHEETS).some(isSheetOpen));
+  document.body.classList.toggle('sheet-editor-open', isSheetOpen('editor'));
+  document.body.classList.toggle('sheet-emu-open', isSheetOpen('emu'));
+}
+
+window.MobileSheets = {
+  isMobile: () => SHEET_MQ.matches,
+
+  open(name) {
+    if (!SHEET_MQ.matches) return; // на десктопе шторок нет
+    Object.keys(SHEETS).forEach((other) => {
+      const el = sheetEl(other);
+      if (el) el.classList.toggle('open', other === name);
+    });
+    syncSheets();
+  },
+
+  close(name) {
+    const el = sheetEl(name);
+    if (el) el.classList.remove('open');
+    syncSheets();
+  },
+
+  closeAll() {
+    Object.keys(SHEETS).forEach((name) => {
+      const el = sheetEl(name);
+      if (el) el.classList.remove('open');
+    });
+    syncSheets();
+  },
+
+  toggle(name) {
+    if (isSheetOpen(name)) window.MobileSheets.close(name);
+    else window.MobileSheets.open(name);
+  },
+};
+
+// Кнопки-переключатели: «✏️ Редактор» (сверху справа) и «🤖 Емулятор» (снизу слева)
+Object.keys(SHEETS).forEach((name) => {
+  const btn = sheetBtn(name);
+  if (btn) btn.addEventListener('click', () => window.MobileSheets.toggle(name));
+});
+
+// Любая кнопка с data-sheet-close="<имя>" сворачивает свою шторку: «▾» в ручке
+// редактора и «▾» в заголовке панели эмулятора.
+document.querySelectorAll('[data-sheet-close]').forEach((btn) => {
+  btn.addEventListener('click', () => window.MobileSheets.close(btn.getAttribute('data-sheet-close')));
+});
+
+// Клик по затемнению и Esc закрывают шторки — привычный жест для bottom sheet.
+const sheetScrim = document.getElementById('sheet-scrim');
+if (sheetScrim) sheetScrim.addEventListener('click', () => window.MobileSheets.closeAll());
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') window.MobileSheets.closeAll();
+});
+
+// Ушли на десктопную ширину — снимаем классы, чтобы при повторном сужении окна
+// не осталось «залипшей» открытой шторки (на десктопе .open ни на что не влияет).
+SHEET_MQ.addEventListener('change', () => window.MobileSheets.closeAll());
+syncSheets();
+
 // ===== Init =====
 loadRouteColors();
 buildColorPalette();

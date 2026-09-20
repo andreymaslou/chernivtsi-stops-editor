@@ -139,14 +139,75 @@
   font: 700 12px/18px -apple-system, "Segoe UI", Roboto, sans-serif;
 }
 
+/* --- Телефон (≤760px): панель стає Bottom Sheet -----------------------------
+ * Раньше здесь было `height: 45vh` с прибивкой к низу: на мобильной вёрстке
+ * это отнимало у карты половину экрана и накрывало её остаток. Теперь панель —
+ * оверлей ПОВЕРХ карты: карта занимает весь вьюпорт (style.css), а панель
+ * выезжает снизу по кнопке «🤖 Емулятор» (`#sheet-toggle-emu` в editor.html)
+ * и закрывается кнопкой «▾» в заголовке.
+ *
+ * Скрытое состояние — это transform, а не display:none: сохраняется анимация,
+ * а UI-проверки на 390px продолжают видеть элементы панели (их ширина ≠ 0) —
+ * tools/ui/check_emulator.js, п.6. visibility добавлена, чтобы закрытая шторка
+ * не ловила фокус табом; задержка (0.28s) даёт анимации доиграть. */
 @media (max-width: 760px) {
   #emu-panel {
+    position: fixed;
     top: auto;
     left: 0;
+    right: 0;
+    bottom: 0;
     width: auto;
-    height: 45vh;
+    height: auto;
+    max-height: 66vh;
+    max-height: 66dvh;
     border-left: 0;
     border-top: 1px solid #000;
+    border-radius: 14px 14px 0 0;
+    box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.45);
+    /* Полоска-индикатор iOS: контент не должен уезжать под неё */
+    padding-bottom: max(10px, env(safe-area-inset-bottom));
+    transform: translateY(102%);
+    visibility: hidden;
+    transition: transform 0.28s ease, visibility 0s linear 0.28s;
+    will-change: transform;
+  }
+
+  #emu-panel.open {
+    transform: translateY(0);
+    visibility: visible;
+    transition: transform 0.28s ease, visibility 0s;
+  }
+
+  /* Заголовок липнет к верхнему краю шторки и играет роль «ручки»: по нему
+     видно, что это именно шторка, и в нём есть кнопка «свернуть». */
+  #emu-panel .head {
+    position: sticky;
+    top: -10px;
+    z-index: 2;
+    margin: -10px -10px 8px;
+    padding: 10px 10px 8px;
+    background: var(--emu-panel);
+    border-bottom: 1px solid #333941;
+    border-radius: 14px 14px 0 0;
+  }
+
+  /* Кнопка «свернуть»: на десктопе скрыта (правило .sheet-bar-close в style.css) */
+  #emu-panel .sheet-bar-close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 30px;
+    height: 30px;
+    margin-left: 8px;
+    padding: 0;
+    background: var(--emu-panel2);
+    border: 1px solid #333941;
+    border-radius: 50%;
+    color: var(--emu-text);
+    font-size: 14px;
+    line-height: 1;
   }
 }
 

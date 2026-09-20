@@ -159,6 +159,26 @@ body {
   border-radius: 4px;
 }
 
+/* ===== Шторки мобильной версии =====
+ * Обёртка левых панелей (.drawer): на десктопе это обычный flex-контейнер
+ * вокруг двух колонок (формы + список), вид не меняется. На телефоне (≤760px)
+ * та же обёртка становится выезжающей сверху шторкой — см. медиа-запрос в
+ * конце файла. Нижняя шторка (эмулятор) живёт в emulator-panel.css.
+ */
+.drawer {
+  display: flex;
+  min-width: 0;
+  flex-shrink: 1;
+}
+
+/* Бары, кнопки и затемнение шторок на десктопе не нужны вовсе. */
+.sheet-bar,
+.sheet-bar-close,
+.sheet-fab,
+.sheet-scrim {
+  display: none;
+}
+
 /* ===== Header / Logo ===== */
 .sidebar-header {
   padding: 20px 18px 16px;
@@ -725,13 +745,186 @@ input[type=number] {
   border-color: #2563eb;
   color: #93c5fd;
 }
-/* ===== Adaptive layout ===== */
+/* ===== Adaptive layout (≤760px): карта на весь екран + шторки ==============
+ * Раньше на телефоні .app схлопувався в колонку: сайдбари зверху, карта знизу,
+ * а панель емулятора (bottom:0; height:45vh) накривала решту карти — від неї
+ * лишалася смужка в кілька пікселів. Тепер карта займає ВЕСЬ екран і нічого не
+ * віддає, а обидві панелі — оверлеї-шторки:
+ *   * редактор виїжджає ЗВЕРХУ (кнопка «✏️ Редактор», справа вгорі);
+ *   * емулятор — ЗНИЗУ (кнопка «🤖 Емулятор», зліва внизу; його правила —
+ *     в emulator-panel.css).
+ * Обидві сховані за замовчуванням, відкрита максимум ОДНА (стежить
+ * app.js → window.MobileSheets).
+ *
+ * Зачинена шторка зсунута трансформом, а НЕ display:none: так зберігається
+ * анімація і не ламаються UI-перевірки, які міряють елементи панелі на 390px
+ * (tools/ui/check_emulator.js, п.6: getBoundingClientRect дає ненульову ширину). */
 @media (max-width: 760px) {
-  .sidebar-forms { width: 150px; min-width: 120px; }
-  .sidebar-list { width: 160px; min-width: 120px; }
-}
-@media (max-width: 560px) {
-  .app { flex-direction: column; }
-  .sidebar-forms, .sidebar-list { width: 100%; min-width: 0; max-height: 40vh; border-right: none; border-bottom: 1px solid var(--border); }
-  .map-container { min-height: 50vh; }
+  /* Карта — база: fixed на весь вьюпорт, у неї нічого не «відгризають» */
+  .app {
+    display: block;
+    position: relative;
+    height: 100vh;
+    height: 100dvh;
+    overflow: hidden;
+  }
+
+  .map-container {
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+  }
+
+  #map {
+    height: 100vh;
+    height: 100dvh;
+  }
+
+  /* --- Верхня шторка: редактор (форми + список зупинок) --- */
+  .drawer {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 1245;
+    display: flex;
+    flex-direction: column;
+    max-height: 82vh;
+    max-height: 82dvh;
+    overflow-y: auto;
+    background: var(--bg-sidebar);
+    border-bottom: 1px solid var(--border);
+    border-radius: 0 0 14px 14px;
+    box-shadow: var(--shadow);
+    transform: translateY(-102%);
+    visibility: hidden;
+    transition: transform 0.28s ease, visibility 0s linear 0.28s;
+    will-change: transform;
+  }
+
+  .drawer.open {
+    transform: translateY(0);
+    visibility: visible;
+    transition: transform 0.28s ease, visibility 0s;
+  }
+
+  /* Усередині шторки панелі йдуть одна під одною на всю ширину */
+  .sidebar-forms,
+  .sidebar-list {
+    width: 100%;
+    min-width: 0;
+    flex: 0 0 auto;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+
+  /* Скролить сама шторка, тому список не «залипає» на власній висоті */
+  .sidebar-list {
+    overflow: visible;
+  }
+
+  #stops-list {
+    max-height: 40vh;
+    max-height: 40dvh;
+  }
+
+  /* «Ручка» шторки: липне до верхнього краю, щоб було чим згорнути */
+  .sheet-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 6px 10px;
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: var(--bg-section);
+    border-bottom: 1px solid var(--border);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-secondary);
+  }
+
+  .sheet-bar-close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text-secondary);
+    font-size: 13px;
+    line-height: 1;
+    cursor: pointer;
+  }
+
+  .sheet-bar-close:hover {
+    color: var(--text-primary);
+    border-color: var(--accent);
+  }
+
+  /* --- Плаваючі кнопки шторок --- */
+  .sheet-fab {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    position: fixed;
+    z-index: 1300;
+    padding: 7px 10px;
+    font-family: var(--font);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-primary);
+    background: rgba(19, 22, 30, 0.92);
+    border: 1px solid var(--border);
+    border-radius: 100px;
+    box-shadow: var(--shadow);
+    cursor: pointer;
+    backdrop-filter: blur(6px);
+    transition: opacity 0.2s ease;
+  }
+
+  /* Кнопка открытой шторки прячется — она бы наложилась на саму шторку.
+     Вторая кнопка остаётся видимой: ею переключаются на соседнюю панель. */
+  body.sheet-editor-open .sheet-fab-top,
+  body.sheet-emu-open .sheet-fab-bottom {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  /* Справа вгорі — там, де немає штатного zoom-контролу Leaflet (він зліва) */
+  .sheet-fab-top { top: 8px; right: 8px; }
+  .sheet-fab-bottom { bottom: 10px; left: 10px; }
+  .sheet-fab[aria-expanded="true"] { border-color: var(--accent); color: var(--accent-light); }
+
+  /* --- Затемнення під відкритою шторкою --- */
+  .sheet-scrim {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 1240;
+    background: rgba(0, 0, 0, 0.45);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.28s ease;
+  }
+
+  .sheet-scrim.show {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  /* Підказка про клік на телефоні в один рядок не влазить і заважала б кнопці
+     емулятора — підіймаємо її та дозволяємо перенос. */
+  .map-hint {
+    bottom: 54px;
+    max-width: calc(100vw - 24px);
+    padding: 6px 12px;
+    font-size: 11px;
+    white-space: normal;
+    text-align: center;
+  }
 }

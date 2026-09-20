@@ -21,7 +21,9 @@
  *   6. попап машини: структура, світлий бейдж, екранування зовнішніх рядків;
  *   7. розвантаження при віддаленні: zoom < 13 — крапки без номера й стрілки,
  *      zoom >= 13 — повний маркер, і крапка не з'їжджає з координати;
- *   8. на 390 px контроли парка видны и легенда влезает в экран.
+ *   8. на 390 px: контроли парка видны, легенда влезает в экран, а на
+ *      /ui/editor.html ещё и адаптив — карта на весь экран, панели открываются
+ *      шторками (сверху редактор, снизу эмулятор).
  *
  * Отчёт и PNG: tools/ui/out/ (в git не попадает).
  */
@@ -283,7 +285,9 @@ const probe = () => ({
   popup: (() => {
     const shot = (vehicle) => {
       const host = document.createElement('div');
-      host.innerHTML = vehiclePopup(vehicle);
+      // vehiclePopup живёт внутри IIFE emulator.js — наружу торчит только через
+      // публичный мини-API (window.Emulator), см. web/emulator.js.
+      host.innerHTML = window.Emulator.vehiclePopup(vehicle);
       document.body.appendChild(host);
       const head = host.querySelector('.veh-popup-head');
       const badge = head ? head.querySelector('.badge') : null;
@@ -691,7 +695,48 @@ const probe = () => ({
   await page.screenshot({ path: path.join(OUT, 'plan.png') });
   report.shots.push('plan.png');
 
-  // --- 6. Мобильный вид ---------------------------------------------------
+  // Перед переходом на мобильную ширину убеждаемся, что десктопная вёрстка цела:
+  // обёртка шторки (.drawer) не должна ничего сдвинуть — обе левые колонки слева
+  // от карты, панель эмулятора справа поверх неё, кнопки/затемнение скрыты.
+  // На отдельной /ui/emulator.html этих элементов нет — проверки пропускаются.
+  const desktopLayout = await page.evaluate(() => {
+    const box = (sel) => {
+      const el = document.querySelector(sel);
+      if (!el) return null;
+      const r = el.getBoundingClientRect();
+      return { left: Math.round(r.left), right: Math.round(r.right) };
+    };
+    const display = (sel) => {
+      const el = document.querySelector(sel);
+      return el ? getComputedStyle(el).display : null;
+    };
+    return {
+      forms: box('.sidebar-forms'),
+      list: box('.sidebar-list'),
+      map: box('.map-container'),
+      emu: box('#emu-panel'),
+      fab: display('#sheet-toggle-editor'),
+      scrim: display('#sheet-scrim'),
+    };
+  });
+  if (desktopLayout.forms && desktopLayout.list && desktopLayout.map) {
+    check('десктоп: обидві колонки ліворуч від карти',
+      desktopLayout.forms.right <= desktopLayout.map.left + 2 &&
+      desktopLayout.list.right <= desktopLayout.map.left + 2,
+      'список до ' + desktopLayout.list.right + ', карта з ' + desktopLayout.map.left);
+  }
+  if (desktopLayout.emu && desktopLayout.map) {
+    check('десктоп: панель емулятора справа поверх карти',
+      desktopLayout.emu.right >= desktopLayout.map.right - 2,
+      'панель до ' + desktopLayout.emu.right + ' / карта ' + desktopLayout.map.right);
+  }
+  if (desktopLayout.fab !== null) {
+    check('десктоп: кнопки й затемнення шторок сховані',
+      desktopLayout.fab === 'none' && desktopLayout.scrim === 'none',
+      'кнопка ' + desktopLayout.fab + ', затемнення ' + desktopLayout.scrim);
+  }
+
+  // --- 6. Мобильный вид (шторки) ------------------------------------------
   await page.setViewport({ width: 390, height: 844, isMobile: true });
   await sleep(1200);
   await page.screenshot({ path: path.join(OUT, 'mobile.png') });
@@ -711,6 +756,88 @@ const probe = () => ({
   check('на 390 px контроли парка видны', mobile.visible, 'ширина ' + Math.round(mobile.width) + 'px');
   check('на 390 px легенда в межах екрана', mobile.legendFits,
     'ширина легенди ' + mobile.legendWidth + 'px з 390px');
+
+  // --- 6.1 Адаптив объединённой страницы: карта + шторки -------------------
+  // Шторки есть только на /ui/editor.html (на отдельной /ui/emulator.html нет
+  // ни #drawer-editor, ни кнопок) — поэтому проверяем по факту наличия.
+  const hasSheets = await page.evaluate(() => !!document.getElementById('drawer-editor'));
+  if (hasSheets) {
+    const layout = await page.evaluate(() => {
+      const box = (el) => el.getBoundingClientRect();
+      const map = box(document.querySelector('.map-container'));
+      const drawer = box(document.getElementById('drawer-editor'));
+      const emu = box(document.getElementById('emu-panel'));
+      const fabEditor = box(document.getElementById('sheet-toggle-editor'));
+      const fabEmu = box(document.getElementById('sheet-toggle-emu'));
+      return {
+        vw: window.innerWidth, vh: window.innerHeight,
+        mapW: Math.round(map.width), mapH: Math.round(map.height),
+        drawerBottom: Math.round(drawer.bottom),
+        emuTop: Math.round(emu.top),
+        fabEditorTop: Math.round(fabEditor.top),
+        fabEmuBottom: Math.round(fabEmu.bottom),
+        hidden: 'none',
+        fabDisplay: getComputedStyle(document.getElementById('sheet-toggle-editor')).display,
+      };
+    });
+    check('карта займає весь вьюпорт',
+      layout.mapH >= layout.vh - 2 && layout.mapW >= layout.vw - 2,
+      layout.mapW + 'x' + layout.mapH + ' з ' + layout.vw + 'x' + layout.vh);
+    check('обидві шторки за замовчуванням сховані',
+      layout.drawerBottom <= 0 && layout.emuTop >= layout.vh,
+      'редактор bottom ' + layout.drawerBottom + ', емулятор top ' + layout.emuTop);
+    check('кнопки шторок видно',
+      layout.fabDisplay !== layout.hidden && layout.fabEditorTop >= 0 && layout.fabEmuBottom <= layout.vh,
+      'редактор top ' + layout.fabEditorTop + ', емулятор bottom ' + layout.fabEmuBottom);
+
+    // Верхня шторка: редактор виїжджає зверху + затемнення
+    await page.click('#sheet-toggle-editor');
+    await sleep(600);
+    const editorSheet = await page.evaluate(() => {
+      const el = document.getElementById('drawer-editor');
+      const r = el.getBoundingClientRect();
+      return {
+        top: Math.round(r.top),
+        visible: r.bottom > 0 && r.top > -2 && getComputedStyle(el).visibility === 'visible',
+        scrim: document.getElementById('sheet-scrim').classList.contains('show'),
+      };
+    });
+    check('кнопка «Редактор» відкриває верхню шторку',
+      editorSheet.visible && editorSheet.scrim, 'top ' + editorSheet.top);
+    await page.screenshot({ path: path.join(OUT, 'mobile-sheet-editor.png') });
+    report.shots.push('mobile-sheet-editor.png');
+
+    // Нижня шторка: емулятор виїжджає знизу, редактор мусить закритися сам
+    await page.click('#sheet-toggle-emu');
+    await sleep(600);
+    const emuSheet = await page.evaluate(() => {
+      const el = document.getElementById('emu-panel');
+      const r = el.getBoundingClientRect();
+      return {
+        bottom: Math.round(r.bottom),
+        visible: r.top < window.innerHeight && getComputedStyle(el).visibility === 'visible',
+        editorBottom: Math.round(document.getElementById('drawer-editor').getBoundingClientRect().bottom),
+      };
+    });
+    check('кнопка «Емулятор» відкриває нижню шторку',
+      emuSheet.visible && emuSheet.bottom >= layout.vh - 2, 'bottom ' + emuSheet.bottom);
+    check('одночасно відкрита лише одна шторка', emuSheet.editorBottom <= 0,
+      'редактор bottom ' + emuSheet.editorBottom);
+    await page.screenshot({ path: path.join(OUT, 'mobile-sheet-emu.png') });
+    report.shots.push('mobile-sheet-emu.png');
+
+    // Закриття кнопкою «▾» у заголовку шторки
+    await page.click('#emu-panel [data-sheet-close="emu"]');
+    await sleep(600);
+    const closed = await page.evaluate(() => ({
+      emuTop: Math.round(document.getElementById('emu-panel').getBoundingClientRect().top),
+      scrim: document.getElementById('sheet-scrim').classList.contains('show'),
+    }));
+    check('кнопка «▾» згортає шторку', closed.emuTop >= layout.vh - 2 && !closed.scrim,
+      'top ' + closed.emuTop);
+  } else {
+    console.log('        (шторки: пропущено — це окрема сторінка /ui/emulator.html)');
+  }
 
   // Плитки OSM — внешний и «best effort» ресурс: один не доехавший тайл не
   // должен валить проверку (сеть на VPS/локалке флапает). Свои запросы и

@@ -1003,7 +1003,11 @@ loadStops();
 
 // Публичный мини-API: отладка и UI-тесты (убедиться, что модуль загрузился и
 // получил карту — свою на /ui/emulator.html или общую на /ui/editor.html).
-window.Emulator = { map, clearLayers, clearVehicles, renderPlan };
+// vehiclePopup вынесен наружу целиком: tools/ui/check_emulator.js строит попап
+// в песочнице DOM и проверяет его структуру/экранирование. После упаковки файла
+// в IIFE (см. docs/STATUS.md п.20) функция иначе не видна из page.evaluate, и
+// проверка падала с «vehiclePopup is not defined».
+window.Emulator = { map, clearLayers, clearVehicles, renderPlan, vehiclePopup };
 
 })(); // конец IIFE: внутренние имена не текут в глобальную область редактора
 
