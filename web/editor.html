@@ -14,7 +14,7 @@
   <link rel="stylesheet" href="style.css?v=2026-09-20c" />
   <!-- Панель эмулятора: стили скоупированы под #emu-panel (см. файл), чтобы
        не переопределять разметку/цвета редактора. -->
-  <link rel="stylesheet" href="emulator-panel.css?v=2026-09-20c" />
+  <link rel="stylesheet" href="emulator-panel.css?v=2026-09-22a" />
   <!-- ⚠️ ?v=... у css/js — защита от кэша браузера. Без него телефон после
        деплоя продолжал рисовать СТАРЫЙ CSS (панель 45vh вместо шторок): сервер
        отдавал новый файл, а Chrome — свою копию. Поднимайте версию при правках
@@ -210,6 +210,12 @@
         <div id="fleet-status" class="status"></div>
 
         <div id="status" class="status">готовий до роботи</div>
+
+        <!-- Картки варіантів плану (поставка 1, §13 брифа): рендерить
+             emulator.js, тільки коли /api/plan повернув >1 варіанта. Живуть
+             НАД саммарі (#answer). Клік перемальовує план без повторного
+             запиту; стилі — у emulator-panel.css, скоуповані під #emu-panel. -->
+        <div id="plan-variants" class="plan-variants" hidden aria-label="Варіанти маршруту"></div>
         <div id="answer" class="answer"></div>
 
         <!-- Форма скарги: відкривається кнопкою «Це бред» -->
@@ -270,7 +276,7 @@
        window.TRANSPORT_MAP; emulator.js подхватывает эту карту (а на
        отдельной странице /ui/emulator.html создаёт свою). -->
   <script src="app.js?v=2026-09-20c"></script>
-  <script src="emulator.js?v=2026-09-20c"></script>
+  <script src="emulator.js?v=2026-09-22a"></script>
 </body>
 
 </html>

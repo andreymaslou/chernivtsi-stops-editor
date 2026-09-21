@@ -18,6 +18,9 @@
  *   5.1 карта плану (UX): номери кроків у кольорі маршруту з пульсацією, шеврони
  *      напрямку (азимут звіряється з `leg.path`), хвости маршруту, фініш 🏁,
  *      іконка 🚶 на пешій пересадці, цифри в панелі = бейджам на карті;
+ *   5.2 картки варіантів (§13 брифа): дві картки над саммарі, перша активна,
+ *      «програшна» цифра підсвічена приглушеним (⚠️, не червоним) з поясненням;
+ *      клік по другій картці перемальовує лінії на карті й цифри в саммарі;
  *   6. попап машини: структура, світлий бейдж, екранування зовнішніх рядків;
  *   7. розвантаження при віддаленні: zoom < 13 — крапки без номера й стрілки,
  *      zoom >= 13 — повний маркер, і крапка не з'їжджає з координати;
@@ -582,9 +585,21 @@ const probe = () => ({
   const atZoom = async (level) => {
     await page.evaluate((value) => new Promise((resolve) => {
       if (map.getZoom() === value) { resolve(); return; }
-      map.once('zoomend', () => setTimeout(resolve, 400));
+      map.once('zoomend', () => setTimeout(resolve, 150));
       map.setZoom(value);
     }), level);
+    // У headless кадри рідкі: фіксований таймаут ловив transition масштабу в
+    // підльоті («matrix(0.84)» навіть за 900 мс після zoomend) — і зум-пункти
+    // флейкали без жодної реальної поломки (docs/STATUS.md §5 п.9). Чекаємо
+    // саме усталення масштабу першого маркера: це і є предмет перевірки.
+    // Не усталилось за 5 с — probe зафіксує поточний стан, асерти проваляться.
+    await page.waitForFunction(() => {
+      const wrap = document.querySelector('.veh-wrap');
+      if (!wrap) return true;
+      const matrix = new DOMMatrixReadOnly(getComputedStyle(wrap).transform);
+      const target = document.body.classList.contains('zoom-out') ? 0.65 : 1;
+      return Math.abs(matrix.a - target) < 0.02;
+    }, { timeout: 5000, polling: 150 }).catch(() => {});
     return page.evaluate(probe);
   };
   const dots = await atZoom(12);
@@ -728,6 +743,112 @@ const probe = () => ({
     ' stopped=' + stoppedCount + ' target=' + plan.targetBoards.length);
   await page.screenshot({ path: path.join(OUT, 'plan.png') });
   report.shots.push('plan.png');
+
+  // --- 5.2 Картки варіантів плану (поставка 1, §13 брифа) ------------------
+  // Сервер кладе в /api/plan масив variants: перший елемент — кореневий план
+  // («Швидкий», він уже на карті), другий — прогін «≤1 пересадка» («Дешевий»).
+  // Картки живуть у #plan-variants НАД саммарі (#answer). Клік по другій
+  // мусить: зупинити голос, перемалювати план і цифри панелі, підсвітити картку.
+  const variantsProbe = () => page.evaluate(() => {
+    const box = document.getElementById('plan-variants');
+    const answer = document.getElementById('answer');
+    const cards = box ? Array.prototype.slice.call(box.querySelectorAll('.variant-card')) : [];
+    const geometry = Array.prototype.map.call(
+      document.querySelectorAll('.plan-active'),
+      (path) => path.getAttribute('d'),
+    ).join('|');
+    let hash = 0;
+    for (let i = 0; i < geometry.length; i += 1) {
+      hash = ((hash * 31) + geometry.charCodeAt(i)) | 0;
+    }
+    const last = window.Emulator && window.Emulator.lastPlan();
+    return {
+      boxPresent: !!box,
+      hidden: box ? box.hidden : true,
+      count: cards.length,
+      ids: cards.map((card) => card.getAttribute('data-variant-id')),
+      texts: cards.map((card) => card.textContent.replace(/\s+/g, ' ').trim()),
+      tags: cards.map((card) => {
+        const el = card.querySelector('.variant-tag');
+        return el ? el.textContent.trim() : '';
+      }),
+      notes: cards.map((card) => {
+        const el = card.querySelector('.variant-note');
+        return el ? el.textContent.trim() : '';
+      }),
+      noteColour: (() => {
+        const el = box ? box.querySelector('.variant-card .variant-note') : null;
+        return el ? getComputedStyle(el).color : null;
+      })(),
+      activeId: (() => {
+        const el = box ? box.querySelector('.variant-card.active') : null;
+        return el ? el.getAttribute('data-variant-id') : null;
+      })(),
+      worseCount: cards.reduce((sum, card) =>
+        sum + card.querySelectorAll('.variant-num.worse').length, 0),
+      summary: answer ? answer.textContent.replace(/\s+/g, ' ').trim() : '',
+      planId: last ? (last.id || null) : null,
+      lines: document.querySelectorAll('.plan-active').length,
+      linesHash: hash,
+    };
+  });
+
+  const variantsBefore = await variantsProbe();
+  if (variantsBefore.count >= 2) {
+    check('карточки вариантов отрисованы над саммари',
+      variantsBefore.boxPresent && !variantsBefore.hidden && variantsBefore.count === 2,
+      'карточек: ' + variantsBefore.count + ', id: [' + variantsBefore.ids.join(', ') + ']');
+    check('корневой план — первая карточка (активна по умолчанию)',
+      variantsBefore.activeId === variantsBefore.ids[0],
+      'активная: ' + variantsBefore.activeId);
+    check('карточка показывает тег, транспорт, цену и время',
+      variantsBefore.tags.every(Boolean) &&
+      variantsBefore.texts.every((text) => /грн/.test(text) && /хв/.test(text)),
+      variantsBefore.texts.join(' | '));
+    check('проигравший параметр подсвечен ⚠️ с объяснением',
+      variantsBefore.worseCount > 0 && variantsBefore.notes.filter(Boolean).every((note) =>
+        /дорожче|довше/.test(note)),
+      'пояснения: [' + variantsBefore.notes.join('] [') + '], подсвеченных цифр: ' +
+      variantsBefore.worseCount);
+    check('подсветка «проигравшего» не чисто красная',
+      variantsBefore.noteColour === null ||
+      (variantsBefore.noteColour !== 'rgb(255, 0, 0)' &&
+       variantsBefore.noteColour !== rgb('#ff5c5c')),
+      'цвет пояснения: ' + variantsBefore.noteColour);
+
+    await page.click('.plan-variants .variant-card[data-variant-id="' +
+      variantsBefore.ids[1] + '"]');
+    await sleep(1200);
+    const variantsAfter = await variantsProbe();
+    check('клик по второй карточке сделал её активной',
+      variantsAfter.activeId === variantsBefore.ids[1],
+      'активная: ' + variantsAfter.activeId);
+    check('клик переключил план без перезапроса',
+      variantsAfter.planId === variantsBefore.ids[1] &&
+      variantsAfter.planId !== variantsBefore.planId,
+      'последний план: ' + variantsBefore.planId + ' → ' + variantsAfter.planId);
+    check('после клика линии на карте изменились',
+      variantsAfter.lines > 0 &&
+      (variantsAfter.linesHash !== variantsBefore.linesHash ||
+       variantsAfter.lines !== variantsBefore.lines),
+      'линий: ' + variantsBefore.lines + ' → ' + variantsAfter.lines +
+      ', hash ' + variantsBefore.linesHash + ' → ' + variantsAfter.linesHash);
+    check('после клика цифры в саммари изменились',
+      variantsAfter.summary !== variantsBefore.summary,
+      'саммари: «' + variantsAfter.summary.slice(0, 90) + '»');
+    await page.screenshot({ path: path.join(OUT, 'variants.png') });
+    report.shots.push('variants.png');
+
+    // Возвращаем первый вариант — остальной сценарий смотрит дефолтный вид.
+    await page.click('.plan-variants .variant-card[data-variant-id="' +
+      variantsBefore.ids[0] + '"]');
+    await sleep(800);
+  } else {
+    console.log('        (карточки вариантов: пропущено — сервер дал один вариант, это честный ответ)');
+    check('один вариант — карточек нет (только стандартный текст)',
+      variantsBefore.count === 0 && variantsBefore.hidden,
+      'карточек: ' + variantsBefore.count + ', панель скрыта: ' + variantsBefore.hidden);
+  }
 
   // Перед переходом на мобильную ширину убеждаемся, что десктопная вёрстка цела:
   // обёртка шторки (.drawer) не должна ничего сдвинуть — обе левые колонки слева

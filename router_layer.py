@@ -274,9 +274,13 @@ class TransitRouter:
     # полей в подписи кэш остался бы с геометрией старого направления.
     # `vehicle_type` — из того же ряда: кандидат ищется по паре (тип, подпись),
     # так что смена типа машины обязана сбрасывать кэш.
+    # `source` не влияет на геометрию, но определяет пометку ноги плана
+    # (real|sim|sched): если та же машина пришла из другого источника
+    # (PARK_SOURCE=auto добрал её симулятором), кэш обязан устареть — иначе
+    # живой GPS подменится виртуальным парком без следов в ответе.
     _FLEET_KEY_FIELDS = (
         "lat", "lon", "speed_kmh", "board_number", "is_live", "route_label",
-        "direction", "heading_deg", "vehicle_type",
+        "direction", "heading_deg", "vehicle_type", "source",
     )
 
     @classmethod
@@ -861,8 +865,11 @@ class TransitRouter:
             "vehicles": vehicles,
             # Источник парка и признак «в срезе вообще были живые ТС» — контракт
             # лога телеметрии (§12.2): без этого выборки ночью на симуляторе
-            # невозможно отличить от предпочтений реальных пассажиров.
-            "fleet_source": self._fleet_source or "unknown",
+            # невозможно отличить от предпочтений реальных пассажиров. В
+            # смешанном режиме (PARK_SOURCE=auto) источник у каждой ноги свой
+            # (поле source ноги), а корню говорим "mixed".
+            "fleet_source": "mixed" if self._fleet_source == "auto"
+            else (self._fleet_source or "unknown"),
             "had_live_data": bool(self._live_vehicles),
             "computed_at": now.strftime("%Y-%m-%d %H:%M:%S"),
         }
@@ -966,7 +973,10 @@ class TransitRouter:
             else round(float(wait["live_wait_min"]), 1),
             # "real" | "sim" — борт найден и пришёл из соответствующего слоя,
             # "sched" — живого борта нет, цифра посчитана по расписанию.
-            "source": "sched" if wait.get("live_bus") is None else (self._fleet_source or "unknown"),
+            # В смешанном парке (PARK_SOURCE=auto) источник берём у самой
+            # машины (wait["source"]), иначе — у всего среза.
+            "source": "sched" if wait.get("live_bus") is None
+            else (wait.get("source") or self._fleet_source or "unknown"),
             "color": colour,
         }
 
@@ -1076,6 +1086,11 @@ class TransitRouter:
             result["live_wait_min"] = live_wait
             if live_wait is not None and live_wait < base_wait:
                 result["wait_min"] = live_wait
+            # Джерело борта: кожна машина змішаного парку несе своє
+            # (merge_fleet у main.py); для моно-режиму fallback на source
+            # всього среза — сим-машини мають is_live=True, тому по цьому
+            # полю джерело не визначити (§12.2).
+            result["source"] = live.get("source") or self._fleet_source
         if cache is not None:
             cache[cache_key] = result
         return result
@@ -1122,6 +1137,9 @@ class TransitRouter:
                 "live_bus": approach["live_bus"],
                 "is_live": approach["is_live"],
                 "route_label": approach["route_label"],
+                # Источник конкретного борта; None — слой его не проставляет
+                # (моно-режим), тогда сработает fleet-level source.
+                "source": approach.get("source"),
             }
         return None
 
@@ -1240,6 +1258,11 @@ class TransitRouter:
                         "live_bus": vehicle.get("board_number") or "?",
                         "is_live": bool(vehicle.get("is_live")),
                         "route_label": str(vehicle.get("route_label") or ""),
+                        # Откуда пришёл борт: "real" | "sim" | None (старый слой
+                        # не проставляет поле — тогда работает fleet-level source).
+                        # Нужно, чтобы при PARK_SOURCE=auto нога плана не наврала
+                        # об источнике машины (§3.3 п.3).
+                        "source": vehicle.get("source"),
                     }
                 )
 

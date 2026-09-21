@@ -8,11 +8,19 @@
 и docs/REVIEW-router-perf.md.
 """
 import json
+import os
 import sys
 from datetime import datetime
 from pathlib import Path
 
 import pytest
+
+# Парк тестов — ТОЛЬКО симулятор (бриф §3.3 п.3): PARK_SOURCE=sim выставляем
+# ДО импорта main, иначе константа модуля прочитает реальный .env, и эталонные
+# планы станут зависеть от трекера и наличия интернета. setdefault — чтобы
+# локальный прогон мог форсировать что-то иное явным env.
+os.environ.setdefault("PARK_SOURCE", "sim")
+os.environ.setdefault("GPS_SIMULATOR", "1")
 
 REPO = Path(__file__).resolve().parent.parent
 if str(REPO) not in sys.path:
@@ -66,3 +74,15 @@ def router(data, fleet, now):
     # машин и время прибытия пассажира.
     r.set_live(fleet, snapshot_at=now)
     return r
+
+
+@pytest.fixture(autouse=True)
+def park_source_is_sim(monkeypatch):
+    """Детерминированные тесты: парк — только симулятор (§3.3 п.3).
+
+    env выставлен ещё при импорте main (см. выше), но .env в репозитории
+    может перевесить константу модуля — эта фикстура закрывает и этот случай,
+    чтобы ни один тест не ушёл в реальный трекер.
+    """
+    monkeypatch.setattr(app_main, "PARK_SOURCE", "sim")
+

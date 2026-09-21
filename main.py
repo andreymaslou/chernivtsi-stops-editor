@@ -21,10 +21,11 @@ import logging
 import math
 import os
 import re
+import threading
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query, Request
@@ -45,6 +46,7 @@ from slang_store import (
     overrides_stats,
     upsert_stop,
 )
+from storage import append_jsonl
 
 # ---------------------------------------------------------------------------
 # Инициализация окружения и логирования
@@ -60,6 +62,18 @@ STOPS_PATH = BASE_DIR / "stops.json"
 STREETS_PATH = BASE_DIR / "streets.json"
 GRAPH_PATH = BASE_DIR / "graph.json"
 SCHEDULE_PATH = BASE_DIR / "routes_schedule.json"
+
+# Журнал выбора варианта плана (поставка 1, §13.3 брифа): одна JSON-строка на
+# запрос. Анализ предпочтений идёт по этому потоку, поэтому кладём его рядом с
+# остальными данными, в отдельной папке logs (в git не попадает).
+TELEMETRY_LOG_PATH = BASE_DIR / "logs" / "telemetry_plan_choices.jsonl"
+
+# FastAPI выполняет синхронные эндпоинты в пуле потоков, поэтому запросы могут
+# приходить параллельно. Один lock на процесс гарантирует, что две строки не
+# «вклинятся» друг в друга при конкурентной записи (O_APPEND этого не обещает
+# на Windows). Нагрузка стенда мизерная, блокировка не узкое место.
+_TELEMETRY_LOCK = threading.Lock()
+
 
 # Порог уверенности (в процентах) для срабатывания Уровня 1 (остановки).
 # Если совпадение по остановкам ниже этого порога — алгоритм переходит
@@ -392,13 +406,35 @@ OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 # Тестовый режим (для локальной обкатки; в проде переменные не задаём):
 #   ASSUME_IN_SERVICE=1 — считаем все маршруты в работе независимо от времени
 #                         суток (ночные запросы ведут себя как дневные);
-#   GPS_SIMULATOR=1     — /api/live и /api/plan используют виртуальный парк
-#                         (sim_layer) вместо реального GPS-трекера.
+#   GPS_SIMULATOR=1     — УСТАРЕЛ, аналог PARK_SOURCE=sim (см. ниже).
+#                         Оставлен для обратной совместимости со старым .env.
 def _env_flag(name: str) -> bool:
     return os.getenv(name, "").strip().lower() in ("1", "true", "yes", "on")
 
+
 ASSUME_IN_SERVICE = _env_flag("ASSUME_IN_SERVICE")
 GPS_SIMULATOR = _env_flag("GPS_SIMULATOR")
+
+# Источник парка машин (бриф §3, «Идея A» — приоритет реального GPS, дыры
+# заполняются симулятором, чтобы демо не было пустым):
+#   auto — опросить оба источника и слить (merge_fleet): маршрут
+#          (тип ТС + подпись), на котором есть хоть одна свежая реальная
+#          машина вне депо, целиком берём из трекера, остальные — из
+#          симулятора. Каждой машине добавляется поле source: "real"|"sim";
+#   gps  — только реальный трекер;
+#   sim  — только виртуальный парк (детерминированные тесты и ночной стенд).
+PARK_SOURCE = os.getenv("PARK_SOURCE", "auto").strip().lower()
+if GPS_SIMULATOR and PARK_SOURCE == "auto":
+    # Обратная совместимость: старый ключ означал «весь парк виртуальный».
+    # Явно заданный PARK_SOURCE приоритетнее — новый ключ точнее старого.
+    PARK_SOURCE = "sim"
+    logger.warning(
+        "GPS_SIMULATOR=1 устарел и работает как PARK_SOURCE=sim "
+        "(приоритет источников парка выключен). Перейдите на PARK_SOURCE."
+    )
+if PARK_SOURCE not in ("auto", "gps", "sim"):
+    logger.warning("PARK_SOURCE=%r не поддерживается, использую 'auto'.", PARK_SOURCE)
+    PARK_SOURCE = "auto"
 
 if not OPENROUTER_API_KEY:
     logger.warning(
@@ -585,20 +621,33 @@ async def lifespan(app: FastAPI):
         )
     app_state["router"] = router
 
-    # Выбираем источник данных о машинах: симулятор (для тестов) или реальный трекер.
-    if GPS_SIMULATOR and graph is not None:
-        live = SimLayer(graph, schedule, assume_in_service=ASSUME_IN_SERVICE)
-        app_state["live"] = live
-        logger.info("Подключен виртуальный парк (GPS_SIMULATOR=1).")
-    else:
-        live = LiveTracker()
-        app_state["live"] = live
-        await live.start()
-        logger.info("Подключен реальный GPS-трекер.")
+    # Источник данных о машинах (бриф §3): симулятор и/или реальный трекер.
+    # В режиме auto опрашиваются оба, а сливаются они в merge_fleet() при
+    # каждом запросе — тогда на маршрутах со свежим GPS видны реальные
+    # машины, а пустые направления заполняются виртуальными.
+    sim_layer: Optional[SimLayer] = None
+    if PARK_SOURCE in ("auto", "sim") and graph is not None:
+        sim_layer = SimLayer(graph, schedule, assume_in_service=ASSUME_IN_SERVICE)
+        app_state["sim_layer"] = sim_layer
+        logger.info("Подключен виртуальный парк (PARK_SOURCE=%s).", PARK_SOURCE)
+
+    tracker: Optional[LiveTracker] = None
+    if PARK_SOURCE in ("auto", "gps"):
+        tracker = LiveTracker()
+        # LiveTracker.start() поднимает фоновый поллер трекера: при
+        # PARK_SOURCE=sim он не запускается вовсе, чтобы тесты не лезли в сеть.
+        await tracker.start()
+        app_state["tracker"] = tracker
+        logger.info("Подключен реальный GPS-трекер (PARK_SOURCE=%s).", PARK_SOURCE)
+
+    # app_state["live"] — основной источник для health-check и совместимости:
+    # в режиме auto это трекер (он приоритетный, сборка среза идёт в merge).
+    app_state["live"] = tracker if tracker is not None else sim_layer
 
     yield
 
-    if hasattr(live, "stop"):
+    live: Optional[Any] = app_state.get("live")
+    if live is not None and hasattr(live, "stop"):
         await live.stop()
     logger.info("Остановка сервера.")
 
@@ -723,6 +772,138 @@ def get_route(request: RouteRequest):
 
 
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Сборка парка машин: приоритет реального GPS над симулятором (бриф §3)
+# ---------------------------------------------------------------------------
+
+def _route_key(vehicle: Dict[str, Any]) -> Tuple[str, str]:
+    """
+    Ключ приоритета источника: (тип ТС, нормализованная подпись маршрута).
+
+    Тип ТС обязателен: «5» есть и у автобусов, и у троллейбусов, это два
+    разных маршрута — по голой подписи они склеились бы в один. Нормализация
+    та же, что в роутере, иначе ключи слияния и поиска бортов разъедутся.
+    """
+    vtype = str(vehicle.get("vehicle_type") or "").strip().lower()
+    label = str(vehicle.get("route_label") or vehicle.get("route_name") or "")
+    return vtype, TransitRouter.normalize_label(label)
+
+
+def merge_fleet(
+    real_fleet: List[Dict[str, Any]],
+    sim_fleet: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """
+    Сливает реальный и виртуальный парки по правилу приоритета (§3).
+
+    Если на маршруте (тип ТС + подпись) есть хоть одна СВЕЖАЯ реальная
+    машина вне депо — берём для этого маршрута только реальные машины;
+    если свежих нет — берём виртуальные. Правило маршрутом, а не машиной:
+    смешивать оба источника на одном маршруте нельзя — у них разные поля
+    (направление есть только у симулятора) и разные эпохи среза, поэтому
+    строгость фильтров и ETA отличались бы (§3.2).
+
+    Свежесть и депо проверяются до слияния (это делает live_layer при
+    only_fresh=True), поэтому stale-машина не может «прикрыть» направление
+    и оставить нас без парка (§3.3 п.2): она не формирует приоритет.
+
+    Каждой машине добавляется поле `source: "real" | "sim"` — роутер
+    прокидывает его в ногу плана, а UI рисует бейдж «SIM». Без этой
+    пометки приоритет превращается в подмену (§3.3 п.3-4).
+    """
+    real_keys: set = set()
+    real_vehicles: List[Dict[str, Any]] = []
+    for vehicle in real_fleet:
+        real_vehicles.append(dict(vehicle, source="real"))
+        # Право забрать маршрут у симулятора — только у свежей машины не из
+        # депо: старый трек и машины на смене — это дыра, её заполняем симом.
+        if vehicle.get("is_live") and not vehicle.get("in_depo"):
+            key = _route_key(vehicle)
+            if key[1]:
+                real_keys.add(key)
+
+    sim_vehicles: List[Dict[str, Any]] = []
+    for vehicle in sim_fleet:
+        if _route_key(vehicle) in real_keys:
+            continue  # маршрут уже занят свежим реальным парком
+        sim_vehicles.append(dict(vehicle, source="sim"))
+
+    merged = real_vehicles + sim_vehicles
+    # Единый порядок для UI: трекер и симулятор сортируют срезы по-разному
+    # (route_id vs route_label), а в смешанном ответе должен быть стабильный
+    # порядок, иначе маркеры «прыгают» между опросами.
+    merged.sort(
+        key=lambda v: (
+            str(v.get("vehicle_type") or ""),
+            str(v.get("route_label") or v.get("route_name") or ""),
+            str(v.get("board_number") or ""),
+        )
+    )
+    return merged
+
+
+def _collect_fleet(
+    plan_now: Optional[datetime] = None,
+) -> Tuple[List[Dict[str, Any]], Optional[datetime], str]:
+    """
+    Срез парка для /api/plan и /api/live с учётом PARK_SOURCE.
+
+    Возвращает (vehicles, snapshot_at, fleet_source):
+      * snapshot_at — момент, на который построен парк. Роутер сверяет с
+        ним ETA: симулятор умеет строить парк на любое время, реальный
+        трекер — только «сейчас», поэтому при наличии обоих источников
+        (PARK_SOURCE=auto) берём plan_now либо фактическое «сейчас»;
+      * fleet_source — источник среза для ног плана и телеметрии: "real"
+        или "sim" в мономоде; "auto" в смешанном режиме — тогда роутер
+        берёт source каждой отдельной машины (см. _transit_leg).
+    """
+    sim_layer: Optional[SimLayer] = app_state.get("sim_layer")
+    tracker: Optional[LiveTracker] = app_state.get("tracker")
+
+    if PARK_SOURCE == "sim" or (PARK_SOURCE == "auto" and tracker is None):
+        # Только симулятор (тестовый стенд) либо трекер недоступен —
+        # вырожденный auto, который не во что сливать.
+        if sim_layer is None:
+            return [], None, "sim"
+        snapshot = sim_layer.snapshot(now=plan_now)
+        # Симулятор строит парк на plan_now; если его нет — на фактическое
+        # «сейчас», как и раньше (роутер сверяет ETA с моментом среза).
+        snapshot_at = plan_now if plan_now is not None else datetime.now()
+        return snapshot.get("vehicles", []), snapshot_at, "sim"
+
+    if PARK_SOURCE == "gps":
+        # Только реальный трекер: он умеет отдавать только «сейчас».
+        if tracker is None:
+            return [], None, "real"
+        snapshot = tracker.snapshot(only_fresh=True)
+        return snapshot.get("vehicles", []), datetime.now(), "real"
+
+    # PARK_SOURCE == "auto": опрашиваем оба источника и сливаем.
+    sim_vehicles: List[Dict[str, Any]] = []
+    if sim_layer is not None:
+        try:
+            sim_vehicles = sim_layer.snapshot(now=plan_now).get("vehicles", [])
+        except Exception as exc:  # симулятор не должен ронять план
+            logger.warning("Срез симулятора не получен (%s).", exc)
+
+    real_vehicles: List[Dict[str, Any]] = []
+    if tracker is not None:
+        try:
+            real_vehicles = tracker.snapshot(only_fresh=True).get("vehicles", [])
+        except Exception as exc:  # сеть перевозчика иногда лежит — выкатимся на симе
+            logger.warning("Срез реального трекера не получен (%s).", exc)
+
+    merged = merge_fleet(real_vehicles, sim_vehicles)
+    logger.info(
+        "Парк собран: %d реальных + %d виртуальных машин.",
+        sum(1 for v in merged if v.get("source") == "real"),
+        sum(1 for v in merged if v.get("source") == "sim"),
+    )
+    snapshot_at = plan_now if plan_now is not None else datetime.now()
+    return merged, snapshot_at, "auto"
+
+
+
 # Маршрутизация: полный план поездки (роутер на графе остановок)
 # ---------------------------------------------------------------------------
 
@@ -803,31 +984,18 @@ def get_plan(request: PlanRequest):
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=f"Field 'now' is not ISO-8601: {exc}")
 
-    # Живой GPS (если поллер успел накопить данные) уточняет ожидание и
-    # «перший потрібний ТС» для каждой ноги плана.
-    live: Optional[LiveTracker] = app_state.get("live")
-    # Источник среза для ног плана и телеметрии (§12.2 брифа): "sim" на стенде
-    # (GPS_SIMULATOR=1), "real" — из трекера. Роутер сам это не определит:
-    # сим-машины тоже приходят с is_live=True.
-    fleet_source = "sim" if isinstance(live, SimLayer) else "real"
-    if live is not None:
-        try:
-            if plan_now is not None and isinstance(live, SimLayer):
-                # Симулятор строит парк на заданный момент времени, поэтому
-                # именно plan_now и есть «время среза» для сверки с ETA машин.
-                snapshot = live.snapshot(only_fresh=True, now=plan_now)
-                snapshot_at = plan_now
-            else:
-                # Реальный трекер умеет отдавать только «сейчас».
-                snapshot = live.snapshot(only_fresh=True)
-                snapshot_at = datetime.now()
-            router.set_live(
-                snapshot.get("vehicles", []),
-                snapshot_at=snapshot_at,
-                source=fleet_source,
-            )
-        except Exception:
-            router.set_live([], source=fleet_source)
+    # Парк машин: реальный трекер и/или симулятор, по PARK_SOURCE (§3 брифа).
+    # Роутер сам не определит источник среза — сим-машины тоже приходят с
+    # is_live=True, поэтому source приходит сюда вместе с машинами. В режиме
+    # auto источник каждой отдельной машины уезжает в ногу плана, и телеметрия
+    # различает технический бакет (sim) и предпочтения реальных пассажиров.
+    fleet, snapshot_at, fleet_source = _collect_fleet(plan_now)
+    try:
+        router.set_live(fleet, snapshot_at=snapshot_at, source=fleet_source)
+    except Exception:
+        # План строится и без парка (ожидание по расписанию), поэтому
+        # survivability важнее: теряем live-ETA, но не ответ.
+        router.set_live([], source=fleet_source)
 
     if plan_now is None:
         # Один и тот же момент для обоих прогонов (дефолт и вариант «≤1
@@ -956,6 +1124,63 @@ def get_stops(q: Optional[str] = Query(None, description="Подстрока н�
 
 
 # ---------------------------------------------------------------------------
+# Телеметрия выбора варианта плана (поставка 1, §13.3 брифа)
+# ---------------------------------------------------------------------------
+
+class PlanChoiceTelemetry(BaseModel):
+    """
+    Один клик по карточке варианта — событие для анализа предпочтений.
+
+    Поля по замороженному контракту лога (§13.3): оффер целиком (включая
+    `source` каждого варианта — без него ночной стенд на симуляторе не
+    отделить от предпочтений реальных пассажиров), порядок карточек
+    (позиционный bias: первая карточка притягивает клики), выбранный вариант
+    (`null` — карточки показали, но выбора не сделали; эта метрика обязательна)
+    и анонимный `device_id` клиента.
+    """
+
+    ts: str
+    from_stop_id: Union[int, str]
+    to_stop_id: Union[int, str]
+    offer: List[Dict[str, Any]]
+    default_variant_id: str
+    variant_order: List[str]
+    chosen_variant_id: Optional[str] = None
+    device_id: str
+    client: str
+
+
+@app.post("/api/telemetry/plan_choice")
+def log_plan_choice(request: PlanChoiceTelemetry):
+    """
+    Записывает выбор варианта плана в JSONL-поток `logs/telemetry_plan_choices.jsonl`.
+
+    Эндпоинт ничего не возвращает клиенту, кроме подтверждения — это «пожарная
+    и забыть» запись: UI шлёт её после клика по карточке и не ждет ответа.
+    Запись не должна ронять приложение: если файл недоступен, логируем ошибку
+    и отдаём 500, но сервер продолжает работать.
+    """
+    payload = request.model_dump()
+    # Серверная метка приёма: час клиента может гулять, а для анализа нужна
+    # достоверная хронология. Контрактные поля клиента не затираем.
+    payload["received_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    try:
+        with _TELEMETRY_LOCK:
+            append_jsonl(TELEMETRY_LOG_PATH, payload)
+    except OSError as exc:
+        logger.warning("Телеметрия выбора не записана: %s", exc)
+        raise HTTPException(status_code=500, detail="Не удалось записать лог телеметрии")
+
+    logger.info(
+        "Телеметрия выбора: %s — выбран %r из %d карточек (%s)",
+        payload["device_id"], payload["chosen_variant_id"],
+        len(payload["variant_order"]), payload["client"],
+    )
+    return {"status": "ok"}
+
+
+# ---------------------------------------------------------------------------
 # Живой GPS-слой (trans-gps.cv.ua)
 # ---------------------------------------------------------------------------
 
@@ -1002,9 +1227,10 @@ def get_live_vehicles(
     """
     Живой GPS-слой: текущее положение транспорта Черновцов.
 
-    Параметр now работает только в тестовом режиме (GPS_SIMULATOR=1): он
-    позволяет запросить парк на произвольный момент — проверить ночь, утро
-    или конец смены, не переводя часы на сервере.
+    Параметр now работает только для виртуального парка (PARK_SOURCE=sim):
+    он позволяет запросить парк на произвольный момент — проверить ночь,
+    утро или конец смены, не переводя часы на сервере. Реальный трекер
+    умеет отдавать только «сейчас» (§3.1).
 
     Данные берутся с открытого сайта перевозчика trans-gps.cv.ua
     (/map/tracker/), опрашиваются фоновой задачей раз в 5 секунд и
@@ -1018,9 +1244,16 @@ def get_live_vehicles(
     Поле counts считается ДО фильтров, поэтому клиент может показать
     «живих: 12 із 26 машин». Промежуточного кэша нет: срез уже лежит
     в памяти процесса и обновляется фоновым поллером.
+
+    При PARK_SOURCE=auto опрашиваются оба источника и срез сливается
+    (merge_fleet, §3): маршрут со свежей реальной машиной целиком берётся
+    из трекера, остальные — из симулятора. В этом случае source="mixed",
+    а каждая машина помечена своим источником в поле source — UI рисует
+    бейдж «SIM», чтобы виртуальные машины не выдавались за живой GPS.
     """
-    live: Optional[LiveTracker] = app_state.get("live")
-    if live is None:
+    sim_layer: Optional[SimLayer] = app_state.get("sim_layer")
+    tracker: Optional[LiveTracker] = app_state.get("tracker")
+    if sim_layer is None and tracker is None:
         raise HTTPException(status_code=503, detail="Live layer is not initialized yet")
 
     query_now: Optional[datetime] = None
@@ -1039,11 +1272,64 @@ def get_live_vehicles(
         "route_ids": _parse_id_list(routes),
         "vehicle_types": _parse_type_list(vehicle_types),
     }
-    if query_now is not None and isinstance(live, SimLayer):
-        # Симулятор умеет отдать парк на произвольный момент («машина времени»).
-        snapshot_kwargs["now"] = query_now
+    sim_kwargs: Dict[str, Any] = dict(snapshot_kwargs)
+    if query_now is not None and sim_layer is not None:
+        # Симулятор умеет отдать парк на произвольный момент («машина времени»),
+        # реальный трекер — только «сейчас» (§3.1: у источников разные эпохи).
+        sim_kwargs["now"] = query_now
 
-    return live.snapshot(**snapshot_kwargs)
+    # Моно-режим отдаёт срез своего слоя как есть — формат тот же.
+    if PARK_SOURCE == "gps":
+        if tracker is None:
+            raise HTTPException(status_code=503, detail="Live tracker is not initialized yet")
+        return tracker.snapshot(**snapshot_kwargs)
+    if tracker is None:
+        # Тестовый стенд/деградация: трекер не поднят — отдаём виртуальный парк.
+        return sim_layer.snapshot(**sim_kwargs)
+
+    # PARK_SOURCE == "auto": опросили оба источника, сливаем с приоритетом
+    # реального GPS. Свежесть и депо проверяются внутри слоёв (only_fresh),
+    # поэтому в слияние уже не попадут stale-машины, маскирующие дыры.
+    sim_snap = sim_layer.snapshot(**sim_kwargs)
+    real_snap = tracker.snapshot(**snapshot_kwargs)
+    vehicles = merge_fleet(
+        real_snap.get("vehicles", []),
+        sim_snap.get("vehicles", []),
+    )
+
+    return {
+        "source": "mixed",
+        "generated_at": real_snap.get("generated_at") or sim_snap.get("generated_at"),
+        "last_success_at": real_snap.get("last_success_at"),
+        "last_error": real_snap.get("last_error"),
+        "poll_interval_seconds": real_snap.get("poll_interval_seconds"),
+        "fresh_max_age_seconds": real_snap.get("fresh_max_age_seconds"),
+        "counts": {
+            "total": len(vehicles),
+            "live": sum(1 for v in vehicles if v.get("is_live")),
+            "stale": sum(1 for v in vehicles if v.get("status") == "stale"),
+            "in_depo": sum(1 for v in vehicles if v.get("in_depo")),
+            "unknown_gpstime": sum(1 for v in vehicles if v.get("status") == "unknown"),
+        },
+        "returned": len(vehicles),
+        # Кто остался в срезе после приоритета: пользователь видит, что
+        # «маршрутов в N раз больше, чем живых машин» — дыры закрыты симом.
+        "by_source": {
+            "real": sum(1 for v in vehicles if v.get("source") == "real"),
+            "sim": sum(1 for v in vehicles if v.get("source") == "sim"),
+        },
+        "sources": {
+            "real": {"counts": real_snap.get("counts"), "last_error": real_snap.get("last_error")},
+            "sim": {"counts": sim_snap.get("counts"), "generated_at": sim_snap.get("generated_at")},
+        },
+        # Реальные маршруты приоритетнее на пересечениях, симовские
+        # добавляют те, которых трекер сейчас не видит.
+        "routes": {
+            **(sim_snap.get("routes") or {}),
+            **(real_snap.get("routes") or {}),
+        },
+        "vehicles": vehicles,
+    }
 
 
 # ---------------------------------------------------------------------------

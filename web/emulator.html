@@ -120,6 +120,54 @@
       white-space: pre-wrap;
     }
 
+    /* Картки варіантів плану (поставка 1, §13 брифа): над саммарі (#answer).
+       Активна картка виділяється акцентом; «програшний» параметр — приглушений
+       помаранчевий з ⚠️, НЕ чистий червоний: це чесний розмен час↔гроші
+       для порівняння, а не помилка. Пояснення («дорожче на 16 грн») — сіре. */
+    .plan-variants { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+    .plan-variants[hidden] { display: none; }
+
+    .variant-card {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 3px;
+      flex: 1 1 150px;
+      background: var(--panel2);
+      color: var(--text);
+      border: 1px solid #333941;
+      border-radius: 10px;
+      padding: 8px 10px;
+      cursor: pointer;
+      text-align: left;
+      font-weight: 400;
+      transition: border-color .15s, background .15s;
+    }
+
+    .variant-card:hover { border-color: #4a5260; }
+
+    .variant-card.active {
+      border-color: var(--accent);
+      background: rgba(79, 140, 255, .14);
+    }
+
+    .variant-tag {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: .3px;
+      color: var(--accent);
+    }
+
+    .variant-card.active .variant-tag { color: #cfe0ff; }
+
+    .variant-route { font-size: 13px; }
+
+    .variant-meta { display: flex; gap: 10px; flex-wrap: wrap; font-size: 13px; }
+
+    .variant-num.worse { color: #d9a05b; font-weight: 600; }
+
+    .variant-note { font-size: 12px; color: var(--muted); }
+
     .badge { display: inline-block; padding: 1px 7px; border-radius: 10px; font-size: 12px; margin-right: 6px; }
     .badge.live { background: #1e4620; color: #9ae6a8; }
     .badge.plan { background: #3a3320; color: #ffd88a; }
@@ -346,6 +394,12 @@
     <div id="fleet-status" class="status"></div>
 
     <div id="status" class="status">готовий до роботи</div>
+
+    <!-- Картки варіантів плану (поставка 1, §13 брифа): рендерить emulator.js,
+         тільки коли /api/plan повернув >1 варіанта. Живуть НАД саммарі плану
+         (саммарі — це #answer, який малює renderPlan). Клік по картці
+         перемальовує план без повторного запиту. -->
+    <div id="plan-variants" class="plan-variants" hidden aria-label="Варіанти маршруту"></div>
     <div id="answer" class="answer"></div>
 
     <!-- Форма скарги: відкривається кнопкою «Це бред» -->
@@ -370,7 +424,7 @@
   <div id="map" class="map"></div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script src="emulator.js?v=2026-09-20c"></script>
+  <script src="emulator.js?v=2026-09-22a"></script>
 </body>
 
 </html>

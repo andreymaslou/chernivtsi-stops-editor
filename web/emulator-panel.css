@@ -114,6 +114,55 @@
 #emu-panel .badge.live { background: #1e4620; color: #9ae6a8; }
 #emu-panel .badge.plan { background: #3a3320; color: #ffd88a; }
 
+/* --- Картки варіантів плану («Швидкий» / «Дешевий», §13 брифа) -------------
+   Живуть У ПАНЕЛІ над саммарі (#answer), тому скоуповані під #emu-panel
+   (принцип файлу). Візуально ті самі, що в інлайн-CSS emulator.html:
+   «програшна» цифра — приглушений помаранчевий (#d9a05b) з ⚠️, пояснення —
+   сіре. НЕ --emu-danger: розмен час↔гроші — це вибір, а не помилка. */
+#emu-panel .plan-variants { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+#emu-panel .plan-variants[hidden] { display: none; }
+
+#emu-panel .variant-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  flex: 1 1 150px;
+  background: var(--emu-panel2);
+  color: var(--emu-text);
+  border: 1px solid #333941;
+  border-radius: 10px;
+  padding: 8px 10px;
+  cursor: pointer;
+  text-align: left;
+  font-weight: 400;
+  transition: border-color .15s, background .15s;
+}
+
+#emu-panel .variant-card:hover { border-color: #4a5260; }
+
+#emu-panel .variant-card.active {
+  border-color: var(--emu-accent);
+  background: rgba(79, 140, 255, .14);
+}
+
+#emu-panel .variant-tag {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .3px;
+  color: var(--emu-accent);
+}
+
+#emu-panel .variant-card.active .variant-tag { color: #cfe0ff; }
+
+#emu-panel .variant-route { font-size: 13px; }
+
+#emu-panel .variant-meta { display: flex; gap: 10px; flex-wrap: wrap; font-size: 13px; }
+
+#emu-panel .variant-num.worse { color: #d9a05b; font-weight: 600; }
+
+#emu-panel .variant-note { font-size: 12px; color: var(--emu-muted); }
+
 #emu-panel .toggle { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--emu-muted); }
 #emu-panel .toggle input { accent-color: var(--emu-accent); width: 16px; height: 16px; }
 

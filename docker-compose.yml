@@ -23,8 +23,11 @@ services:
     restart: always
     # Эмулятор и админка работают с папкой data/: сленговые правки и логи
     # жалоб должны переживать пересборку образа (иначе правки исчезнут).
+    # logs/ — журнал телеметрии выбора вариантов плана (§13.3): он тоже
+    # должен переживать рестарт контейнера, иначе аналитика теряется.
     volumes:
       - ./data:/app/data
+      - ./logs:/app/logs
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8000/health').read()"]
       interval: 30s

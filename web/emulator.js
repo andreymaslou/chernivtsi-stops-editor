@@ -39,6 +39,10 @@ const state = {
   // «крок плану» в тексте можно было связать с его линией на карте.
   lastPlan: null,
   planStepLayers: {},
+  // Картки варіантів плану (поставка 1, §13 брифа): останній оффер з
+  // /api/plan та id обраної карточки. Кореневий план — завжди перший варіант.
+  variantOffer: null,
+  activeVariantId: null,
 };
 
 // ---------------------------------------------------------------------------
@@ -486,7 +490,11 @@ function render(endpoint, data) {
   } else {
     renderRoute(data);
   }
+  // Картки варіантів: рендеримо одразу, паралельно з озвученням тексту.
+  // Якщо варіант один або немає — карток не буде взагалі (панель сховається).
+  renderVariantCards(data);
   document.getElementById('answer').style.display = 'block';
+  if (Array.isArray(data.legs)) speakPlanSummary(data);
 }
 
 /** Сервер просить уточнити фразу (не впевнений у точках) або маршруту немає. */
@@ -842,6 +850,185 @@ function renderVehicles(vehicles, bounds, planLegs) {
 }
 
 // ---------------------------------------------------------------------------
+// Картки варіантів плану («Швидкий» / «Дешевий», §13 брифа, поставка 1)
+// ---------------------------------------------------------------------------
+//
+// Сервер (/api/plan) кладе в відповідь `variants`: перший елемент — кореневий
+// план (він уже намальований), другий — прогін «≤1 пересадка» («Дешевий»).
+// Карточки малюємо ЛИШЕ коли варіантів ≥ 2: один варіант — це не вибір, а
+// порожні чіпи тільки шуміли б. Клік по карточці: (а) зупиняємо озвучення,
+// якщо воно грає; (б) clearLayers() + renderPlan(варіант) — логіку renderPlan
+// не чіпаємо, вона малює план з об'єкта цілком, тож цифри в саммарі (#answer)
+// оновлюються самі; (в) підсвічуємо обрану картку. «Програшні» цифри
+// (дорожче/довше) підсвічуємо приглушеним помаранчевим (⚠️), НЕ чистим
+// червоним: це чесний розмен час↔гроші, а не помилка.
+
+/** Зупинити озвучення, якщо синтез грає. Голос (Web Speech TTS) — етап 4
+ *  плану емулятора, і сторінка його вже вміє вимикати: клік по картці — явна
+ *  дія «я вибрав інакше», читати старий варіант поверх нового не можна. */
+function stopVoice() {
+  if (typeof window.speechSynthesis !== 'undefined' &&
+      typeof window.speechSynthesis.cancel === 'function') {
+    try { window.speechSynthesis.cancel(); } catch (err) { /* немає голосів */ }
+  }
+}
+
+/** Озвучення відповіді паралельно з появою карток (Web Speech, uk-UA).
+ *  Текст складаємо з цифр плану — сервер голосових фраз не віддає. */
+function speakPlanSummary(plan) {
+  if (typeof window.speechSynthesis === 'undefined' ||
+      typeof window.SpeechSynthesisUtterance !== 'function') return;
+  const mins = Number(plan && plan.total_min);
+  if (!Number.isFinite(mins)) return;
+  try {
+    let text = 'План: ' + Math.round(mins) + ' хвилин';
+    const price = Number(plan.price_grn);
+    if (Number.isFinite(price)) text += ', ' + Math.round(price) + ' гривень';
+    const variants = Array.isArray(plan.variants) ? plan.variants : [];
+    if (variants.length > 1 && Number.isFinite(Number(variants[1].total_min))) {
+      text += '. Або інший варіант: ' + Math.round(Number(variants[1].total_min)) + ' хвилин' +
+        (Number.isFinite(Number(variants[1].price_grn))
+          ? ', ' + Math.round(Number(variants[1].price_grn)) + ' гривень' : '');
+    }
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = 'uk-UA';
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(utterance);
+  } catch (err) { /* синтез може бути вимкнений — текст і так видно */ }
+}
+
+function hideVariantCards() {
+  state.variantOffer = null;
+  state.activeVariantId = null;
+  const box = document.getElementById('plan-variants');
+  if (box) {
+    box.hidden = true;
+    box.innerHTML = '';
+  }
+}
+
+/** «Чим їдемо» одним рядком: унікальні лінії поїздок варіанта (🚎 5 + 🚌 20). */
+function variantTransportLabel(variant) {
+  const seen = [];
+  (Array.isArray(variant.legs) ? variant.legs : []).forEach((leg) => {
+    if (!leg || leg.type !== 'transit' || !leg.route) return;
+    const label = (leg.vehicle === 'trolley' ? '🚎 ' : '🚌 ') + leg.route;
+    if (seen.indexOf(label) === -1) seen.push(label);
+  });
+  return seen.length ? seen.join(' + ') : 'маршрут';
+}
+
+/**
+ * Карточки над саммарі (#plan-variants). Викликається з render(): картки
+ * з'являються одразу, паралельно з озвученням тексту. Один варіант або жодного
+ * — карток НЕ рендеримо взагалі (панель схована, лишається стандартний текст).
+ */
+function renderVariantCards(plan) {
+  const box = document.getElementById('plan-variants');
+  if (!box) return false;
+  const variants = plan && Array.isArray(plan.variants) ? plan.variants : [];
+  if (variants.length < 2) {
+    hideVariantCards();
+    return false;
+  }
+
+  const times = variants.map((v) => Number(v.total_min)).filter(Number.isFinite);
+  const prices = variants.map((v) => Number(v.price_grn)).filter(Number.isFinite);
+  const bestTime = Math.min.apply(null, times);
+  const bestPrice = Math.min.apply(null, prices);
+
+  state.variantOffer = plan;
+  state.activeVariantId = variants[0].id;
+
+  box.innerHTML = '';
+  variants.forEach((variant, index) => {
+    const time = Number(variant.total_min);
+    const price = Number(variant.price_grn);
+    const timeWorse = Number.isFinite(time) && time > bestTime + 0.05;
+    const priceWorse = Number.isFinite(price) && price > bestPrice + 0.05;
+    const notes = [];
+    if (timeWorse) notes.push('довше на ' + Math.round(time - bestTime) + ' хв');
+    if (priceWorse) notes.push('дорожче на ' + Math.round(price - bestPrice) + ' грн');
+
+    const card = document.createElement('button');
+    card.type = 'button';
+    card.className = 'variant-card' + (index === 0 ? ' active' : '');
+    card.setAttribute('data-variant-id', String(variant.id || index));
+    card.setAttribute('aria-pressed', index === 0 ? 'true' : 'false');
+
+    const tag = document.createElement('span');
+    tag.className = 'variant-tag';
+    tag.textContent = (Array.isArray(variant.tags) && variant.tags.length
+      ? variant.tags : ['варіант']).join(' · ');
+    card.appendChild(tag);
+
+    const route = document.createElement('span');
+    route.className = 'variant-route';
+    route.textContent = variantTransportLabel(variant);
+    card.appendChild(route);
+
+    const meta = document.createElement('span');
+    meta.className = 'variant-meta';
+    const addNum = (value, unit, worse) => {
+      if (!Number.isFinite(value)) return;
+      const span = document.createElement('span');
+      span.className = 'variant-num' + (worse ? ' worse' : '');
+      span.textContent = (worse ? '⚠️ ' : '') + '~' + Math.round(value) + ' ' + unit;
+      meta.appendChild(span);
+    };
+    addNum(time, 'хв', timeWorse);
+    addNum(price, 'грн', priceWorse);
+    if (variant.transfers !== undefined && variant.transfers !== null) {
+      const span = document.createElement('span');
+      span.className = 'variant-num';
+      span.textContent = variant.transfers === 0 ? 'без пересадок'
+        : variant.transfers + ' перес.';
+      meta.appendChild(span);
+    }
+    card.appendChild(meta);
+
+    if (notes.length) {
+      const note = document.createElement('span');
+      note.className = 'variant-note';
+      note.textContent = notes.join(', ');
+      card.appendChild(note);
+    }
+
+    card.onclick = () => selectVariant(variant);
+    box.appendChild(card);
+  });
+
+  box.hidden = false;
+  return true;
+}
+
+/** Клік по картці: голос → стоп, карта → варіант, цифри в саммарі → варіант. */
+function selectVariant(variant) {
+  if (!variant || !Array.isArray(variant.legs)) return;
+  stopVoice();
+
+  // renderPlan читає з об'єкта все (ноги, цифри, ТС, фініш) — віддаємо
+  // злиття «корінь відповіді + варіант»: варіант адитивний, from/to зупинок
+  // і текст фрази живуть у корені (див. router_layer.py: _variant_entry).
+  const root = (state.variantOffer && typeof state.variantOffer === 'object')
+    ? state.variantOffer : {};
+  const planForMap = Object.assign({}, root, variant);
+
+  clearLayers();
+  renderPlan(planForMap);   // лінії/ТС і цифри в саммарі (#answer) з варіанта
+
+  state.activeVariantId = variant.id;
+  const box = document.getElementById('plan-variants');
+  if (box) {
+    Array.prototype.forEach.call(box.querySelectorAll('.variant-card'), (card) => {
+      const active = card.getAttribute('data-variant-id') === String(variant.id);
+      card.classList.toggle('active', active);
+      card.setAttribute('aria-pressed', active ? 'true' : 'false');
+    });
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Скарга «це бред»
 // ---------------------------------------------------------------------------
 
@@ -918,6 +1105,8 @@ document.getElementById('report-btn').onclick = openReportForm;
 document.getElementById('report-send').onclick = sendReport;
 document.getElementById('report-cancel').onclick = closeReportForm;
 document.getElementById('clear-btn').onclick = () => {
+  stopVoice();
+  hideVariantCards();
   clearLayers();
   clearVehicles();
   document.getElementById('answer').style.display = 'none';
@@ -1030,6 +1219,10 @@ loadStops();
 window.Emulator = {
   map, clearLayers, clearVehicles, renderPlan, vehiclePopup,
   lastPlan: () => state.lastPlan,
+  // Картки варіантів (поставка 1, §13 брифа): тільки читання — UI-проверка
+  // сверяет оффер и активный вариант, не роясь в приватном состоянии.
+  variantOffer: () => state.variantOffer,
+  activeVariantId: () => state.activeVariantId,
 };
 
 })(); // конец IIFE: внутренние имена не текут в глобальную область редактора
