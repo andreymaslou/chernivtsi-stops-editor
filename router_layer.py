@@ -221,6 +221,8 @@ class TransitRouter:
 
         self.schedule: Dict[str, Dict[str, Dict[str, Any]]] = schedule or {}
         self._live_vehicles: List[Dict[str, Any]] = []
+        # Источник среза парка: "real" | "sim" | None (не задан — тесты/инструменты).
+        self._fleet_source: Optional[str] = None
         # Индекс «нормализованная подпись маршрута -> машины». Строится в
         # set_live(), чтобы поиск «першого потрібного ТС» не перебирал парк.
         self._live_by_route: Dict[Tuple[str, str], List[Dict[str, Any]]] = {}
@@ -291,9 +293,17 @@ class TransitRouter:
         self,
         vehicles: Sequence[Dict[str, Any]],
         snapshot_at: Optional[datetime] = None,
+        source: Optional[str] = None,
     ) -> None:
         """
         Приймає нормалізований срез живого шару (список ТЗ).
+
+        `source` — звідки прийшов срез: `"real"` (трекер) або `"sim"` (симулятор).
+        Роутер не може визначити це сам: сим-машини приходять із `is_live = True`,
+        тому сама лише позначка «живий» на стенді (`GPS_SIMULATOR=1`) вводить в
+        оману. Значення потрапляє в ногу плану (`source`) і в телеметрію —
+        контракт лога, див. `docs/BRIEF-plan-variants.md` §12.2 і
+        `docs/REVIEW-f4-wait-display.md` §4.
 
         Заодно строит индекс «(тип ТС, нормализованная подпись маршрута) ->
         машины»: поиск «першого потрібного ТС» вызывается из Дейкстры тысячи
@@ -308,6 +318,7 @@ class TransitRouter:
         """
         self._live_vehicles = list(vehicles)
         self._live_snapshot_at = snapshot_at
+        self._fleet_source = source
         # Сброс пространственного кэша — только если изменилась ГЕОМЕТРИЯ парка.
         # eta в записях кэша — величина относительная («через сколько минут от
         # позиции приедет»), от `snapshot_at` она не зависит, поэтому новый
@@ -749,6 +760,11 @@ class TransitRouter:
             "price_grn": int(price_grn),
             "legs": legs,
             "vehicles": vehicles,
+            # Источник парка и признак «в срезе вообще были живые ТС» — контракт
+            # лога телеметрии (§12.2): без этого выборки ночью на симуляторе
+            # невозможно отличить от предпочтений реальных пассажиров.
+            "fleet_source": self._fleet_source or "unknown",
+            "had_live_data": bool(self._live_vehicles),
             "computed_at": now.strftime("%Y-%m-%d %H:%M:%S"),
         }
 
@@ -843,6 +859,15 @@ class TransitRouter:
             "live_bus": wait.get("live_bus"),
             "eta": wait.get("eta_min"),
             "vehicle_state": wait.get("vehicle_state"),
+            # V3-поля (§12.2): расписанное и фактическое ожидание отдельно, чтобы
+            # UI показывал обе цифры без спора, а телеметрия знала источник.
+            "schedule_wait_min": None if wait.get("schedule_wait_min") is None
+            else round(float(wait["schedule_wait_min"]), 1),
+            "live_wait_min": None if wait.get("live_wait_min") is None
+            else round(float(wait["live_wait_min"]), 1),
+            # "real" | "sim" — борт найден и пришёл из соответствующего слоя,
+            # "sched" — живого борта нет, цифра посчитана по расписанию.
+            "source": "sched" if wait.get("live_bus") is None else (self._fleet_source or "unknown"),
             "color": colour,
         }
 
@@ -919,6 +944,7 @@ class TransitRouter:
                 no_service = {
                     "wait_min": None, "eta_min": None, "live_bus": None,
                     "vehicle_state": "не ходить", "headway_min": headway_min,
+                    "schedule_wait_min": None, "live_wait_min": None,
                 }
                 if cache is not None:
                     cache[cache_key] = no_service
@@ -932,6 +958,12 @@ class TransitRouter:
             "live_bus": None,
             "vehicle_state": None,
             "headway_min": headway_min,
+            # V3 (docs/REVIEW-f4-wait-display.md §3): отдаём обе цифры отдельно,
+            # чтобы UI мог показать «5.2 хв (за розкладом)» и «живий борт — 6.9 хв»
+            # вместо двух спорящих чисел. `wait_min` остаётся min(...) — план и
+            # поиск не меняются.
+            "schedule_wait_min": base_wait,
+            "live_wait_min": None,
         }
 
         live = self._nearest_live_vehicle(route_key, board_node, now)
@@ -942,6 +974,7 @@ class TransitRouter:
             # wait_min — очікування на самій зупинці (від прибуття пасажира),
             # тому порівнюємо його з розкладом, а не з ETA від моменту среза.
             live_wait = live.get("wait_min")
+            result["live_wait_min"] = live_wait
             if live_wait is not None and live_wait < base_wait:
                 result["wait_min"] = live_wait
         if cache is not None:

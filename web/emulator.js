@@ -740,17 +740,32 @@ function renderPlan(plan) {
       // Посадка: номер шага вместо безликой точки — глаз цепляется сразу.
       if (path.length) stepBadge(step, path[0], colour).addTo(legLayer);
 
+      // Ожидание: если показанная цифра посчитана по расписанию (нет живого борта
+      // или живой приедет позже расписания), помечаем её как расчётную, а живой
+      // борт показываем отдельной строкой. Так две цифры не спорят — вариант V3,
+      // см. docs/REVIEW-f4-wait-display.md §3.
+      const schedWait = leg.schedule_wait_min;
+      const liveWait = leg.live_wait_min;
+      const schedBased = schedWait != null && leg.wait_min != null &&
+        Math.abs(leg.wait_min - schedWait) < 0.05;
+      const waitNote = leg.wait_min == null ? ''
+        : ', чекати ~' + leg.wait_min + ' хв' + (schedBased ? ' (за розкладом)' : '');
       lines.push(
         '<span class="step-dot" data-step="' + step + '" style="background: ' +
         esc(colour) + '">' + step + '</span> ' +
         (leg.vehicle === 'trolley' ? '🚎' : '🚌') + ' ' + esc(leg.route) +
         ': «' + esc(leg.from) + '» → «' + esc(leg.to) + '», ' + leg.travel_min +
-        ' хв у дорозі, чекати ~' + leg.wait_min + ' хв'
+        ' хв у дорозі' + waitNote
       );
 
       // Перший потрібний ТС: те, у що сідати в цій нозі.
       if (leg.live_bus || leg.eta) {
-        lines.push('   ↳ сідати: ' + esc(leg.live_bus || 'ТЗ') + (leg.eta ? ', буде ~' + leg.eta : '') +
+        const liveMinutes = liveWait != null ? liveWait : leg.eta;
+        const later = liveWait != null && schedWait != null && liveWait > schedWait + 0.05;
+        lines.push('   ↳ сідати: ' + esc(leg.live_bus || 'ТЗ') +
+          (liveMinutes != null
+            ? (later ? ', живий борт — через ' + liveMinutes + ' хв' : ', буде ~' + liveMinutes)
+            : '') +
           (leg.vehicle_state ? ' [' + esc(leg.vehicle_state) + ']' : ''));
       }
     } else if (leg.type === 'transfer') {

@@ -806,6 +806,10 @@ def get_plan(request: PlanRequest):
     # Живой GPS (если поллер успел накопить данные) уточняет ожидание и
     # «перший потрібний ТС» для каждой ноги плана.
     live: Optional[LiveTracker] = app_state.get("live")
+    # Источник среза для ног плана и телеметрии (§12.2 брифа): "sim" на стенде
+    # (GPS_SIMULATOR=1), "real" — из трекера. Роутер сам это не определит:
+    # сим-машины тоже приходят с is_live=True.
+    fleet_source = "sim" if isinstance(live, SimLayer) else "real"
     if live is not None:
         try:
             if plan_now is not None and isinstance(live, SimLayer):
@@ -817,9 +821,13 @@ def get_plan(request: PlanRequest):
                 # Реальный трекер умеет отдавать только «сейчас».
                 snapshot = live.snapshot(only_fresh=True)
                 snapshot_at = datetime.now()
-            router.set_live(snapshot.get("vehicles", []), snapshot_at=snapshot_at)
+            router.set_live(
+                snapshot.get("vehicles", []),
+                snapshot_at=snapshot_at,
+                source=fleet_source,
+            )
         except Exception:
-            router.set_live([])
+            router.set_live([], source=fleet_source)
 
     plan = router.plan(from_stop_id, to_stop_id, now=plan_now)
     if plan is None:

@@ -456,9 +456,28 @@ const probe = () => ({
     window.__legendDisableFlag = box._leaflet_disable_click === true;
     const rect = box.getBoundingClientRect();
     const area = document.querySelector('.leaflet-container').getBoundingClientRect();
+    // Контрольна точка має бути вільною від маркерів ТС: Leaflet при кліку по шару
+    // (іконка машини) НЕ піднімає 'click' самої карти, тому «клік провалився»
+    // ловилось як падіння. На /ui/editor.html на карті 100+ машин, і центр
+    // регулярно виявлявся зайнятий (docs/STATUS.md §5 п.9, пункт «а»).
+    const free = (() => {
+      const cx = area.left + area.width / 2;
+      const cy = area.top + area.height / 2;
+      const offsets = [[0, 0], [0, -120], [0, 120], [-170, 0], [170, 0],
+        [-170, -120], [170, 120], [0, -220], [0, 220]];
+      for (const [dx, dy] of offsets) {
+        const x = Math.min(Math.max(cx + dx, area.left + 8), area.right - 8);
+        const y = Math.min(Math.max(cy + dy, area.top + 8), area.bottom - 8);
+        const el = document.elementFromPoint(x, y);
+        if (!el || !el.closest('.leaflet-container')) continue;
+        if (el.closest('.veh-marker, .leaflet-marker-icon')) continue;
+        return { x: Math.round(x), y: Math.round(y) };
+      }
+      return { x: Math.round(cx), y: Math.round(cy) };
+    })();
     return {
       legend: { x: Math.round(rect.left + rect.width / 2), y: Math.round(rect.top + rect.height / 2) },
-      free: { x: Math.round(area.left + area.width / 2), y: Math.round(area.top + area.height / 2) },
+      free,
     };
   });
   const centre = () => page.evaluate(() => map.getCenter().toString());
@@ -628,10 +647,18 @@ const probe = () => ({
   check('стрілка повертається за курсом маркера',
     !!plan.geometry && plan.geometry.groupTransform === 'rotate(' + plan.geometry.heading + ' 18 18)',
     plan.geometry ? plan.geometry.groupTransform + ' при курсі ' + plan.geometry.heading : 'нет маркеров');
+  // Анимации состояний на странице редактора живут в emulator-panel.css и носят
+  // префикс `emu-` (пространство имён: редактор и эмулятор делят одну страницу,
+  // см. docs/STATUS.md §5 п.9, пункт «б»). На /ui/emulator.html имена без префикса.
+  // Поэтому сверяем имя без префикса — так проверка ловит и «переименовали», и
+  // «правило пропало», но не путается со страницей.
+  const pulseBase = (value) => String(value || '').replace(/^emu-/, '');
   check('CSS станів за специфікацією',
     plan.css.plannedOpacity === '0.6' && /grayscale/.test(plan.css.plannedGrayscale) &&
-    plan.css.stoppedArrowDisplay === 'none' && plan.css.stoppedCircleAnimation === 'pulse-stopped' &&
-    plan.css.targetAnimation === 'pulse-target' && /gold|rgb\(255, 215, 0\)/i.test(plan.css.targetShadow),
+    plan.css.stoppedArrowDisplay === 'none' &&
+    pulseBase(plan.css.stoppedCircleAnimation) === 'pulse-stopped' &&
+    pulseBase(plan.css.targetAnimation) === 'pulse-target' &&
+    /gold|rgb\(255, 215, 0\)/i.test(plan.css.targetShadow),
     'planned=' + plan.css.plannedOpacity + '/' + plan.css.plannedGrayscale +
     ' stopped=' + plan.css.stoppedArrowDisplay + '/' + plan.css.stoppedCircleAnimation +
     ' target=' + plan.css.targetAnimation + '/' + plan.css.targetShadow);
