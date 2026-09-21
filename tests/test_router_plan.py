@@ -572,3 +572,75 @@ def test_fleet_fingerprint_tracks_direction(router, fleet, now):
     assert not router._spatial_cache
 
 
+def test_transfer_graph_invariants(data):
+    """Инварианты сборки переходов: порог, дубли групп и «соседние остановки одной ветки».
+
+    Фільтр «не зшивати сусідні зупинки однієї гілки» діє лише в новій смузі
+    (> 150 м) і лише коли набір маршрутів на обох кінцях однаковий — інакше
+    відрізається реальна пересадка (див. docs/REVIEW-f1-transfer-250m.md §4).
+    """
+    graph, _schedule, _stops = data
+    nodes = {int(key): value for key, value in graph["nodes"].items()}
+    limit = float(graph["params"]["transfer_max_meters"])
+
+    chain_routes: dict = {}
+    for route in graph["routes"].values():
+        chain = route["stops"]
+        for left, right in zip(chain, chain[1:]):
+            key = (min(left, right), max(left, right))
+            chain_routes.setdefault(key, set()).add(
+                (route.get("vehicle_type"), route.get("route_name"))
+            )
+
+    group_of: dict = {}
+    for gid, group in graph["groups"].items():
+        for node in group["node_ids"]:
+            group_of[int(node)] = int(gid)
+
+    for edge in graph["transfers"]:
+        a, b = int(edge["from"]), int(edge["to"])
+        assert edge["meters"] <= limit + 0.05, "переход длиннее порога"
+        same_group = group_of.get(a) is not None and group_of.get(a) == group_of.get(b)
+        if edge["meters"] > 150.0:
+            # Легаси-полоса (< 150 м) сохраняется как есть намеренно: там рёбра
+            # внутри группы — дубли, но их удаление ломает уже принятые планы
+            # (см. TRANSFER_LEGACY_MAX_METERS), поэтому проверяем только новую.
+            assert not same_group, (
+                "в новой полосе оставлено ребро внутри одной группы — дубль: "
+                "роутер и так ходит пешком внутри группы"
+            )
+        if edge["meters"] > 150.0 and (a, b) in chain_routes:
+            left = set(nodes[a]["routes"])
+            right = set(nodes[b]["routes"])
+            assert left != right, (
+                "в новой полосе оставлено ребро «соседние остановки одной ветки» "
+                "при одинаковом наборе маршрутов: пешком идти некуда, можно проехать"
+            )
+
+
+def test_direct_bus_20_reachable_from_uchylische(data):
+    """§1.7: порог 250 м обязан вернуть связку «Училище №15» ↔ «Поліклініка».
+
+    Узел 202 стоял без единого пешего соседа: первая версия фильтра срезала
+    пару 202↔140 (они идут подряд в цепочке `bus:23:B`), хотя наборы маршрутов
+    на концах разные — то есть это настоящая пересадка, а не проход вдоль
+    своего маршрута. Без этого ребра прямой автобус 20 недостижим.
+    """
+    graph, _schedule, _stops = data
+    limit = float(graph["params"]["transfer_max_meters"])
+    if limit < 250.0:
+        pytest.skip("граф собран с порогом %s м — кейс §1.7 относится к 250 м" % limit)
+
+    nodes = {int(key): value for key, value in graph["nodes"].items()}
+    assert nodes[202]["name"].startswith("Училище"), "сменились id узлов — тест надо обновить"
+
+    pairs = {(int(t["from"]), int(t["to"])) for t in graph["transfers"]}
+    assert (140, 202) in pairs or (202, 140) in pairs, (
+        "потеряна связка «Училище №15» ↔ «Поліклініка» (140): прямой 20-й снова недостижим"
+    )
+    neighbours = {
+        (int(t["to"]) if int(t["from"]) == 202 else int(t["from"]))
+        for t in graph["transfers"]
+        if 202 in (int(t["from"]), int(t["to"]))
+    }
+    assert neighbours, "у узла 202 нет ни одного пешего соседа"

@@ -1,11 +1,11 @@
 {
- "generated": "2026-09-20 02:03:21",
+ "generated": "2026-09-21 14:59:50",
  "params": {
   "detour_factor": 1.25,
   "commercial_speed_kmh": 20.0,
   "dwell_seconds": 25.0,
   "node_merge_meters": 20.0,
-  "transfer_max_meters": 150.0,
+  "transfer_max_meters": 250.0,
   "walk_speed_kmh": 4.5,
   "stop_id_match_meters": 60.0
  },
@@ -16,7 +16,11 @@
   "groups": 123,
   "nodes_in_groups": 266,
   "routes": 76,
-  "transfers": 194,
+  "transfers": 292,
+  "transfers_skipped_chain": 11,
+  "transfers_skipped_group": 15,
+  "transfers_legacy_chain_kept": 5,
+  "transfers_legacy_group_kept": 139,
   "stop_ids_matched": 404,
   "stop_ids_unmatched": 0
  },
@@ -30470,6 +30474,12 @@
  "transfers": [
   {
    "from": 0,
+   "to": 297,
+   "meters": 228.7,
+   "walk_minutes": 3.05
+  },
+  {
+   "from": 0,
    "to": 24,
    "meters": 39.8,
    "walk_minutes": 0.53
@@ -30523,10 +30533,28 @@
    "walk_minutes": 0.74
   },
   {
+   "from": 7,
+   "to": 8,
+   "meters": 191.0,
+   "walk_minutes": 2.55
+  },
+  {
+   "from": 8,
+   "to": 31,
+   "meters": 200.6,
+   "walk_minutes": 2.67
+  },
+  {
    "from": 9,
    "to": 17,
    "meters": 22.8,
    "walk_minutes": 0.3
+  },
+  {
+   "from": 10,
+   "to": 16,
+   "meters": 241.5,
+   "walk_minutes": 3.22
   },
   {
    "from": 11,
@@ -30539,6 +30567,18 @@
    "to": 14,
    "meters": 31.6,
    "walk_minutes": 0.42
+  },
+  {
+   "from": 13,
+   "to": 224,
+   "meters": 204.9,
+   "walk_minutes": 2.73
+  },
+  {
+   "from": 13,
+   "to": 190,
+   "meters": 225.5,
+   "walk_minutes": 3.01
   },
   {
    "from": 24,
@@ -30559,10 +30599,76 @@
    "walk_minutes": 0.35
   },
   {
+   "from": 26,
+   "to": 255,
+   "meters": 167.6,
+   "walk_minutes": 2.23
+  },
+  {
+   "from": 26,
+   "to": 33,
+   "meters": 157.4,
+   "walk_minutes": 2.1
+  },
+  {
+   "from": 27,
+   "to": 193,
+   "meters": 216.9,
+   "walk_minutes": 2.89
+  },
+  {
+   "from": 27,
+   "to": 210,
+   "meters": 238.2,
+   "walk_minutes": 3.18
+  },
+  {
+   "from": 27,
+   "to": 392,
+   "meters": 209.6,
+   "walk_minutes": 2.79
+  },
+  {
+   "from": 27,
+   "to": 32,
+   "meters": 238.8,
+   "walk_minutes": 3.18
+  },
+  {
+   "from": 28,
+   "to": 193,
+   "meters": 174.7,
+   "walk_minutes": 2.33
+  },
+  {
+   "from": 28,
+   "to": 210,
+   "meters": 151.2,
+   "walk_minutes": 2.02
+  },
+  {
+   "from": 28,
+   "to": 392,
+   "meters": 208.9,
+   "walk_minutes": 2.78
+  },
+  {
    "from": 28,
    "to": 32,
    "meters": 113.6,
    "walk_minutes": 1.51
+  },
+  {
+   "from": 35,
+   "to": 324,
+   "meters": 208.4,
+   "walk_minutes": 2.78
+  },
+  {
+   "from": 35,
+   "to": 332,
+   "meters": 206.2,
+   "walk_minutes": 2.75
   },
   {
    "from": 35,
@@ -30581,6 +30687,12 @@
    "to": 53,
    "meters": 99.3,
    "walk_minutes": 1.32
+  },
+  {
+   "from": 37,
+   "to": 101,
+   "meters": 230.2,
+   "walk_minutes": 3.07
   },
   {
    "from": 37,
@@ -30607,6 +30719,18 @@
    "walk_minutes": 0.41
   },
   {
+   "from": 39,
+   "to": 79,
+   "meters": 169.2,
+   "walk_minutes": 2.26
+  },
+  {
+   "from": 46,
+   "to": 184,
+   "meters": 189.7,
+   "walk_minutes": 2.53
+  },
+  {
    "from": 46,
    "to": 50,
    "meters": 42.8,
@@ -30625,10 +30749,40 @@
    "walk_minutes": 1.47
   },
   {
+   "from": 51,
+   "to": 79,
+   "meters": 194.8,
+   "walk_minutes": 2.6
+  },
+  {
+   "from": 53,
+   "to": 101,
+   "meters": 189.2,
+   "walk_minutes": 2.52
+  },
+  {
    "from": 53,
    "to": 80,
    "meters": 122.1,
    "walk_minutes": 1.63
+  },
+  {
+   "from": 55,
+   "to": 324,
+   "meters": 207.0,
+   "walk_minutes": 2.76
+  },
+  {
+   "from": 55,
+   "to": 332,
+   "meters": 196.7,
+   "walk_minutes": 2.62
+  },
+  {
+   "from": 56,
+   "to": 79,
+   "meters": 207.9,
+   "walk_minutes": 2.77
   },
   {
    "from": 58,
@@ -30679,16 +30833,52 @@
    "walk_minutes": 1.96
   },
   {
+   "from": 67,
+   "to": 68,
+   "meters": 184.2,
+   "walk_minutes": 2.46
+  },
+  {
    "from": 70,
    "to": 72,
    "meters": 21.9,
    "walk_minutes": 0.29
   },
   {
+   "from": 70,
+   "to": 71,
+   "meters": 172.6,
+   "walk_minutes": 2.3
+  },
+  {
+   "from": 71,
+   "to": 72,
+   "meters": 192.2,
+   "walk_minutes": 2.56
+  },
+  {
+   "from": 73,
+   "to": 185,
+   "meters": 227.2,
+   "walk_minutes": 3.03
+  },
+  {
+   "from": 80,
+   "to": 101,
+   "meters": 167.4,
+   "walk_minutes": 2.23
+  },
+  {
    "from": 83,
    "to": 85,
    "meters": 24.8,
    "walk_minutes": 0.33
+  },
+  {
+   "from": 83,
+   "to": 84,
+   "meters": 237.1,
+   "walk_minutes": 3.16
   },
   {
    "from": 86,
@@ -30721,10 +30911,28 @@
    "walk_minutes": 0.39
   },
   {
+   "from": 99,
+   "to": 368,
+   "meters": 217.8,
+   "walk_minutes": 2.9
+  },
+  {
    "from": 100,
    "to": 126,
    "meters": 26.3,
    "walk_minutes": 0.35
+  },
+  {
+   "from": 102,
+   "to": 333,
+   "meters": 230.0,
+   "walk_minutes": 3.07
+  },
+  {
+   "from": 103,
+   "to": 394,
+   "meters": 208.0,
+   "walk_minutes": 2.77
   },
   {
    "from": 104,
@@ -30739,16 +30947,40 @@
    "walk_minutes": 1.19
   },
   {
+   "from": 105,
+   "to": 138,
+   "meters": 196.5,
+   "walk_minutes": 2.62
+  },
+  {
    "from": 106,
    "to": 243,
    "meters": 149.0,
    "walk_minutes": 1.99
   },
   {
+   "from": 106,
+   "to": 123,
+   "meters": 154.2,
+   "walk_minutes": 2.06
+  },
+  {
    "from": 107,
    "to": 122,
    "meters": 105.0,
    "walk_minutes": 1.4
+  },
+  {
+   "from": 108,
+   "to": 109,
+   "meters": 234.9,
+   "walk_minutes": 3.13
+  },
+  {
+   "from": 108,
+   "to": 120,
+   "meters": 249.5,
+   "walk_minutes": 3.33
   },
   {
    "from": 108,
@@ -30841,10 +31073,22 @@
    "walk_minutes": 1.27
   },
   {
+   "from": 124,
+   "to": 138,
+   "meters": 174.8,
+   "walk_minutes": 2.33
+  },
+  {
    "from": 127,
    "to": 286,
    "meters": 53.7,
    "walk_minutes": 0.72
+  },
+  {
+   "from": 127,
+   "to": 368,
+   "meters": 198.9,
+   "walk_minutes": 2.65
   },
   {
    "from": 128,
@@ -30871,10 +31115,22 @@
    "walk_minutes": 0.78
   },
   {
+   "from": 131,
+   "to": 153,
+   "meters": 175.6,
+   "walk_minutes": 2.34
+  },
+  {
    "from": 133,
    "to": 134,
    "meters": 91.4,
    "walk_minutes": 1.22
+  },
+  {
+   "from": 133,
+   "to": 289,
+   "meters": 215.0,
+   "walk_minutes": 2.87
   },
   {
    "from": 134,
@@ -30913,10 +31169,28 @@
    "walk_minutes": 0.67
   },
   {
+   "from": 138,
+   "to": 389,
+   "meters": 217.5,
+   "walk_minutes": 2.9
+  },
+  {
    "from": 139,
    "to": 145,
    "meters": 29.0,
    "walk_minutes": 0.39
+  },
+  {
+   "from": 139,
+   "to": 276,
+   "meters": 163.7,
+   "walk_minutes": 2.18
+  },
+  {
+   "from": 140,
+   "to": 202,
+   "meters": 163.1,
+   "walk_minutes": 2.17
   },
   {
    "from": 140,
@@ -30950,6 +31224,12 @@
   },
   {
    "from": 144,
+   "to": 202,
+   "meters": 205.9,
+   "walk_minutes": 2.74
+  },
+  {
+   "from": 144,
    "to": 399,
    "meters": 99.5,
    "walk_minutes": 1.33
@@ -30965,6 +31245,36 @@
    "to": 241,
    "meters": 21.6,
    "walk_minutes": 0.29
+  },
+  {
+   "from": 146,
+   "to": 257,
+   "meters": 217.8,
+   "walk_minutes": 2.9
+  },
+  {
+   "from": 146,
+   "to": 258,
+   "meters": 167.2,
+   "walk_minutes": 2.23
+  },
+  {
+   "from": 147,
+   "to": 241,
+   "meters": 159.5,
+   "walk_minutes": 2.13
+  },
+  {
+   "from": 147,
+   "to": 257,
+   "meters": 182.8,
+   "walk_minutes": 2.44
+  },
+  {
+   "from": 147,
+   "to": 258,
+   "meters": 193.7,
+   "walk_minutes": 2.58
   },
   {
    "from": 149,
@@ -31028,9 +31338,27 @@
   },
   {
    "from": 166,
+   "to": 167,
+   "meters": 240.7,
+   "walk_minutes": 3.21
+  },
+  {
+   "from": 166,
+   "to": 272,
+   "meters": 229.5,
+   "walk_minutes": 3.06
+  },
+  {
+   "from": 166,
    "to": 175,
    "meters": 84.2,
    "walk_minutes": 1.12
+  },
+  {
+   "from": 167,
+   "to": 272,
+   "meters": 214.9,
+   "walk_minutes": 2.87
   },
   {
    "from": 168,
@@ -31123,6 +31451,12 @@
    "walk_minutes": 0.49
   },
   {
+   "from": 196,
+   "to": 206,
+   "meters": 247.5,
+   "walk_minutes": 3.3
+  },
+  {
    "from": 198,
    "to": 205,
    "meters": 50.4,
@@ -31136,9 +31470,21 @@
   },
   {
    "from": 200,
+   "to": 403,
+   "meters": 245.0,
+   "walk_minutes": 3.27
+  },
+  {
+   "from": 200,
    "to": 203,
    "meters": 64.0,
    "walk_minutes": 0.85
+  },
+  {
+   "from": 205,
+   "to": 237,
+   "meters": 211.3,
+   "walk_minutes": 2.82
   },
   {
    "from": 207,
@@ -31151,6 +31497,24 @@
    "to": 392,
    "meters": 60.2,
    "walk_minutes": 0.8
+  },
+  {
+   "from": 218,
+   "to": 297,
+   "meters": 207.5,
+   "walk_minutes": 2.77
+  },
+  {
+   "from": 219,
+   "to": 297,
+   "meters": 206.5,
+   "walk_minutes": 2.75
+  },
+  {
+   "from": 221,
+   "to": 300,
+   "meters": 196.3,
+   "walk_minutes": 2.62
   },
   {
    "from": 221,
@@ -31219,6 +31583,18 @@
    "walk_minutes": 1.7
   },
   {
+   "from": 241,
+   "to": 257,
+   "meters": 237.3,
+   "walk_minutes": 3.16
+  },
+  {
+   "from": 241,
+   "to": 258,
+   "meters": 188.5,
+   "walk_minutes": 2.51
+  },
+  {
    "from": 245,
    "to": 254,
    "meters": 23.9,
@@ -31235,6 +31611,30 @@
    "to": 253,
    "meters": 68.9,
    "walk_minutes": 0.92
+  },
+  {
+   "from": 249,
+   "to": 334,
+   "meters": 221.4,
+   "walk_minutes": 2.95
+  },
+  {
+   "from": 249,
+   "to": 344,
+   "meters": 249.3,
+   "walk_minutes": 3.32
+  },
+  {
+   "from": 252,
+   "to": 312,
+   "meters": 173.1,
+   "walk_minutes": 2.31
+  },
+  {
+   "from": 252,
+   "to": 321,
+   "meters": 191.8,
+   "walk_minutes": 2.56
   },
   {
    "from": 255,
@@ -31261,6 +31661,12 @@
    "walk_minutes": 1.47
   },
   {
+   "from": 261,
+   "to": 278,
+   "meters": 231.9,
+   "walk_minutes": 3.09
+  },
+  {
    "from": 262,
    "to": 396,
    "meters": 70.4,
@@ -31271,6 +31677,24 @@
    "to": 271,
    "meters": 102.8,
    "walk_minutes": 1.37
+  },
+  {
+   "from": 263,
+   "to": 347,
+   "meters": 192.2,
+   "walk_minutes": 2.56
+  },
+  {
+   "from": 263,
+   "to": 357,
+   "meters": 170.8,
+   "walk_minutes": 2.28
+  },
+  {
+   "from": 265,
+   "to": 267,
+   "meters": 215.1,
+   "walk_minutes": 2.87
   },
   {
    "from": 265,
@@ -31303,16 +31727,40 @@
    "walk_minutes": 1.6
   },
   {
+   "from": 267,
+   "to": 268,
+   "meters": 197.3,
+   "walk_minutes": 2.63
+  },
+  {
    "from": 268,
    "to": 367,
    "meters": 102.3,
    "walk_minutes": 1.36
   },
   {
+   "from": 271,
+   "to": 357,
+   "meters": 223.3,
+   "walk_minutes": 2.98
+  },
+  {
    "from": 273,
    "to": 308,
    "meters": 58.5,
    "walk_minutes": 0.78
+  },
+  {
+   "from": 273,
+   "to": 307,
+   "meters": 242.1,
+   "walk_minutes": 3.23
+  },
+  {
+   "from": 273,
+   "to": 353,
+   "meters": 249.0,
+   "walk_minutes": 3.32
   },
   {
    "from": 274,
@@ -31345,6 +31793,12 @@
    "walk_minutes": 0.42
   },
   {
+   "from": 275,
+   "to": 389,
+   "meters": 220.9,
+   "walk_minutes": 2.95
+  },
+  {
    "from": 280,
    "to": 401,
    "meters": 105.3,
@@ -31369,6 +31823,12 @@
    "walk_minutes": 0.76
   },
   {
+   "from": 286,
+   "to": 368,
+   "meters": 244.0,
+   "walk_minutes": 3.25
+  },
+  {
    "from": 290,
    "to": 296,
    "meters": 20.4,
@@ -31385,6 +31845,12 @@
    "to": 294,
    "meters": 23.2,
    "walk_minutes": 0.31
+  },
+  {
+   "from": 297,
+   "to": 398,
+   "meters": 237.9,
+   "walk_minutes": 3.17
   },
   {
    "from": 298,
@@ -31405,6 +31871,24 @@
    "walk_minutes": 0.28
   },
   {
+   "from": 303,
+   "to": 395,
+   "meters": 190.5,
+   "walk_minutes": 2.54
+  },
+  {
+   "from": 303,
+   "to": 310,
+   "meters": 193.0,
+   "walk_minutes": 2.57
+  },
+  {
+   "from": 305,
+   "to": 354,
+   "meters": 170.2,
+   "walk_minutes": 2.27
+  },
+  {
    "from": 305,
    "to": 355,
    "meters": 31.1,
@@ -31412,9 +31896,33 @@
   },
   {
    "from": 306,
+   "to": 353,
+   "meters": 203.0,
+   "walk_minutes": 2.71
+  },
+  {
+   "from": 306,
+   "to": 391,
+   "meters": 227.1,
+   "walk_minutes": 3.03
+  },
+  {
+   "from": 306,
    "to": 354,
    "meters": 36.2,
    "walk_minutes": 0.48
+  },
+  {
+   "from": 306,
+   "to": 355,
+   "meters": 230.9,
+   "walk_minutes": 3.08
+  },
+  {
+   "from": 307,
+   "to": 352,
+   "meters": 177.2,
+   "walk_minutes": 2.36
   },
   {
    "from": 307,
@@ -31427,6 +31935,18 @@
    "to": 391,
    "meters": 91.1,
    "walk_minutes": 1.21
+  },
+  {
+   "from": 307,
+   "to": 354,
+   "meters": 221.7,
+   "walk_minutes": 2.96
+  },
+  {
+   "from": 309,
+   "to": 310,
+   "meters": 159.2,
+   "walk_minutes": 2.12
   },
   {
    "from": 312,
@@ -31459,6 +31979,18 @@
    "walk_minutes": 0.45
   },
   {
+   "from": 324,
+   "to": 331,
+   "meters": 227.9,
+   "walk_minutes": 3.04
+  },
+  {
+   "from": 325,
+   "to": 332,
+   "meters": 224.9,
+   "walk_minutes": 3.0
+  },
+  {
    "from": 325,
    "to": 326,
    "meters": 124.4,
@@ -31487,6 +32019,12 @@
    "to": 331,
    "meters": 89.6,
    "walk_minutes": 1.19
+  },
+  {
+   "from": 326,
+   "to": 327,
+   "meters": 204.1,
+   "walk_minutes": 2.72
   },
   {
    "from": 328,
@@ -31531,10 +32069,28 @@
    "walk_minutes": 0.37
   },
   {
+   "from": 345,
+   "to": 346,
+   "meters": 246.5,
+   "walk_minutes": 3.29
+  },
+  {
+   "from": 345,
+   "to": 358,
+   "meters": 201.6,
+   "walk_minutes": 2.69
+  },
+  {
    "from": 346,
    "to": 347,
    "meters": 142.3,
    "walk_minutes": 1.9
+  },
+  {
+   "from": 346,
+   "to": 357,
+   "meters": 207.8,
+   "walk_minutes": 2.77
   },
   {
    "from": 346,
@@ -31561,10 +32117,22 @@
    "walk_minutes": 0.32
   },
   {
+   "from": 352,
+   "to": 391,
+   "meters": 170.3,
+   "walk_minutes": 2.27
+  },
+  {
    "from": 353,
    "to": 391,
    "meters": 76.4,
    "walk_minutes": 1.02
+  },
+  {
+   "from": 357,
+   "to": 358,
+   "meters": 247.3,
+   "walk_minutes": 3.3
   },
   {
    "from": 359,
@@ -31579,6 +32147,18 @@
    "walk_minutes": 0.39
   },
   {
+   "from": 363,
+   "to": 364,
+   "meters": 244.8,
+   "walk_minutes": 3.26
+  },
+  {
+   "from": 370,
+   "to": 374,
+   "meters": 244.1,
+   "walk_minutes": 3.25
+  },
+  {
    "from": 376,
    "to": 387,
    "meters": 21.9,
@@ -31591,6 +32171,12 @@
    "walk_minutes": 0.69
   },
   {
+   "from": 377,
+   "to": 378,
+   "meters": 236.3,
+   "walk_minutes": 3.15
+  },
+  {
    "from": 379,
    "to": 380,
    "meters": 109.6,
@@ -31601,6 +32187,12 @@
    "to": 385,
    "meters": 39.8,
    "walk_minutes": 0.53
+  },
+  {
+   "from": 381,
+   "to": 384,
+   "meters": 157.2,
+   "walk_minutes": 2.1
   },
   {
    "from": 382,
