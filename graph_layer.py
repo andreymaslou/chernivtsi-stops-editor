@@ -51,7 +51,7 @@ import math
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 logger = logging.getLogger("transgps-graph")
 
@@ -75,7 +75,21 @@ DWELL_SECONDS = 25.0
 NODE_MERGE_METERS = 20.0
 
 # Максимальное расстояние пешего перехода между разными остановками.
-TRANSFER_MAX_METERS = 150.0
+# 250 м (было 150): при 150 м в графе не было половины реальных связок —
+# например «Училище №15» ↔ «Поліклініка» (узлы 202↔144, 204 м), из-за чего
+# прямой автобус 20 не попадал в выдачу вообще (docs/BRIEF-plan-variants.md §1.7).
+# При 250 м пар становится на 124 больше (47 из них — соседние остановки одной
+# ветки), поэтому порог обязан применяться ВМЕСТЕ с фильтрами в build_transfers.
+# Замеры и решения: §12.1, §12.4 брифа.
+TRANSFER_MAX_METERS = 250.0
+
+# Порог, при котором граф собирался ДО расширения. Рёбра внутри него остаются
+# как есть (фильтры к ним не применяем): они часть уже принятого поведения, и их
+# удаление ломает реальные планы — замер: «Онколікарня → вул. Гетьмана Дорошенка»
+# был 75 мин / 20 грн / 0 пересадок, стал 112 мин / 60 грн / 2 пересадки.
+# Фильтры нужны только для новой полосы 150–250 м (там 54 пары из 124 —
+# «соседние остановки одной ветки» или дубли групп).
+TRANSFER_LEGACY_MAX_METERS = 150.0
 
 # Скорость пешехода при пересадке, км/ч.
 WALK_SPEED_KMH = 4.5
@@ -505,7 +519,30 @@ def segment_minutes(meters: float) -> float:
     return round(travel_minutes + DWELL_SECONDS / 60.0, 3)
 
 
-def build_transfers(nodes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def route_chain_pairs(routes: Dict[str, Dict[str, Any]]) -> Set[Tuple[int, int]]:
+    """
+    Пары узлов, соседние в цепочке одного направления («одна ветка»).
+
+    Это НЕ пересадка, а «выйти и дойти до следующей остановки того же маршрута»:
+    переход по прямой короче проезда, поэтому роутер начинал ходить пешком
+    вместо поездки. При пороге 150 м таких пар в графе не было, при 250 м их
+    47 из 124 новых (замеры §12.1 брифа) — отсекаем.
+    """
+    pairs: Set[Tuple[int, int]] = set()
+    for route in routes.values():
+        chain = route["stops"]
+        for left, right in zip(chain, chain[1:]):
+            pairs.add((left, right) if left < right else (right, left))
+    return pairs
+
+
+def build_transfers(
+    nodes: List[Dict[str, Any]],
+    chain_pairs: Optional[Set[Tuple[int, int]]] = None,
+    group_of: Optional[Dict[int, int]] = None,
+    node_routes: Optional[Dict[int, Set[str]]] = None,
+    stats: Optional[Dict[str, int]] = None,
+) -> List[Dict[str, Any]]:
     """
     Пешие пересадки между разными узлами (<= TRANSFER_MAX_METERS).
 
@@ -513,7 +550,25 @@ def build_transfers(nodes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     внутри одного узла — это просто выход из машины на той же остановке.
     Остаются реальные пары «остановка на другой стороне / на соседней улице»,
     между которыми пассажир дойдёт пешком.
+
+    Фильтры (нужны при пороге 250 м, см. docs/BRIEF-plan-variants.md §12.1) и
+    применяются ТОЛЬКО к полосе > TRANSFER_LEGACY_MAX_METERS:
+        chain_pairs — пары, соседние в цепочке одного направления. Пропускаем их
+            ТОЛЬКО если на обоих концах тот же набор маршрутов (node_routes):
+            тогда пассажир просто проедет, а пешком ходить нечего. Если наборы
+            разные — это реальный вариант сесть на маршрут, который идёт лишь от
+            соседней остановки (кейс «Училище №15» ↔ «Поліклініка», §1.7 — без
+            этого ребра у узла 202 ноль соседей и прямой 20-й недостижим);
+        group_of — «узел → группа»: внутри одной группы роутер и так ходит пешком
+            (router_layer._expand_to_boardable), явное ребро — дубль группы.
+    Рёбра внутри старой полосы остаются без изменений — см. комментарий к
+    TRANSFER_LEGACY_MAX_METERS.
     """
+    skipped_chain = 0
+    skipped_group = 0
+    legacy_chain = 0
+    legacy_group = 0
+
     grid = _SpatialGrid()
     for node in nodes:
         grid.add(node["node_id"], node["lat"], node["lon"])
@@ -527,12 +582,36 @@ def build_transfers(nodes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             distance = haversine_m(node["lat"], node["lon"], other["lat"], other["lon"])
             if distance > TRANSFER_MAX_METERS:
                 continue
+            chain_key = (node["node_id"], other_id) if node["node_id"] < other_id else (other_id, node["node_id"])
+            same_routes = False
+            if node_routes is not None:
+                same_routes = node_routes.get(node["node_id"], set()) == node_routes.get(other_id, set())
+            is_chain = bool(chain_pairs) and chain_key in chain_pairs and same_routes
+            group = group_of.get(node["node_id"]) if group_of is not None else None
+            is_group = group is not None and group == group_of.get(other_id)
+            if distance <= TRANSFER_LEGACY_MAX_METERS:
+                # Старая полоса: ребро оставляем, но считаем «мусорные» для отчёта.
+                legacy_chain += 1 if is_chain else 0
+                legacy_group += 1 if is_group else 0
+            else:
+                if is_chain:
+                    skipped_chain += 1
+                    continue
+                if is_group:
+                    skipped_group += 1
+                    continue
             transfers.append({
                 "from": node["node_id"],
                 "to": other_id,
                 "meters": round(distance, 1),
                 "walk_minutes": round((distance / 1000.0) / WALK_SPEED_KMH * 60.0, 2),
             })
+
+    if stats is not None:
+        stats["transfers_skipped_chain"] = skipped_chain
+        stats["transfers_skipped_group"] = skipped_group
+        stats["transfers_legacy_chain_kept"] = legacy_chain
+        stats["transfers_legacy_group_kept"] = legacy_group
     return transfers
 
 
@@ -714,9 +793,10 @@ def build_graph(
             if key not in nodes[node_id]["routes"]:
                 nodes[node_id]["routes"].append(key)
 
-    transfers = build_transfers(nodes)
-
     # Остановочные группы: узлы одного названия в шаговой доступности.
+    # Собираем ДО пересадок: внутри одной группы пассажир и так переходит пешком
+    # (router_layer._expand_to_boardable), поэтому явные рёбра внутри группы —
+    # дубли, а «соседние остановки одной ветки» — не пересадка вовсе (§12.1).
     groups = build_groups(nodes)
     node_groups: Dict[int, int] = {}
     for group in groups:
@@ -724,6 +804,15 @@ def build_graph(
             node_groups[node_id] = group["group_id"]
     for node in nodes:
         node["group_id"] = node_groups.get(node["node_id"])
+
+    transfer_stats: Dict[str, int] = {}
+    transfers = build_transfers(
+        nodes,
+        chain_pairs=route_chain_pairs(routes),
+        group_of=node_groups,
+        node_routes={node["node_id"]: set(node["routes"]) for node in nodes},
+        stats=transfer_stats,
+    )
 
     if live_route_names:
         for route in routes.values():
@@ -752,6 +841,10 @@ def build_graph(
             "nodes_in_groups": len(node_groups),
             "routes": len(routes),
             "transfers": len(transfers),
+            "transfers_skipped_chain": transfer_stats.get("transfers_skipped_chain", 0),
+            "transfers_skipped_group": transfer_stats.get("transfers_skipped_group", 0),
+            "transfers_legacy_chain_kept": transfer_stats.get("transfers_legacy_chain_kept", 0),
+            "transfers_legacy_group_kept": transfer_stats.get("transfers_legacy_group_kept", 0),
             "stop_ids_matched": id_stats["matched"],
             "stop_ids_unmatched": id_stats["unmatched"],
         },

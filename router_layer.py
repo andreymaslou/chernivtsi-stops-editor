@@ -192,6 +192,14 @@ class TransitRouter:
             self.transfer_walk[(a, b)] = minutes
             self.transfer_walk[(b, a)] = minutes
 
+        # Сусіди по пішій пересадці: вузол -> [(вузол, хвилин)]. Індекс потрібен,
+        # щоб _expand_to_boardable не сканував увесь transfer_walk (було O(V·E):
+        # при 264 пересадках це давало +50% до p50 —
+        # tools/perf/compare_snapshots.py f1_before f1_after).
+        self.transfer_neighbors: Dict[int, List[Tuple[int, float]]] = {}
+        for (a, b), minutes in self.transfer_walk.items():
+            self.transfer_neighbors.setdefault(a, []).append((b, minutes))
+
         # Зупинкові групи.
         self.node_group: Dict[int, Optional[int]] = {}
         self.group_nodes: Dict[int, List[int]] = {}
@@ -408,13 +416,10 @@ class TransitRouter:
                     seen.add(mate)
                     options.append((mate, self._walk_between(node, mate)))
 
-        for (a, b), minutes in self.transfer_walk.items():
-            if a == node and b not in seen:
-                seen.add(b)
-                options.append((b, minutes))
-            elif b == node and a not in seen:
-                seen.add(a)
-                options.append((a, minutes))
+        for other, minutes in self.transfer_neighbors.get(node, ()):
+            if other not in seen:
+                seen.add(other)
+                options.append((other, minutes))
 
         return options
 
