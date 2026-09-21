@@ -829,6 +829,11 @@ def get_plan(request: PlanRequest):
         except Exception:
             router.set_live([], source=fleet_source)
 
+    if plan_now is None:
+        # Один и тот же момент для обоих прогонов (дефолт и вариант «≤1
+        # пересадка»): иначе ожидания второго прогона считались бы от другого
+        # «сейчас», и цифры карточек не сходились бы между собой.
+        plan_now = datetime.now()
     plan = router.plan(from_stop_id, to_stop_id, now=plan_now)
     if plan is None:
         stop_by_id = {str(stop["id"]): stop for stop in locator.stops}
@@ -859,6 +864,15 @@ def get_plan(request: PlanRequest):
             "note": note,
         }
 
+    # Варианты плана для карточек (поставка 1, §13 брифа): аддитивно — корневой
+    # ответ не меняется, выбранный по умолчанию вариант остаётся в корне, а
+    # остальные лежат в `variants`. `variants_note` объясняет, почему вариант
+    # один (честное «сейчас нет» вместо пустого списка).
+    variants, variants_note = router.build_variants(
+        from_stop_id, to_stop_id, now=plan_now, default_plan=plan
+    )
+    plan["variants"] = variants
+    plan["variants_note"] = variants_note
     plan["user_text"] = request.text
     plan["debug_info"] = debug
     plan["reask"] = False

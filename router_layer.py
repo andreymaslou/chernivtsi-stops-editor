@@ -375,8 +375,17 @@ class TransitRouter:
         from_stop_id: int,
         to_stop_id: int,
         now: Optional[datetime] = None,
+        max_transfers: Optional[int] = None,
     ) -> Optional[Dict[str, Any]]:
-        """Будує план від from_stop_id до to_stop_id; None — маршрут не знайдено."""
+        """
+        Будує план від from_stop_id до to_stop_id; None — маршрут не знайдено.
+
+        `max_transfers` — жорстке обмеження кількості пересадок для ЦЬОГО прогону
+        (None → модульна константа `MAX_TRANSFERS`). Саме параметром, а не правкою
+        константи: один обʼєкт `TransitRouter` обслуговує кілька потоків FastAPI,
+        і глобальна правка — це гонка між запитами. Другим прогоном будуються
+        варіанти плану (`build_variants`, поставка 1, §13 брифа).
+        """
         now = now or datetime.now()
         from_nodes = self._resolve_to_nodes(int(from_stop_id))
         to_nodes = self._resolve_to_nodes(int(to_stop_id))
@@ -408,8 +417,97 @@ class TransitRouter:
         # (эндпоинт объявлен обычным def), поэтому общее поле дало бы гонку и
         # ответы «из другого времени».
         wait_cache: Dict[Tuple[str, int], Dict[str, Any]] = {}
-        result = self._dijkstra(from_nodes, to_nodes, now, wait_cache)
+        result = self._dijkstra(from_nodes, to_nodes, now, wait_cache, max_transfers=max_transfers)
         return result
+
+    # Максимальное «удорожание временем» второго варианта: если он медленнее
+    # дефолта больше, чем на столько минут, карточку не показываем — такой размен
+    # человеку уже не интересен, а честнее сказать «другого варианта нет».
+    # Замеры §12.6: медиана размена «≤1 пересадка» — +7.5 мин по 44 парам.
+    VARIANT_MAX_SLOWDOWN_MIN = 20.0
+
+    def build_variants(
+        self,
+        from_stop_id: int,
+        to_stop_id: int,
+        now: Optional[datetime] = None,
+        default_plan: Optional[Dict[str, Any]] = None,
+        second_max_transfers: int = 1,
+    ) -> Tuple[List[Dict[str, Any]], Optional[str]]:
+        """
+        Собирает варианты плана для карточек (поставка 1, §13 брифа).
+
+        Первый прогон — обычный (дефолт, минимум времени); его результат уже есть
+        у вызывающего, поэтому принимаем его как `default_plan` и не считаем
+        заново. Второй прогон — с жёстким ограничением `second_max_transfers`
+        («≤1 пересадка»): меньше посадок → меньше тарифов, то есть «дешевле».
+
+        Почему именно второй прогон, а не `transfer penalty`: штраф только
+        искажает порядок по времени, а когда варианта нет вовсе — вернёт план с
+        пересадкой, и карточка «Прямой» становится ложью (§11 брифа). Жёсткое
+        ограничение даёт честный ответ «варианта сейчас нет».
+
+        Схема аддитивная: корневой ответ не меняется, варианты лежат в
+        `variants`, а выбранный по умолчанию остаётся в корне (совместимость с UI
+        и pytest).
+
+        Возвращает `(variants, note)`: список вариантов (первый — всегда дефолт) и
+        человеческую пометку, когда второго варианта сейчас нет.
+        """
+        now = now or datetime.now()
+        default = default_plan if default_plan is not None else self.plan(
+            from_stop_id, to_stop_id, now=now
+        )
+        if default is None:
+            return [], "маршрут не знайдено"
+        variants = [self._variant_entry(default, "default")]
+        if default.get("transfers", 0) <= second_max_transfers:
+            return variants, (
+                "другого варіанта зараз немає: маршрут уже з ≤%d пересадками"
+                % second_max_transfers
+            )
+
+        second = self.plan(
+            from_stop_id, to_stop_id, now=now, max_transfers=second_max_transfers
+        )
+        if second is None:
+            return variants, (
+                "другого варіанта зараз немає: із ≤%d пересадками маршрут не знайдено"
+                % second_max_transfers
+            )
+        if (second["total_min"], second["price_grn"], second["transfers"]) == (
+            default["total_min"], default["price_grn"], default["transfers"]
+        ):
+            return variants, "другого варіанта зараз немає: обидва прогони дали той самий план"
+        slowdown = second["total_min"] - default["total_min"]
+        if slowdown > self.VARIANT_MAX_SLOWDOWN_MIN:
+            return variants, "другого варіанта зараз немає: він на %d хв довший" % slowdown
+        variants.append(self._variant_entry(second, "fewer_transfers"))
+        return variants, None
+
+    @staticmethod
+    def _variant_entry(plan: Dict[str, Any], variant_id: str) -> Dict[str, Any]:
+        """
+        Один вариант для карточки: цифры `(грн, хв)`, теги и ноги (для карты).
+
+        Теги — короткий смысловой ярлык вместо чтения цифр (§11): «Прямий» при
+        0 пересадок, «Швидкий» у дефолта (он оптимум по времени по построению),
+        «Дешевий» у второго варианта.
+        """
+        tags: List[str] = []
+        if plan.get("transfers") == 0:
+            tags.append("Прямий")
+        tags.append("Швидкий" if variant_id == "default" else "Дешевий")
+        return {
+            "id": variant_id,
+            "tags": tags,
+            "total_min": plan.get("total_min"),
+            "price_grn": plan.get("price_grn"),
+            "transfers": plan.get("transfers"),
+            "legs": plan.get("legs", []),
+            "vehicles": plan.get("vehicles", []),
+            "fleet_source": plan.get("fleet_source"),
+        }
 
     # ------------------------------------------------------------------
     # Розширення: куди можна піти/сісти з вузла
@@ -536,6 +634,7 @@ class TransitRouter:
         to_nodes: List[int],
         now: datetime,
         wait_cache: Optional[Dict[Tuple[str, int], Dict[str, Any]]] = None,
+        max_transfers: Optional[int] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Оптимальний маршрут (0-2 пересадки). Вартість — «хвилини від виходу
@@ -586,7 +685,7 @@ class TransitRouter:
                         heapq.heappush(heap, (cost, 1, route_key, board_node))
 
         best_goal: Optional[Tuple[float, float, Tuple[Any, ...]]] = None
-        max_boardings = MAX_TRANSFERS + 1
+        max_boardings = (MAX_TRANSFERS if max_transfers is None else int(max_transfers)) + 1
 
         while heap:
             cost, boardings, route_key, node = heapq.heappop(heap)

@@ -16,6 +16,7 @@ from datetime import timedelta
 
 import pytest
 
+import router_layer
 from router_layer import TransitRouter
 
 # Эталонные пары остановок.
@@ -644,3 +645,62 @@ def test_direct_bus_20_reachable_from_uchylische(data):
         if 202 in (int(t["from"]), int(t["to"]))
     }
     assert neighbours, "у узла 202 нет ни одного пешего соседа"
+
+def test_variants_offer_fewer_transfers(router, now):
+    """Второй прогон «≤1 пересадка» даёт дешёвый вариант карточкой (§13 брифа).
+
+    Пара — «Поліклініка профоглядів → вул. Сагайдачного»: дефолт 2 пересадки,
+    второй прогон даёт 1 пересадку и меньше денег (замер 2026-09-21).
+    """
+    pair = (169, 68)
+    default = router.plan(*pair, now=now)
+    assert default is not None and default["transfers"] >= 2
+
+    variants, note = router.build_variants(*pair, now=now, default_plan=default)
+
+    assert note is None, "для этой пары вариант должен быть доступен: %r" % note
+    assert len(variants) == 2
+    first, second = variants
+
+    # Корневой ответ не подменяется: первый вариант повторяет дефолт.
+    assert (first["total_min"], first["price_grn"], first["transfers"]) == (
+        default["total_min"], default["price_grn"], default["transfers"])
+    assert first["id"] == "default" and "Швидкий" in first["tags"]
+
+    # Второй вариант — честное «дешевле»: меньше посадок и меньше денег.
+    assert second["id"] == "fewer_transfers" and "Дешевий" in second["tags"]
+    assert second["transfers"] < default["transfers"]
+    assert second["price_grn"] < default["price_grn"]
+    assert second["total_min"] >= default["total_min"]
+    assert second["legs"], "у варианта должны быть ноги — их рисует карта"
+
+
+def test_variants_are_honest_when_there_is_no_second(router, now):
+    """Когда варианта нет, API говорит об этом текстом, а не пустым списком."""
+    pair = (107, 166)  # дефолт уже с ≤1 пересадкой — второй карточке взяться неоткуда
+    default = router.plan(*pair, now=now)
+    assert default is not None
+
+    variants, note = router.build_variants(*pair, now=now, default_plan=default)
+
+    assert len(variants) == 1
+    assert note and "немає" in note, note
+
+
+def test_max_transfers_is_a_parameter_not_a_global(router, now):
+    """Ограничение пересадок — параметр вызова; глобальная константа не меняется.
+
+    Иначе второй прогон («≤1 пересадка») правил бы общую константу, а один
+    `TransitRouter` обслуживает несколько потоков FastAPI — это гонка между
+    запросами (docs/BRIEF-plan-variants.md §13, F3).
+    """
+    pair = (169, 68)
+    before = router_layer.MAX_TRANSFERS
+
+    two = router.plan(*pair, now=now)
+    one = router.plan(*pair, now=now, max_transfers=1)
+
+    assert router_layer.MAX_TRANSFERS == before, (
+        "прогон изменил глобальную MAX_TRANSFERS — это гонка между запросами")
+    assert two is not None and one is not None
+    assert one["transfers"] <= 1 < two["transfers"]
