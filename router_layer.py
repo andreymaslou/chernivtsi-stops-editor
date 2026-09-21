@@ -530,6 +530,14 @@ class TransitRouter:
         Оптимальний маршрут (0-2 пересадки). Вартість — «хвилини від виходу
         з дому»: очікування + у дорозі + пішки. Усі ребра невід'ємні, тому
         перший цільовий стан, витягнутий з купи, є оптимальним.
+
+        Ярлик стану — `(route_key, node)`: усе, від чого залежить майбутнє, бо єдина
+        заборона — не сідати вдруге на той самий маршрут після виходу. Раніше тут
+        відсіювались УСІ вже використані маршрути, а набір у ярлик не входив: тоді
+        дешевший ярлик витісняє дорожчий із кращим набором, і оптимальний план
+        губиться (саме так погіршився еталон day 12:00 `181→166`, 50 → 64 хв, після
+        розширення графа до 250 м — `docs/REVIEW-f1-transfer-250m.md` §6). Варіант із
+        набором у ярлику коректний, але дає ×2–4 станів і +59…93 % до p50 — занадто.
         """
         import heapq
 
@@ -541,9 +549,9 @@ class TransitRouter:
             for board_node, _walk in self._expand_to_boardable(node):
                 origin_zone.add(board_node)
 
-        heap: List[Tuple[float, int, str, int, frozenset]] = []
+        heap: List[Tuple[float, int, str, int]] = []
         dist: Dict[Tuple[str, int], float] = {}
-        # prev[(key,node)] = (prev_key, prev_node, вид, додатково)
+        # prev[стан] = (попередній стан або None, вид, додатково)
         #   вид "start" -> (walk_min, wait_min)
         #   вид "ride"  -> ride_cost
         #   вид "board" -> (walk_min, wait_min, board_node)
@@ -559,21 +567,18 @@ class TransitRouter:
                     wait = self._wait_minutes(route_key, board_node, board_time, wait_cache)
                     if wait is None:
                         continue
-                    state = (route_key, board_node)
                     cost = walk_min + wait
-                    route_name = self._route_name_id(route_key)
+                    state = (route_key, board_node)
                     if cost < dist.get(state, math.inf):
                         dist[state] = cost
-                        prev[state] = ("start", board_node, "start", (walk_min, wait))
-                        heapq.heappush(
-                            heap, (cost, 1, route_key, board_node, frozenset((route_name,)))
-                        )
+                        prev[state] = (None, "start", (walk_min, wait))
+                        heapq.heappush(heap, (cost, 1, route_key, board_node))
 
-        best_goal: Optional[Tuple[float, float, Tuple[str, int]]] = None
+        best_goal: Optional[Tuple[float, float, Tuple[Any, ...]]] = None
         max_boardings = MAX_TRANSFERS + 1
 
         while heap:
-            cost, boardings, route_key, node, used = heapq.heappop(heap)
+            cost, boardings, route_key, node = heapq.heappop(heap)
             state = (route_key, node)
             if cost > dist.get(state, math.inf):
                 continue
@@ -601,8 +606,8 @@ class TransitRouter:
                 nstate = (route_key, nxt)
                 if new_cost < dist.get(nstate, math.inf):
                     dist[nstate] = new_cost
-                    prev[nstate] = (route_key, node, "ride", ride_cost)
-                    heapq.heappush(heap, (new_cost, boardings, route_key, nxt, used))
+                    prev[nstate] = (state, "ride", ride_cost)
+                    heapq.heappush(heap, (new_cost, boardings, route_key, nxt))
 
             # 2) Вийти і сісти на інший маршрут.
             if boardings >= max_boardings:
@@ -611,8 +616,10 @@ class TransitRouter:
                 if boardings >= 2 and alight in origin_zone:
                     continue  # не повертаємось до старту після першої пересадки
                 for other in self.node_routes.get(alight, ()):
-                    other_name = self._route_name_id(other)
-                    if other_name == self._route_name_id(route_key) or other_name in used:
+                    # Єдина заборонена петля: вийти й одразу сісти на той самий
+                    # маршрут. Раніше тут ще відсіювались усі вже використані
+                    # маршрути — саме це й ламало оптимальність (див. docstring).
+                    if self._route_name_id(other) == self._route_name_id(route_key):
                         continue
                     # cost уже включает всю предыдущую поездку (ожидания и
                     # перегоны), поэтому посадка на следующую ногу произойдёт
@@ -625,10 +632,8 @@ class TransitRouter:
                     nstate = (other, alight)
                     if new_cost < dist.get(nstate, math.inf):
                         dist[nstate] = new_cost
-                        prev[nstate] = (route_key, node, "board", (walk_min, wait, alight))
-                        heapq.heappush(
-                            heap, (new_cost, boardings + 1, other, alight, used | {other_name})
-                        )
+                        prev[nstate] = (state, "board", (walk_min, wait, alight))
+                        heapq.heappush(heap, (new_cost, boardings + 1, other, alight))
 
         if best_goal is None:
             return None
@@ -647,22 +652,27 @@ class TransitRouter:
         self,
         from_nodes: List[int],
         to_nodes: List[int],
-        goal_state: Tuple[str, int],
-        prev: Dict[Tuple[str, int], Any],
+        goal_state: Tuple[Any, ...],
+        prev: Dict[Tuple[Any, ...], Any],
         total_cost: float,
         goal_walk: float,
         now: datetime,
         wait_cache: Optional[Dict[Tuple[str, int], Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
-        """Відновлює послідовність станів із prev і збирає legs."""
-        sequence: List[Tuple[str, int]] = []
-        current: Optional[Tuple[str, int]] = goal_state
+        """
+        Відновлює послідовність станів із prev і збирає legs.
+
+        Стан — `(route_key, node, used)`, а `prev[стан] = (попередній стан, вид,
+        додатково)`, тому шлях відновлюється за першим елементом запису.
+        """
+        sequence: List[Tuple[Any, ...]] = []
+        current: Optional[Tuple[Any, ...]] = goal_state
         while current is not None:
             sequence.append(current)
             entry = prev.get(current)
-            if entry is None or entry[2] == "start":
+            if entry is None or entry[1] == "start":
                 break
-            current = (entry[0], entry[1])
+            current = entry[0]
         sequence.reverse()
 
         legs: List[Dict[str, Any]] = []
@@ -675,13 +685,13 @@ class TransitRouter:
 
         index = 0
         while index < len(sequence):
-            route_key, board_node = sequence[index]
+            route_key, board_node = sequence[index][0], sequence[index][1]
             used_route_keys.add(route_key)
             entry = prev.get(sequence[index])
 
             # Стартова прогулянка до місця посадки (група/пересадка).
-            if entry is not None and entry[2] == "start":
-                walk_min, _wait = entry[3]
+            if entry is not None and entry[1] == "start":
+                walk_min, _wait = entry[2]
                 elapsed_min += walk_min
                 if walk_min > 0.01:
                     legs.append(
@@ -702,9 +712,9 @@ class TransitRouter:
             # Пересадка на наступний маршрут.
             index += 1
             if index < len(sequence):
-                nxt_key, nxt_node = sequence[index]
+                nxt_key, nxt_node = sequence[index][0], sequence[index][1]
                 if nxt_key != route_key:
-                    walk_min, wait_min, _alight = prev[sequence[index]][3]
+                    walk_min, wait_min, _alight = prev[sequence[index]][2]
                     legs.append(
                         self._walk_leg_name(
                             self.nodes[nxt_node]["name"], walk_min, "transfer"
