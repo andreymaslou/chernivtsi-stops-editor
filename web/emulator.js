@@ -1007,7 +1007,15 @@ loadStops();
 // в песочнице DOM и проверяет его структуру/экранирование. После упаковки файла
 // в IIFE (см. docs/STATUS.md п.20) функция иначе не видна из page.evaluate, и
 // проверка падала с «vehiclePopup is not defined».
-window.Emulator = { map, clearLayers, clearVehicles, renderPlan, vehiclePopup };
+// lastPlan() — тот же случай для самого плана: UI-проверка сравнивает
+// нарисованное на карте с ответом сервера (ожидаемые число ног, промежуточные
+// остановки, азимуты шевронов). Пока она читала приватный `state.lastPlan`,
+// ожидания молча вырождались в 0/null, и проверки плана падали «сами по себе»
+// (см. docs/STATUS.md §5 п.9). Отдаём только чтение — состояние не меняется.
+window.Emulator = {
+  map, clearLayers, clearVehicles, renderPlan, vehiclePopup,
+  lastPlan: () => state.lastPlan,
+};
 
 })(); // конец IIFE: внутренние имена не текут в глобальную область редактора
 

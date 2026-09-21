@@ -106,8 +106,12 @@ const probe = () => ({
   // проверить пунктир, иконку и новый фолбэк «прямая между остановками» надо.
   // После замера возвращаем настоящий план на карту.
   mapWalk: (() => {
-    if (typeof state === 'undefined' || !state.lastPlan) return null;
-    const real = state.lastPlan;
+    const api = window.Emulator || {};
+    const real = (typeof api.lastPlan === 'function' ? api.lastPlan() : null) ||
+      (typeof state !== 'undefined' ? state.lastPlan : null);
+    if (!real || typeof api.renderPlan !== 'function' || typeof api.clearLayers !== 'function') {
+      return null;
+    }
     const rides = real.legs.filter((leg) => leg.type === 'transit' && Array.isArray(leg.path));
     if (!rides.length) return null;
     const synthetic = {
@@ -119,8 +123,8 @@ const probe = () => ({
       vehicles: [],
       to_stop_id: real.to_stop_id,
     };
-    clearLayers();
-    renderPlan(synthetic);
+    api.clearLayers();
+    api.renderPlan(synthetic);
     const walkLine = document.querySelector('.plan-walk-line');
     const out = {
       icons: document.querySelectorAll('.plan-walk-icon').length,
@@ -129,8 +133,8 @@ const probe = () => ({
       steps: document.querySelectorAll('.plan-step').length,
       tails: document.querySelectorAll('.plan-tail').length,
     };
-    clearLayers();
-    renderPlan(real);
+    api.clearLayers();
+    api.renderPlan(real);
     return out;
   })(),
   polylines: document.querySelectorAll('.leaflet-overlay-pane path').length,
@@ -139,7 +143,9 @@ const probe = () => ({
   // (state.lastPlan), поэтому проверка ловит и «не нарисовали», и «нарисовали
   // не то».
   mapUx: (() => {
-    const plan = (typeof state !== 'undefined' && state.lastPlan) ? state.lastPlan : null;
+    const api = window.Emulator || {};
+    const plan = (typeof api.lastPlan === 'function' ? api.lastPlan() : null) ||
+      ((typeof state !== 'undefined' && state.lastPlan) ? state.lastPlan : null);
     const transit = plan ? plan.legs.filter((leg) => leg.type === 'transit') : [];
     const walkLegs = plan ? plan.legs.filter((leg) => leg.kind === 'walk') : [];
     const bearingOf = (lat1, lon1, lat2, lon2) => {
