@@ -171,6 +171,7 @@
     .badge { display: inline-block; padding: 1px 7px; border-radius: 10px; font-size: 12px; margin-right: 6px; }
     .badge.live { background: #1e4620; color: #9ae6a8; }
     .badge.plan { background: #3a3320; color: #ffd88a; }
+    .badge.sim { background: #3a2a14; color: #f0b45a; }   /* віртуальна машина */
 
     .map { flex: 1; min-height: 45vh; }
 
@@ -228,6 +229,26 @@
     body.zoom-out .veh-wrap { transform: scale(0.65); }
     body.zoom-out .veh-wrap text { display: none; }
     body.zoom-out .veh-arrow-group { display: none; }
+    /* Віртуальна машина: штрих-пунктирне коло + плашка «SIM» (§3 брифа —
+       симулятор не має видаватись за живий GPS). Плашку ховаємо при віддаленні,
+       як і номер маршруту. */
+    .veh-wrap.sim circle { stroke-dasharray: 3.5 2.5; }
+    .veh-sim-badge {
+      position: absolute;
+      top: -10px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: #b06a1f;
+      color: #fff;
+      font: 700 8px/1.6 -apple-system, "Segoe UI", Roboto, sans-serif;
+      letter-spacing: .6px;
+      padding: 1px 4px;
+      border-radius: 4px;
+      white-space: nowrap;
+      pointer-events: none;
+      box-shadow: 0 1px 2px rgba(0, 0, 0, .5);
+    }
+    body.zoom-out .veh-sim-badge { display: none; }
 
     /* Попап машини (специфікація дизайну, п. 2): попапи Leaflet світлі,
        тому верстка під світлу тему. Розмітка — vehiclePopup() в emulator.js. */
@@ -424,7 +445,7 @@
   <div id="map" class="map"></div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script src="emulator.js?v=2026-09-22a"></script>
+  <script src="emulator.js?v=2026-09-23a"></script>
 </body>
 
 </html>

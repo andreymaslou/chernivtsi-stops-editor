@@ -305,6 +305,26 @@
 body.zoom-out .veh-wrap { transform: scale(0.65); }
 body.zoom-out .veh-wrap text { display: none; }
 body.zoom-out .veh-arrow-group { display: none; }
+/* Віртуальна машина: штрих-пунктирне коло + плашка «SIM» (§3 брифа —
+   симулятор не має видаватись за живий GPS). Плашку ховаємо при віддаленні,
+   як і номер маршруту. */
+.veh-wrap.sim circle { stroke-dasharray: 3.5 2.5; }
+.veh-sim-badge {
+  position: absolute;
+  top: -10px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #b06a1f;
+  color: #fff;
+  font: 700 8px/1.6 -apple-system, "Segoe UI", Roboto, sans-serif;
+  letter-spacing: .6px;
+  padding: 1px 4px;
+  border-radius: 4px;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .5);
+}
+body.zoom-out .veh-sim-badge { display: none; }
 
 /* Попап машини (попапи Leaflet світлі — верстка під світлу тему) */
 .veh-popup-head {

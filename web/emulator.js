@@ -30,6 +30,10 @@ const state = {
   // словаря машин: парк каждые 0.9 с приходит новыми объектами, а подсветка
   // цели обязана пережить обновление снимка.
   targetBoards: new Set(),
+  // Джерело парку для всього знімка: "sim" | "real" | "mixed" (auto). У mixed
+  // режимі кожна машина несе своє поле source, а в моно-режимі його немає —
+  // тоді бейдж «SIM» малюється за кореневим джерелом усього знімка.
+  fleetSource: '',
   fleetOn: false,
   playing: false,
   modelNow: null,      // «машина часу»: ISO без секунд, null = реальное время
@@ -196,12 +200,25 @@ function vehicleKey(vehicle) {
 }
 
 /**
+ * Джерело машини: "real" | "sim" | "sched" | "". У змішаному парку (auto) у
+ * кожної машини є власне поле source (merge_fleet), а в моно-режимі
+ * (PARK_SOURCE=sim/gps) джерело відоме лише для всього знімка — їм і користуємось:
+ * на тестовому стенді весь парк віртуальний, і бейдж «SIM» має це показувати.
+ */
+function vehicleSource(vehicle) {
+  if (vehicle && vehicle.source) return String(vehicle.source);
+  return state.fleetSource || '';
+}
+
+/**
  * Маркер ТС (спецификация дизайна Gemini, docs/BRIEF-emulator-vehicles-visual.md):
  * круг радиусом 11px с номером маршрута + выступающий сверху треугольник-стрелка.
  * Стрелка повёрнута за курсом (0° — на север), круг и подпись — прямые.
  *
  * Состояния — классами на обёртке: live / planned (приглушён), stopped
  * (стрілка ховається, обводка пульсує) / target (золоте пульсування цілі).
+ * sim — віртуальна машина (бейдж «SIM», §3 брифа: демо не має видавати
+ * симулятор за живий GPS).
  */
 function vehicleIcon(vehicle) {
   const heading = Number(vehicle.heading_deg);
@@ -214,13 +231,16 @@ function vehicleIcon(vehicle) {
   const label = esc(rawLabel.slice(0, 4));
   const stopped = Number(vehicle.speed_kmh) < 3;
   const isTarget = state.targetBoards.has(boardKey(vehicle));
+  const source = vehicleSource(vehicle);
 
   let wrapClass = 'veh-wrap' + (live ? ' live' : ' planned');
   if (stopped) wrapClass += ' stopped';
   if (isTarget) wrapClass += ' target';
+  if (source === 'sim') wrapClass += ' sim';
 
   const html = `
-    <div class="${wrapClass}" data-heading="${angle}" data-board="${esc(vehicle.board_number)}">
+    <div class="${wrapClass}" data-heading="${angle}" data-board="${esc(vehicle.board_number)}" data-source="${esc(source)}">
+      <span class="veh-sim-badge" title="Віртуальна машина (симулятор)">SIM</span>
       <svg width="36" height="36" viewBox="0 0 36 36">
         <g class="veh-arrow-group" transform="rotate(${angle} 18 18)">
           <path class="veh-arrow" d="M 18 2 L 24 10 L 12 10 Z" fill="${colour}" stroke="#14161a" stroke-width="1.5" stroke-linejoin="round"/>
@@ -302,6 +322,7 @@ function esc(value) {
  */
 function vehiclePopup(vehicle) {
   const live = !!vehicle.is_live;
+  const source = vehicleSource(vehicle);
   const route = esc(vehicle.route_label || '?');
   const board = esc(vehicle.board_number || '?');
   const speed = Number.isFinite(Number(vehicle.speed_kmh))
@@ -314,10 +335,17 @@ function vehiclePopup(vehicle) {
     ? '<div class="veh-popup-age">Дані: ' + esc(vehicle.gpstime) +
       (vehicle.age_seconds ? ' (' + Math.round(vehicle.age_seconds) + ' с тому)' : '') + '</div>' : '';
 
+  // Бейдж джерела: SIM — машина віртуальна (симулятор), GPS/Розклад — як раніше.
+  // Розміщуємо його після основного, щоб головна відповідь «живий чи ні»
+  // залишалася першою — джерело це контекст демо, а не стан рейсу.
+  const sourceBadge = source === 'sim'
+    ? '<span class="badge sim">Симулятор</span>' : '';
+
   return '<div class="veh-popup">' +
     '<div class="veh-popup-head">' +
       '<span class="badge ' + (live ? 'live' : 'plan') + '">' + (live ? 'GPS' : 'Розклад') + '</span>' +
       '<strong>Маршрут ' + route + '</strong>' +
+      sourceBadge +
     '</div>' +
     '<div class="veh-popup-body">' +
       '<div>Борт: <b>' + board + '</b></div>' +
@@ -388,14 +416,22 @@ function updateFleetStatus(counts) {
   if (!el) return;
   let live = 0;
   let planned = 0;
+  let sim = 0;
   state.vehicles.forEach((entry) => {
     if (entry.vehicle.is_live) live += 1;
     else planned += 1;
+    if (vehicleSource(entry.vehicle) === 'sim') sim += 1;
   });
   const time = state.modelNow ? state.modelNow.replace('T', ' ') : 'зараз';
   const targets = [...state.targetBoards];
+  // Віртуальні машини рахуємо окремо: на демо видно, де реальний GPS, а де
+  // симулятор (§3). Змішаний парк показуємо одразу, моно-режим — ні (там все sim
+  // або все real, і сума дублювала б перше число).
+  const simNote = sim && state.fleetSource === 'mixed'
+    ? ' · сим: ' + sim : '';
   el.textContent =
     'ТС на карті: ' + live + ' живих' + (planned ? ' + ' + planned + ' за розкладом' : '') +
+    simNote +
     (counts && counts.total ? ' (у парку ' + counts.total + ')' : '') +
     (targets.length ? ' · ціль: ' + targets.join(', ') : '') +
     ' · час: ' + time + (state.playing ? ' ▶' : '') +
@@ -411,6 +447,9 @@ async function loadFleet() {
     const res = await fetch('/api/live?' + params.toString());
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const data = await res.json();
+    // Кореневе джерело знімка: у mixed кожна машина несе своє поле source,
+    // а в моно-режимі воно одне для всього парку — бейдж «SIM» малюється по ньому.
+    state.fleetSource = String(data.source || '');
     const vehicles = (data.vehicles || []).filter((v) => !v.in_depo);
     const seen = new Set();
     vehicles.forEach((vehicle) => {
@@ -681,6 +720,9 @@ function renderPlan(plan) {
   const lines = [];
   state.lastPlan = plan;
   state.planStepLayers = {};
+  // Джерело парку плану (sim/real/mixed): машини в нозі несуть своє джерело
+  // лише в mixed-режимі, тож для моно-режиму запам'ятовуємо кореневе.
+  if (plan.fleet_source) state.fleetSource = String(plan.fleet_source);
 
   // Точки стыковки ног: нужны, чтобы нарисовать пешую пересадку, у которой
   // своей геометрии пока нет (роутер отдаёт геометрию только для поездок).
@@ -918,6 +960,117 @@ function variantTransportLabel(variant) {
   return seen.length ? seen.join(' + ') : 'маршрут';
 }
 
+// ---------------------------------------------------------------------------
+// Телеметрія вибору варіанта (поставка 1, §13.3 брифа)
+// ---------------------------------------------------------------------------
+//
+// Подія — одна JSONL-рядка на сервері (POST /api/telemetry/plan_choice,
+// модель PlanChoiceTelemetry). Шлємо двічі: коли показали картки
+// (chosen_variant_id = null — обов'язкова метрика «показали, але не вибрали»)
+// і коли юзер клікнув по картці (chosen_variant_id = id). Запит fire-and-forget:
+// відповідь не чекаємо, помити тільки в консоль — аналіз йде asynchronously,
+// UI не має від нього залежати.
+
+const DEVICE_KEY = 'emulator.device_id';
+
+/** Анонімний ідентифікатор приладу: один на браузер, зберігаємо в localStorage. */
+function deviceId() {
+  const random = () => 'anon-' + Math.random().toString(16).slice(2, 10);
+  try {
+    let id = localStorage.getItem(DEVICE_KEY);
+    if (!id) {
+      id = random();
+      localStorage.setItem(DEVICE_KEY, id);
+    }
+    return id;
+  } catch (err) {
+    // localStorage недоступний (приватний режим) — генеруємо на сесію.
+    if (!state.deviceId) state.deviceId = random();
+    return state.deviceId;
+  }
+}
+
+/** Підпис ніг варіанта: «trolley:3:B|walk|bus:9A:A» — щоб порівнювати плани
+ *  між собами без важкого повного legs. Те саме поле пише бекенд у тестах. */
+function legsSignature(legs) {
+  return (Array.isArray(legs) ? legs : []).map((leg) => {
+    if (!leg) return '?';
+    if (leg.type === 'transit') {
+      const dir = leg.direction ? ':' + leg.direction : '';
+      return (leg.vehicle || '?') + ':' + (leg.route || '?') + dir;
+    }
+    if (leg.type === 'transfer') return 'walk';
+    return leg.type || '?';
+  }).join('|');
+}
+
+/** Окремий варіант у форматі контракту лога (§12.2). */
+function variantToOfferEntry(variant) {
+  const legs = Array.isArray(variant.legs) ? variant.legs : [];
+  // Джерело: у змішаному парку source стоїть у кожної ноги, а в моно-режимі —
+  // лише кореневе fleet_source усього варіанта. Бакети в логі мають бути
+  // чесними навіть тоді, коли ноги мовчать про походження машини.
+  let source = variant.fleet_source || '';
+  if (!source) {
+    const transit = legs.find((leg) => leg && leg.type === 'transit');
+    source = (transit && transit.source) || '';
+  }
+  const waits = legs
+    .map((leg) => Number(leg && leg.wait_min))
+    .filter((value) => Number.isFinite(value));
+  return {
+    id: String(variant.id),
+    tags: Array.isArray(variant.tags) ? variant.tags : [],
+    total_min: variant.total_min,
+    price_grn: variant.price_grn,
+    transfers: variant.transfers,
+    wait_min: waits.length ? Math.min.apply(null, waits) : null,
+    source: source || 'unknown',
+    legs_signature: legsSignature(legs),
+  };
+}
+
+/**
+ * Тіло події вибору або null, якщо оффера немає (картки не показували).
+ * variant_order — id у тому порядку, в якому картки лежать на екрані.
+ */
+function buildPlanChoiceBody(chosenVariantId) {
+  const plan = state.variantOffer;
+  if (!plan || !Array.isArray(plan.variants) || plan.variants.length < 2) return null;
+  const ids = plan.variants.map((variant) => String(variant.id));
+  return {
+    ts: new Date().toISOString(),
+    from_stop_id: plan.from_stop_id,
+    to_stop_id: plan.to_stop_id,
+    offer: plan.variants.map(variantToOfferEntry),
+    default_variant_id: ids[0],
+    variant_order: ids,
+    chosen_variant_id: chosenVariantId == null ? null : String(chosenVariantId),
+    device_id: deviceId(),
+    client: 'web-emulator',
+  };
+}
+
+/** Fire-and-forget: запис події вибору варіанта в журнал на сервері. */
+function sendPlanChoice(chosenVariantId) {
+  let body;
+  try {
+    body = buildPlanChoiceBody(chosenVariantId);
+  } catch (err) {
+    console.error('telemetry plan_choice: не вдалося зібрати тіло', err);
+    return;
+  }
+  if (!body) return;
+  fetch('/api/telemetry/plan_choice', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+    keepalive: true,   // запис долетить навіть якщо вкладку вже закривають
+  }).catch((err) => {
+    console.error('telemetry plan_choice: запит не дістався', err);
+  });
+}
+
 /**
  * Карточки над саммарі (#plan-variants). Викликається з render(): картки
  * з'являються одразу, паралельно з озвученням тексту. Один варіант або жодного
@@ -999,6 +1152,9 @@ function renderVariantCards(plan) {
   });
 
   box.hidden = false;
+  // Метрика «показали, але не вибрали»: шлємо одразу з появою карток,
+  // chosen_variant_id = null. Без неї невідомо, чи взагалі юзер їх бачив.
+  sendPlanChoice(null);
   return true;
 }
 
@@ -1018,6 +1174,9 @@ function selectVariant(variant) {
   renderPlan(planForMap);   // лінії/ТС і цифри в саммарі (#answer) з варіанта
 
   state.activeVariantId = variant.id;
+  // Подія вибору: шлємо після перемальовки — план уже на карті, запис йде
+  // fire-and-forget і не блокує UI.
+  sendPlanChoice(variant.id);
   const box = document.getElementById('plan-variants');
   if (box) {
     Array.prototype.forEach.call(box.querySelectorAll('.variant-card'), (card) => {

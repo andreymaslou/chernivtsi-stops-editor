@@ -21,9 +21,13 @@
  *   5.2 картки варіантів (§13 брифа): дві картки над саммарі, перша активна,
  *      «програшна» цифра підсвічена приглушеним (⚠️, не червоним) з поясненням;
  *      клік по другій картці перемальовує лінії на карті й цифри в саммарі;
+ *      телеметрія §13.3: подія йде і при показі карток (chosen=null), і при
+ *      кліку (chosen=id), з тим самим порядком карток, що на екрані;
  *   6. попап машини: структура, світлий бейдж, екранування зовнішніх рядків;
  *   7. розвантаження при віддаленні: zoom < 13 — крапки без номера й стрілки,
  *      zoom >= 13 — повний маркер, і крапка не з'їжджає з координати;
+ *   7.1 бейдж «SIM» на віртуальних машинах (§3): на стенді всі машини sim —
+ *      плашка та клас .sim є на кожному маркері, data-source збігається;
  *   8. на 390 px: контроли парка видны, легенда влезает в экран, нижняя полоса
  *      (подсказка о клике / легенда / кнопка «Емулятор») не перекрывается, а на
  *      /ui/editor.html ещё и адаптив — карта на весь экран, панели открываются
@@ -46,6 +50,10 @@ function argValue(name, fallback) {
 
 const URL = argValue('--url', 'http://127.0.0.1:8000/ui/emulator.html');
 const PHRASE = argValue('--text', 'Я на Соборці, їду на Гравітон');
+// Фіксований час плану (опціонально): інтерсепт POST /api/plan і додає ?now.
+// Потрібен, коли на поточний час у маршруту лише 1 пересадка — тоді сервер
+// чесно віддає один варіант, і блок карток не має що перевіряти.
+const PLAN_NOW = argValue('--plan-now', '');
 // Час у моделі фіксуємо в робочому вікні маршрутів (06:00–22:00): симулятор
 // «затискає» ніч до середини дня, тобто поза вікном парк у моделі НЕРУХОМИЙ —
 // інакше перевірка «машины двигаются» залежала б від годинника машини.
@@ -75,10 +83,14 @@ const probe = () => ({
   wraps: [...document.querySelectorAll('.veh-wrap')].map((el) => ({
     heading: el.getAttribute('data-heading'),
     board: el.getAttribute('data-board'),
+    source: el.getAttribute('data-source'),
     planned: el.classList.contains('planned'),
     stopped: el.classList.contains('stopped'),
     target: el.classList.contains('target'),
+    sim: el.classList.contains('sim'),
   })),
+  // Бейдж «SIM» на віртуальних машинах (§3: симулятор не видається за живий GPS)
+  simBadges: [...document.querySelectorAll('.veh-sim-badge')].map((el) => el.textContent.trim()),
   targetBoards: [...document.querySelectorAll('.veh-wrap.target')]
     .map((el) => el.getAttribute('data-board')),
   targetMarkers: document.querySelectorAll('.veh-marker.is-target').length,
@@ -215,6 +227,11 @@ const probe = () => ({
     return {
       hasPlan: !!plan,
       transit: transit.length,
+      // Хвіст маршруту малюється лише для ніг з path.length > 1: у дуже
+      // короткої ноги (1 точка) «обрізати нічого», sliceOffset не знаходить
+      // зрізу — хвоста не буде, і це не помилка.
+      transitWithTail: transit.filter((leg) =>
+        Array.isArray(leg.path) && leg.path.length > 1).length,
       walkLegs: walkLegs.length,
       steps,
       chevrons,
@@ -395,6 +412,34 @@ const probe = () => ({
       report.errors.push('HTTP ' + response.status() + ': ' + response.url());
     }
   });
+  // Телеметрія вибору варіанта (§13.3): UI шле POST /api/telemetry/plan_choice
+  // при появі карток (chosen=null) і при кліку по них. Запити fire-and-forget,
+  // але їх треба бачити в перевірці — збираємо тіла тут.
+  const telemetry = [];
+  page.on('request', (request) => {
+    if (request.method() === 'POST' && /\/api\/telemetry\/plan_choice/.test(request.url())) {
+      let body = null;
+      try { body = request.postData() ? JSON.parse(request.postData()) : null; }
+      catch (err) { body = { _raw: request.postData() }; }
+      telemetry.push(body);
+    }
+  });
+  // --plan-now: підставляємо фіксований час у запит плану (див. PLAN_NOW).
+  if (PLAN_NOW) {
+    await page.setRequestInterception(true);
+    page.on('request', (request) => {
+      if (request.method() === 'POST' && /\/api\/plan$/.test(request.url()) &&
+          request.postData()) {
+        try {
+          const body = JSON.parse(request.postData());
+          if (!body.now) body.now = PLAN_NOW;
+          request.continue({ postData: JSON.stringify(body) });
+          return;
+        } catch (err) { /* битий body — пропускаємо як є */ }
+      }
+      request.continue();
+    });
+  }
 
   await page.goto(URL, { waitUntil: 'networkidle2', timeout: 60000 });
   await sleep(1500);
@@ -560,6 +605,23 @@ const probe = () => ({
   check('машины нарисованы', fleet.markers > 5, 'маркеров: ' + fleet.markers);
   check('у машин есть курс', rotated > 0, 'ненулевых курсов: ' + rotated + ' из ' + headings.length);
   check('в статусе видно время', /час:/.test(fleet.fleetStatus), fleet.fleetStatus.trim());
+
+  // --- 3.1 Бейдж «SIM» на віртуальних машинах (§3 брифа) ------------------
+  // Стенд працює на PARK_SOURCE=sim, тож УСІ машини віртуальні: плашка «SIM»
+  // має бути на кожному маркері (джерело беремо з кореневого source знімка —
+  // в моно-режимі машини поле source не несуть). В змішаному парку плачка
+  // стоїть лише на sim-машинах (перевіряємо через data-source).
+  const allSim = fleet.wraps.length > 0 && fleet.wraps.every((item) => item.sim);
+  const badgesOk = fleet.simBadges.length === fleet.wraps.length &&
+    fleet.simBadges.every((text) => text === 'SIM');
+  check('віртуальні машини помічені «SIM»',
+    allSim && badgesOk,
+    'sim-класів: ' + fleet.wraps.filter((item) => item.sim).length + ' із ' + fleet.wraps.length +
+      ', бейджів: ' + fleet.simBadges.length);
+  check('data-source маркера збігається з класом sim',
+    fleet.wraps.length > 0 && fleet.wraps.every((item) =>
+      (item.source === 'sim') === item.sim),
+    'джерела: ' + [...new Set(fleet.wraps.map((item) => item.source || '—'))].join(', '));
   await page.screenshot({ path: path.join(OUT, 'fleet.png') });
   report.shots.push('fleet.png');
 
@@ -709,9 +771,10 @@ const probe = () => ({
   check('точки проміжних зупинок', ux.stopDots === ux.expectedStops,
     'точок: ' + ux.stopDots + ' (очікується ' + ux.expectedStops + ')');
   check('хвости маршруту напівпрозорі',
-    !!ux.tails && !!ux.active && ux.tails.count === ux.transit &&
+    !!ux.tails && !!ux.active && ux.tails.count === ux.transitWithTail &&
     ux.tails.opacity > 0 && ux.tails.opacity < ux.active.opacity,
-    ux.tails ? 'хвостів: ' + ux.tails.count + ', opacity ' + ux.tails.opacity +
+    ux.tails ? 'хвостів: ' + ux.tails.count + ' (ніг з path>1: ' + ux.transitWithTail +
+      ' із ' + ux.transit + '), opacity ' + ux.tails.opacity +
       ' проти активної ' + ux.active.opacity : 'немає .plan-tail');
   check('іконка пішохода на пересадці',
     !!plan.mapWalk && plan.mapWalk.icons === 1 && plan.mapWalk.lines === 1,
@@ -816,6 +879,27 @@ const probe = () => ({
        variantsBefore.noteColour !== rgb('#ff5c5c')),
       'цвет пояснения: ' + variantsBefore.noteColour);
 
+    // Телеметрія §13.3: картки показали → UI шле подію з chosen_variant_id = null
+    // («показали, але не вибрали» — обов'язкова метрика). variant_order має
+    // збігатися з порядком карток на екрані.
+    await sleep(400);
+    const shown = telemetry.find((body) => body && body.chosen_variant_id === null);
+    check('телеметрія «показ карток» відправлена',
+      !!shown && shown.variant_order.length === variantsBefore.count &&
+      shown.variant_order.join(',') === variantsBefore.ids.join(','),
+      shown ? 'order: [' + shown.variant_order.join(', ') + '], device: ' + shown.device_id +
+        ', client: ' + shown.client + ', запитів: ' + telemetry.length
+        : 'запитів: ' + telemetry.length);
+    check('оффер телеметрії відповідає контракту лога',
+      !!shown && Array.isArray(shown.offer) && shown.offer.length === variantsBefore.count &&
+      shown.offer.every((entry) => entry && entry.id && Array.isArray(entry.tags) &&
+        Number.isFinite(Number(entry.total_min)) && Number.isFinite(Number(entry.price_grn)) &&
+        entry.source && entry.legs_signature),
+      shown ? 'записів: ' + shown.offer.length + ', підписи: [' +
+        shown.offer.map((entry) => entry.legs_signature).join('] [') + '], джерела: ' +
+        shown.offer.map((entry) => entry.source).join(',')
+        : 'немає запиту');
+
     await page.click('.plan-variants .variant-card[data-variant-id="' +
       variantsBefore.ids[1] + '"]');
     await sleep(1200);
@@ -836,6 +920,17 @@ const probe = () => ({
     check('после клика цифры в саммари изменились',
       variantsAfter.summary !== variantsBefore.summary,
       'саммари: «' + variantsAfter.summary.slice(0, 90) + '»');
+
+    // Телеметрія §13.3: клік → подія з обраним варіантом; дефолт залишається
+    // першою карткою (роутер так і віддає — перший елемент variants).
+    await sleep(400);
+    const chosen = telemetry.find((body) => body &&
+      body.chosen_variant_id === variantsBefore.ids[1]);
+    check('телеметрія «клік по картці» відправлена',
+      !!chosen && chosen.default_variant_id === variantsBefore.ids[0],
+      chosen ? 'обрано: ' + chosen.chosen_variant_id + ' із order [' +
+        chosen.variant_order.join(', ') + '], запитів: ' + telemetry.length
+        : 'запитів: ' + telemetry.length);
     await page.screenshot({ path: path.join(OUT, 'variants.png') });
     report.shots.push('variants.png');
 
