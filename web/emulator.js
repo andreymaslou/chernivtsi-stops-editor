@@ -241,12 +241,12 @@ function vehicleIcon(vehicle) {
   const html = `
     <div class="${wrapClass}" data-heading="${angle}" data-board="${esc(vehicle.board_number)}" data-source="${esc(source)}">
       <span class="veh-sim-badge" title="Віртуальна машина (симулятор)">SIM</span>
-      <svg width="48" height="48" viewBox="0 0 48 48">
-        <g class="veh-arrow-group" transform="rotate(${angle} 24 24)">
-          <path class="veh-arrow" d="M 24 1 L 36 17 L 12 17 Z" fill="#ffffff" stroke="${colour}" stroke-width="3" stroke-linejoin="round"/>
+      <svg width="48" height="48" viewBox="0 0 64 64">
+        <g class="veh-arrow-group" transform="rotate(${angle} 32 32)">
+          <path class="veh-arrow" d="M 32 2 L 48 24 L 16 24 Z" fill="#ffffff" stroke="${colour}" stroke-width="2.5" stroke-linejoin="round"/>
         </g>
-        <circle cx="24" cy="24" r="15" fill="#ffffff" stroke="${colour}" stroke-width="3"/>
-        <text x="24" y="28.5" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="700" fill="#000000">${label}</text>
+        <circle cx="32" cy="32" r="16" fill="#ffffff" stroke="${colour}" stroke-width="3"/>
+        <text x="32" y="38" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="700" fill="#000000">${label}</text>
       </svg>
     </div>`;
 
