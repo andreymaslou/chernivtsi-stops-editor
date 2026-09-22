@@ -243,7 +243,7 @@ function vehicleIcon(vehicle) {
       <span class="veh-sim-badge" title="Віртуальна машина (симулятор)">SIM</span>
       <svg width="48" height="48" viewBox="0 0 48 48">
         <g class="veh-arrow-group" transform="rotate(${angle} 24 24)">
-          <path class="veh-arrow" d="M 24 1 L 34 15 L 14 15 Z" fill="${colour}" stroke="${colour}" stroke-width="2" stroke-linejoin="round"/>
+          <path class="veh-arrow" d="M 24 1 L 36 17 L 12 17 Z" fill="#ffffff" stroke="${colour}" stroke-width="3" stroke-linejoin="round"/>
         </g>
         <circle cx="24" cy="24" r="15" fill="#ffffff" stroke="${colour}" stroke-width="3"/>
         <text x="24" y="28.5" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="700" fill="#000000">${label}</text>
