@@ -243,7 +243,7 @@ function vehicleIcon(vehicle) {
       <span class="veh-sim-badge" title="Віртуальна машина (симулятор)">SIM</span>
       <svg width="48" height="48" viewBox="0 0 48 48">
         <g class="veh-arrow-group" transform="rotate(${angle} 24 24)">
-          <path class="veh-arrow" d="M 24 3 L 32 13 L 16 13 Z" fill="${colour}" stroke="#14161a" stroke-width="2" stroke-linejoin="round"/>
+          <path class="veh-arrow" d="M 24 1 L 34 15 L 14 15 Z" fill="${colour}" stroke="${colour}" stroke-width="2" stroke-linejoin="round"/>
         </g>
         <circle cx="24" cy="24" r="15" fill="#ffffff" stroke="${colour}" stroke-width="3"/>
         <text x="24" y="28.5" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="700" fill="#000000">${label}</text>
@@ -821,8 +821,15 @@ function renderPlan(plan) {
     } else if (leg.type === 'transfer') {
       const isWalk = leg.kind === 'walk' || (leg.walk_min && leg.walk_min > 0);
       const icon = isWalk ? '🚶' : '⇄';
-      const name = isWalk ? ' йдемо до «' + esc(leg.at) + '»' : ' пересадка на «' + esc(leg.at) + '»';
-      const walkNote = leg.walk_min ? ' (' + leg.walk_min + ' хв пішки)' : '';
+      
+      let name = '';
+      if (index === 0 && isWalk) {
+        name = ' Посадка: зупинка «' + esc(leg.at) + '»';
+      } else {
+        name = isWalk ? ' йдемо до «' + esc(leg.at) + '»' : ' пересадка на «' + esc(leg.at) + '»';
+      }
+      
+      const walkNote = (leg.walk_min && index !== 0) ? ' (' + leg.walk_min + ' хв пішки)' : '';
       const waitNote = leg.wait_min ? ', чекати ~' + leg.wait_min + ' хв' : '';
       const legLayer = L.layerGroup().addTo(layerGroup);
 
@@ -834,7 +841,8 @@ function renderPlan(plan) {
         const toPoint = legStarts.slice(index + 1).find(Boolean);
         if (fromPoint && toPoint) walkPath = [fromPoint, toPoint];
       }
-      if (walkPath.length > 1) {
+      // Не малюємо пунктир для першого кроку, якщо не знаємо координату юзера
+      if (walkPath.length > 1 && index !== 0) {
         L.polyline(walkPath, {
           color: '#808080', weight: 5, dashArray: '1, 10',
           lineCap: 'round', lineJoin: 'round', className: 'plan-walk-line',
