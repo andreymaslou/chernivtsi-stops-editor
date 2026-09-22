@@ -1361,7 +1361,7 @@ legend.onAdd = () => {
   return div;
 };
 
-legend.addTo(map);
+// legend.addTo(map);
 
 // Розвантаження при віддаленні: стан рахуємо на кожному 'zoomend' (fitBounds у
 // плані теж його кидає) і один раз при старті — карта відкривається на zoom 13,

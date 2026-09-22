@@ -165,12 +165,9 @@
          поверх карты, а не отдельной колонкой. -->
     <main class="map-container" style="position:relative;">
       <div id="map"></div>
-      <div class="map-hint">
-        <span id="edit-mode-hint">🖱 Клік на карті — встановлює координати нової зупинки</span>
-        <!-- pointer-events:auto обязателен: у .map-hint стоит pointer-events:none
-             (это подсказка, а не контрол), поэтому кнопку включаем явно. -->
-        <button id="edit-mode-btn" class="btn-icon" title="Перемкнути режим кліка по карті"
-          style="font-size:11px; padding:2px 6px; margin-left:6px; pointer-events:auto;">✏️ редактор</button>
+      <div class="map-hint" id="ai-voice-hint" style="display:flex; justify-content:space-between; align-items:center; cursor:pointer;">
+        <span>(AI-ЗАПИТАЙ МЕНЕ)</span>
+        <button id="ai-voice-btn" class="btn-icon" title="Голосове введення" style="font-size:14px; padding:2px 6px; pointer-events:auto; background:transparent; border:none; margin-left:10px;">🎤</button>
       </div>
 
       <!-- Панель эмулятора (перенесена из web/emulator.html).

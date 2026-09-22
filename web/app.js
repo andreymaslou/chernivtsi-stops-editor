@@ -136,9 +136,7 @@ function populateRouteDropdown(type) {
   const container = document.getElementById('routes-checkboxes');
   if (!container) return;
 
-  // Гарантируємо хоча б один обраний маршрут
   if (!state.selectedByType[type]) state.selectedByType[type] = [];
-  if (state.selectedByType[type].length === 0) state.selectedByType[type] = [arr[0] || '1'];
 
   container.innerHTML = '';
   arr.forEach(num => {
