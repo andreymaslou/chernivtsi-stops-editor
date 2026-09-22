@@ -241,21 +241,21 @@ function vehicleIcon(vehicle) {
   const html = `
     <div class="${wrapClass}" data-heading="${angle}" data-board="${esc(vehicle.board_number)}" data-source="${esc(source)}">
       <span class="veh-sim-badge" title="Віртуальна машина (симулятор)">SIM</span>
-      <svg width="36" height="36" viewBox="0 0 36 36">
-        <g class="veh-arrow-group" transform="rotate(${angle} 18 18)">
-          <path class="veh-arrow" d="M 18 2 L 24 10 L 12 10 Z" fill="${colour}" stroke="#14161a" stroke-width="1.5" stroke-linejoin="round"/>
+      <svg width="48" height="48" viewBox="0 0 48 48">
+        <g class="veh-arrow-group" transform="rotate(${angle} 24 24)">
+          <path class="veh-arrow" d="M 24 3 L 32 13 L 16 13 Z" fill="${colour}" stroke="#14161a" stroke-width="2" stroke-linejoin="round"/>
         </g>
-        <circle cx="18" cy="18" r="11" fill="#1e2126" stroke="${colour}" stroke-width="2.5"/>
-        <text x="18" y="21.5" text-anchor="middle" font-family="sans-serif" font-size="10" font-weight="700" fill="#ffffff">${label}</text>
+        <circle cx="24" cy="24" r="15" fill="#1e2126" stroke="${colour}" stroke-width="3"/>
+        <text x="24" y="28.5" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="700" fill="#ffffff">${label}</text>
       </svg>
     </div>`;
 
   return L.divIcon({
     className: 'veh-marker' + (isTarget ? ' is-target' : ''),
     html,
-    iconSize: [36, 36],
-    iconAnchor: [18, 18],
-    popupAnchor: [0, -18],
+    iconSize: [48, 48],
+    iconAnchor: [24, 24],
+    popupAnchor: [0, -24],
   });
 }
 
