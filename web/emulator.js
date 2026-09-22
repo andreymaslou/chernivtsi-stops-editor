@@ -245,8 +245,8 @@ function vehicleIcon(vehicle) {
         <g class="veh-arrow-group" transform="rotate(${angle} 24 24)">
           <path class="veh-arrow" d="M 24 3 L 32 13 L 16 13 Z" fill="${colour}" stroke="#14161a" stroke-width="2" stroke-linejoin="round"/>
         </g>
-        <circle cx="24" cy="24" r="15" fill="#1e2126" stroke="${colour}" stroke-width="3"/>
-        <text x="24" y="28.5" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="700" fill="#ffffff">${label}</text>
+        <circle cx="24" cy="24" r="15" fill="#ffffff" stroke="${colour}" stroke-width="3"/>
+        <text x="24" y="28.5" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="700" fill="#000000">${label}</text>
       </svg>
     </div>`;
 

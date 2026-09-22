@@ -308,7 +308,7 @@ body.zoom-out .veh-arrow-group { display: none; }
 /* Віртуальна машина: штрих-пунктирне коло + плашка «SIM» (§3 брифа —
    симулятор не має видаватись за живий GPS). Плашку ховаємо при віддаленні,
    як і номер маршруту. */
-.veh-wrap.sim circle { stroke-dasharray: 3.5 2.5; }
+.veh-wrap.sim circle { /* stroke-dasharray removed by request */ }
 .veh-sim-badge {
   position: absolute;
   top: -10px;
