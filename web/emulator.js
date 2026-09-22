@@ -1317,6 +1317,95 @@ if (modelTime) {
   syncTimeInput();
 }
 
+// --- Голосове введення (Web Speech API) -------------------------------------
+//
+// Кнопка мікрофона лежить у розмітці editor.html (#ai-voice-btn у .map-hint).
+// На окремій сторінці emulator.html її нема — тоді просто нічого не робимо.
+// Екземпляр розпізнавання створюємо на кожен клік: Web Speech після помилки
+// не любить перезапуск, а один живий інстанс на всіх — джерело «залиплих»
+// станів і воронки мікрофона, яку браузер не відпускає.
+
+const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+const voiceBtn = document.getElementById('ai-voice-btn');
+const voiceHint = document.querySelector('#ai-voice-hint span');
+let voiceRec = null;      // поточний екземпляр розпізнавання (null = не слухаємо)
+let voiceWanted = false;  // юзер хоче слухати (другий клік = стоп)
+
+/** Підказка у .map-hint повертається у спокійний стан, іконка — без блиску. */
+function resetVoiceHint() {
+  voiceWanted = false;
+  voiceRec = null;
+  if (voiceBtn) voiceBtn.classList.remove('recording');
+  if (voiceHint) voiceHint.textContent = '(AI-ЗАПИТАЙ МЕНЕ)';
+}
+
+/** Повідомлення про збій: toast редактора (showToast з app.js) або alert,
+ *  якщо ми на окремій сторінці емулятора, де редактора нема. */
+function voiceNotify(msg) {
+  if (typeof window.showToast === 'function') window.showToast(msg, 'error');
+  else alert(msg);
+}
+
+if (voiceBtn && voiceHint) {
+  if (!SpeechRec) {
+    // Браузер без Web Speech (Firefox без прапорців) — ховаємо кнопку, щоб
+    // не обіцяти голос, якого тут не буває.
+    voiceBtn.style.display = 'none';
+  } else {
+    voiceBtn.addEventListener('click', () => {
+      // Другий клік під час запису — явна зупинка.
+      if (voiceWanted && voiceRec) {
+        voiceRec.stop();
+        return;
+      }
+
+      voiceWanted = true;
+      voiceRec = new SpeechRec();
+      voiceRec.lang = 'uk-UA';
+      voiceRec.interimResults = false;  // одразу фінальний текст, без «привидів»
+      voiceRec.maxAlternatives = 1;
+
+      // UI стан «слухаю»: текст підказки + червона пульсуюча іконка (.recording).
+      voiceRec.onstart = () => {
+        voiceBtn.classList.add('recording');
+        voiceHint.textContent = '(Слухаю...)';
+      };
+
+      // Успіх: розпізнаний текст — у поле запиту, потім програмний клік по
+      // кнопці пошуку (ask() сама перевірить порожнечу й покличе бекенд).
+      voiceRec.onresult = (event) => {
+        const transcript = event.results[0][0].transcript;
+        const input = document.getElementById('ask-text');
+        const askButton = document.getElementById('ask-btn');
+        if (!input || !askButton) return;
+        input.value = transcript;
+        askButton.click();
+      };
+
+      voiceRec.onerror = (event) => {
+        const err = event && event.error;
+        if (err === 'not-allowed' || err === 'NotAllowedError') {
+          voiceNotify('⚠ Немає доступу до мікрофона — дозвольте його в налаштуваннях сайту');
+        } else if (err !== 'aborted' && err !== 'no-speech') {
+          // aborted — наш же стоп, no-speech — тиша: це не помилки для юзера.
+          voiceNotify('⚠ Не вдалося розпізнати голос: ' + err);
+        }
+        // Стан прибере onend — він спрацьовує завжди, і після помилки теж.
+      };
+
+      voiceRec.onend = resetVoiceHint;
+
+      try {
+        voiceRec.start();
+      } catch (err) {
+        // start() кидає, якщо попередній екземпляр ще живий (рідкий глюк).
+        resetVoiceHint();
+        voiceNotify('⚠ Не вдалося стартувати розпізнавання: ' + err.message);
+      }
+    });
+  }
+}
+
 // --- Легенда карти (специфікація дизайну, п. 2) ------------------------------
 //
 // Пояснює кольори маркерів ТС і пішохідні пересадки. Живе як звичайний контрол

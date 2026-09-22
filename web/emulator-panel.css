@@ -418,9 +418,23 @@ body.zoom-out .veh-sim-badge { display: none; }
   }
 }
 
+/* Голосове введення: кнопка мікрофона у .map-hint (розмітка web/editor.html).
+ * SVG іконки лежить прямо в кнопці з атрибутом fill="#ffffff" — атрибут має
+ * пріоритет presentation-атрибута, тому CSS-правило .recording svg перебиває
+ * його без !important. Пульс — той самий прийом, що в .plan-step вище. */
+#ai-voice-btn.recording svg { fill: #ef4444; }
+
+#ai-voice-btn.recording { animation: emu-voice-pulse 1s infinite ease-in-out; }
+
+@keyframes emu-voice-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.15); }
+}
+
 /* Пульсації — лише якщо користувач не просив їх вимкнути */
 @media (prefers-reduced-motion: reduce) {
   .plan-step { animation: none; }
   .veh-wrap.stopped circle { animation: none; }
   .veh-wrap.target svg { animation: none; }
+  #ai-voice-btn.recording { animation: none; }
 }
