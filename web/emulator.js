@@ -1367,10 +1367,22 @@ async function getMicPermissionState() {
   return 'prompt';
 }
 
-/** HTML тіла шторки: текст режиму + попередження, якщо сторінка без HTTPS
- *  (на небезпечному зʼєднанні мікрофон блокується взагалі, без запиту). */
+/** Небезпечне зʼєднання (http:// або http://<IP>): браузер блокує мікрофон
+ *  повністю й БЕЗ системного запиту, тому жодне «Дозволити» тут не спрацює —
+ *  шторка лише пояснює причину. HTTPS або localhost — обовʼязкова умова
+ *  Web Speech API (secure context). */
+function voiceInsecure() {
+  return !window.isSecureContext;
+}
+
+/** HTML тіла шторки: текст режиму; на небезпечному зʼєднанні замість інструкцій
+ *  (вони там марні — браузер не покаже запит) головна причина: потрібен HTTPS. */
 function voiceModalBodyHtml(mode) {
-  let html = mode === 'ask'
+  if (voiceInsecure() || mode === 'insecure') {
+    return '<p class="perm-warn">⚠️ Голос працює лише на безпечному зʼєднанні (HTTPS) або localhost.</p>'
+      + '<p>На поточній адресі браузер повністю блокує мікрофон, тому надати дозвіл неможливо.</p>';
+  }
+  return mode === 'ask'
     ? '<p>Щоб диктувати запити голосом, сайту потрібен мікрофон 🎤.</p>'
       + '<p>Натисніть «Дозволити» — браузер покаже системний запит, і вже після '
       + 'нього почнеться прослуховування. Наступні рази ця шторка не зʼявлятиметься.</p>'
@@ -1380,23 +1392,24 @@ function voiceModalBodyHtml(mode) {
       + '<li>Відкрийте <kbd>Налаштування сайту</kbd> → <kbd>Мікрофон</kbd>.</li>'
       + '<li>Оберіть «Дозволити» і оновіть сторінку (F5).</li>'
       + '</ol>';
-  if (!window.isSecureContext) {
-    html += '<p class="perm-warn">⚠️ Сторінка відкрита по небезпечному HTTP — '
-      + 'мікрофон тут не працюватиме, потрібен HTTPS.</p>';
-  }
-  return html;
 }
 
-/** Відкриває шторку потрібного режиму; без розмітки — toast/alert (fallback). */
+/** Відкриває шторку потрібного режиму; без розмітки — toast/alert (fallback).
+ *  На небезпечному зʼєднанні будь-який режим перетворюється на 'insecure':
+ *  кнопка «Дозволити» там обіцяла б те, чого браузер не дасть. */
 function openVoiceModal(mode) {
+  if (voiceInsecure()) mode = 'insecure';
   if (!voiceModal || !voiceModalTitle || !voiceModalBody) {
     voiceNotify(mode === 'ask'
       ? '🎤 Дозвольте мікрофон у запиті браузера, щоб говорити'
-      : '⚠ Немає доступу до мікрофона — дозвольте його в налаштуваннях сайту');
+      : mode === 'insecure'
+        ? '⚠ Голос працює лише на HTTPS або localhost'
+        : '⚠ Немає доступу до мікрофона — дозвольте його в налаштуваннях сайту');
     return;
   }
   voiceModalMode = mode;
-  voiceModalTitle.textContent = mode === 'ask' ? '🎤 Доступ до мікрофона' : '🔇 Мікрофон заблоковано';
+  voiceModalTitle.textContent = mode === 'ask' ? '🎤 Доступ до мікрофона'
+    : mode === 'insecure' ? '🔒 Потрібен HTTPS' : '🔇 Мікрофон заблоковано';
   voiceModalBody.innerHTML = voiceModalBodyHtml(mode);
   if (voiceModalOk) voiceModalOk.textContent = mode === 'ask' ? 'Дозволити' : 'Зрозуміло';
   if (voiceModalCancel) voiceModalCancel.style.display = mode === 'ask' ? '' : 'none';
@@ -1447,6 +1460,14 @@ if (voiceBtn && voiceHint) {
       }
       // Шторка вже відкрита — повторний клік під нею нічого не додає.
       if (voiceModal && !voiceModal.classList.contains('hidden')) return;
+
+      // Небезпечне зʼєднання (HTTP без HTTPS — зокрема тест-стенд по IP): браузер
+      // блокує мікрофон на рівні платформи, тому ні нашого, ні системного запиту
+      // не буде. Не турбуємо ні permissions, ні start() — одразу пояснюємо причину.
+      if (voiceInsecure()) {
+        openVoiceModal('insecure');
+        return;
+      }
 
       // Машина станів дозволу (див. шапку блоку): denied — одразу інструкція,
       // 'prompt' без прапорця — наша шторка-пояснення, решта — старт.

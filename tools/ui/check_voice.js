@@ -8,7 +8,7 @@
  * Запуск з корня репозиторію (потрібен сервер: python main.py):
  *   node tools/ui/check_voice.js
  *
- * П'ять сценаріїв:
+ * Шість сценаріїв:
  *   A. Мок Web Speech + дозвіл 'granted': клік → «(Слухаю...)» + .recording →
  *      текст у #ask-text → клік #ask-btn (помічено POST /api/plan) → onend →
  *      базовий стан + CSS .recording; шторка дозволу НЕ показується.
@@ -19,6 +19,10 @@
  *      прапорець у localStorage → ДРУГИЙ клік уже без шторки.
  *   E. Дозвіл 'denied': шторка-інструкція (заголовок, кроки, «Зрозуміло»,
  *      без «Пізніше»), розпізнавання НЕ стартує; повторний клік — знову вона.
+ *   F. Небезпечний контекст (HTTP без HTTPS — як було на тест-стенді по IP):
+ *      шторка «Потрібен HTTPS» замість інструкцій, які там не працюють;
+ *      розпізнавання навіть не створюється. Стан підмінюємо стабом
+ *      isSecureContext (реальний тестовий URL — завжди localhost, тобто secure).
  *
  * Реальний сервіс розпізнавання у headless непередбачуваний (мережа, тиша,
  * not-allowed), а реальний стан permissions у свіжому профілі — теж, тому
@@ -452,6 +456,91 @@ async function scenarioDenied(browser) {
 }
 
 // ---------------------------------------------------------------------------
+// F. Небезпечний контекст: HTTP без HTTPS (як тест-стенд по IP — саме через це
+//    голос там не працював). На такій сторінці браузер блокує мікрофон
+//    платформою, тому шторка має показати причину (HTTPS/localhost), а не
+//    інструкцію «налаштуйте мікрофон» і не обіцяти «Дозволити».
+// ---------------------------------------------------------------------------
+async function scenarioInsecureContext(browser) {
+  console.log('\n--- F. Небезпечний контекст (HTTP без HTTPS) ---');
+  const page = await browser.newPage();
+  const errors = [];
+  page.on('pageerror', (err) => errors.push(String(err)));
+  await page.setViewport({ width: 1400, height: 900 });
+
+  // Мок рахує старти: на insecure-контексті start() не має викликатись узагалі.
+  await page.evaluateOnNewDocument(() => {
+    window.__voiceStarts = 0;
+    class FakeRecognition {
+      start() { window.__voiceStarts += 1; }
+      stop() {}
+    }
+    window.SpeechRecognition = FakeRecognition;
+    window.webkitSpeechRecognition = FakeRecognition;
+    // isSecureContext — геттер на window: підмінюємо ДО скриптів сторінки.
+    try {
+      Object.defineProperty(window, 'isSecureContext', {
+        configurable: true,
+        get: () => false,
+      });
+    } catch (err) { /* не вийшло — це побачить перша ж перевірка нижче */ }
+  });
+
+  await page.goto(URL, { waitUntil: 'networkidle2', timeout: 45000 });
+  await page.waitForSelector('#ai-voice-btn', { timeout: 10000 });
+
+  const stubbed = await page.evaluate(() => window.isSecureContext);
+  check('F: стаб isSecureContext=false діє', stubbed === false, String(stubbed));
+
+  await page.click('#ai-voice-btn');
+  const modal = await waitFor(page, () => {
+    const m = document.getElementById('voice-perm-modal');
+    if (!m || m.classList.contains('hidden')) return null;
+    return {
+      title: (document.getElementById('voice-perm-title') || {}).textContent || '',
+      ok: (document.getElementById('voice-perm-ok') || {}).textContent || '',
+      cancelDisplay: (document.getElementById('voice-perm-cancel') || {}).style.display,
+      body: (document.getElementById('voice-perm-body') || {}).innerHTML || '',
+    };
+  }, 4000, 50);
+  check('F: шторка відкрилась', !!modal, JSON.stringify(modal));
+  if (modal) {
+    check('F: заголовок «Потрібен HTTPS»', modal.title === '🔒 Потрібен HTTPS', modal.title);
+    check('F: головна причина — HTTPS/localhost',
+      modal.body.indexOf('HTTPS') !== -1 && modal.body.indexOf('localhost') !== -1,
+      modal.body.slice(0, 140));
+    check('F: немає марної інструкції «налаштуйте мікрофон»',
+      modal.body.indexOf('<ol>') === -1 && modal.body.indexOf('Налаштування сайту') === -1);
+    check('F: кнопка «Зрозуміло», «Пізніше» сховано (обіцяти «Дозволити» нема сенсу)',
+      modal.ok === 'Зрозуміло' && modal.cancelDisplay === 'none',
+      modal.ok + ' / display=' + (modal.cancelDisplay || '""'));
+  }
+
+  // Головне: розпізнавання не стартувало й не «залипло» в очікуванні.
+  const idle = await page.evaluate(() => {
+    const btn = document.getElementById('ai-voice-btn');
+    const span = document.querySelector('#ai-voice-hint span');
+    return {
+      hint: span && span.textContent,
+      rec: !!(btn && btn.classList.contains('recording')),
+      starts: window.__voiceStarts,
+    };
+  });
+  check('F: start() не викликали', idle.starts === 0, 'start=' + idle.starts);
+  check('F: хинт і .recording не чіпали', idle.hint === HINT_IDLE && !idle.rec,
+    idle.hint + ' / recording=' + idle.rec);
+
+  await page.click('#voice-perm-ok');
+  const closed = await page.evaluate(() => {
+    const m = document.getElementById('voice-perm-modal');
+    return !m || m.classList.contains('hidden');
+  });
+  check('F: «Зрозуміло» закриває шторку', closed);
+  check('F: сторінка без необроблених помилок', errors.length === 0, errors.join(' | '));
+  await page.close();
+}
+
+// ---------------------------------------------------------------------------
 
 (async () => {
   const browser = await puppeteer.launch({
@@ -470,6 +559,7 @@ async function scenarioDenied(browser) {
     await scenarioReal(browser);
     await scenarioFirstAsk(browser);
     await scenarioDenied(browser);
+    await scenarioInsecureContext(browser);
   } finally {
     await browser.close();
   }
