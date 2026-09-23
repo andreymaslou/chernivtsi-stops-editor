@@ -46,6 +46,31 @@ OpenRouter либо гасите контейнер, когда не тести�
 Basic Auth. ⚠️ В мобильное приложение (RN) эти же креды придётся положить
 в конфиг — без них API отдаёт `401`.
 
+### Микрофон и голос: индекс (чтобы не искать) — 2026-09-23
+
+Голосовой ввод AI-помощника — это **3 коммита кода + 1 инфраструктурный**; всё
+остальное вокруг — доки. Быстрый поиск: `git tag -l 'mic-*'` →
+`git show mic-voice-https-2026-09-23` (в аннотации тега перечислена вся цепочка).
+
+| Что | Где именно |
+|---|---|
+| Логика (машина станів дозволу, шторка, Web Speech) | `web/emulator.js` — блок «Голосове введення»: `SpeechRec`, `voiceBtn`/`voiceHint`, `getMicPermissionState`, `voiceInsecure`, `voiceModalBodyHtml`, `openVoiceModal`/`closeVoiceModal`, `markVoiceAsked`/`wasVoiceAsked`, `resetVoiceHint` |
+| Кнопка 🎤 и шторка дозволу | `web/editor.html` — `#ai-voice-hint`/`#ai-voice-btn` и `#voice-perm-modal`; стилі — `web/style.css` (`.perm-body`, `.perm-warn`), пульс запису — `web/emulator-panel.css` (`.recording`, `emu-voice-pulse`) |
+| Smoke-тест (6 сценариев A–F) | `tools/ui/check_voice.js` — `node tools/ui/check_voice.js` (нужен живой `python main.py`) |
+| Почему на HTTP не работало и как включили HTTPS | `deploy/README_HTTPS.md` §0.1 (состояние + грабли), этот файл §5.1 |
+| План развития (GPS, пеший пунктир до нужной остановки) | `docs/PLAN-assistant-geo-walk.md` |
+
+| Коммит | Что в нём |
+|---|---|
+| `b2d31cd` | голосовое введение заработало: кнопка 🎤 (`Web Speech API`, `uk-UA`, «(Слухаю…)», транскрипт → `#ask-text` → клик `#ask-btn`), новый `check_voice.js` |
+| `25ff7a7` | шторка дозволу мікрофона (pre-permission): `granted` / `prompt` / `denied` + `not-allowed` в `onerror()` |
+| `4eff912` | шторка на небезпечному з'єднанні: `voiceInsecure()`, режим `insecure` («🔒 Потрібен HTTPS», кнопка «Зрозуміло»), сценарий F, бамп `?v=` |
+| `b7e460e` | **инфра, без которой голос не работает**: бинд `127.0.0.1:8000:8000` → наружу nginx + HTTPS (secure context) |
+| `e5deef0` | доки: стенд на HTTPS, грабли нип.io, грабли htpasswd (`500` вместо `401`) |
+
+Признак, что микрофон разблокирован (на стенде): `window.isSecureContext === true`
+и `navigator.permissions.query({name:'microphone'})` → `'prompt'`, а не `'denied'`.
+
 ## 2. Что уже сделано (история коммитов)
 
 Всего ~57 коммитов, репозиторий начат 2026-08-18 (точное число — `git rev-list --count HEAD`).
