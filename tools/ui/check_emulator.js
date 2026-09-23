@@ -276,6 +276,20 @@ const probe = () => ({
       stopDots: document.querySelectorAll('.plan-stop-dot').length,
       expectedStops: transit.reduce((sum, leg) =>
         sum + (Array.isArray(leg.stops) ? leg.stops.length : 0), 0),
+      stopTooltip: (() => {
+        const firstDot = document.querySelector('.plan-stop-dot');
+        const firstStop = transit.reduce((found, leg) => found ||
+          (Array.isArray(leg.stops) && leg.stops[0] && !Array.isArray(leg.stops[0])
+            ? leg.stops[0].name : null), null);
+        if (!firstDot || !firstStop) return null;
+        (firstDot.parentElement || firstDot).dispatchEvent(
+          new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+        const tooltip = document.querySelector('.plan-stop-tooltip');
+        return {
+          text: tooltip ? tooltip.textContent.trim() : '',
+          expected: firstStop,
+        };
+      })(),
     };
   })(),
   // CSS спецификации: проверяем правила на одноразовых элементах, а не «на глаз».
@@ -694,6 +708,10 @@ const probe = () => ({
       JSON.stringify(ux.chevrons.filter((item) => !item.ok).slice(0, 3))));
   check('точки проміжних зупинок', ux.stopDots === ux.expectedStops,
     'точок: ' + ux.stopDots + ' (очікується ' + ux.expectedStops + ')');
+  check('клік по точці показує тільки назву',
+    !!ux.stopTooltip && ux.stopTooltip.text === ux.stopTooltip.expected,
+    ux.stopTooltip ? 'tooltip: "' + ux.stopTooltip.text + '", очікувалося: "' +
+      ux.stopTooltip.expected + '"' : 'немає tooltip');
   check('хвости маршруту напівпрозорі',
     !!ux.tails && !!ux.active && ux.tails.count === ux.transitWithTail &&
     ux.tails.opacity > 0 && ux.tails.opacity < ux.active.opacity,

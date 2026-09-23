@@ -918,15 +918,21 @@ class TransitRouter:
         full_geom = [[lat, lon] for lat, lon in self.route_coords[route_key]]
 
         # Проміжні зупинки ноги (між посадкою та висадкою, виключно) — окремим
-        # масивом координат. Крапки малюються лише за координатами РЕАЛЬНИХ
-        # зупинок, а не за точками геометрії: якщо геометрію колись знову
-        # розширять (форма доріг), крапка на кожній точці дала б «пил» на карті.
+        # масивом об'єктів із назвою та координатами. Крапки малюються лише за
+        # координатами РЕАЛЬНИХ зупинок, а не за точками геометрії: якщо геометрію
+        # колись знову розширять (форма доріг), крапка на кожній точці дала б
+        # «пил» на карті.
         leg_coords = self.route_coords[route_key]
-        stops: List[List[float]] = []
+        stops: List[Dict[str, Any]] = []
         for position in range(pos_first + 1, pos_last):
             if 0 <= position < len(stop_indices):
+                stop_node = self.route_stops[route_key][position]
                 lat, lon = leg_coords[stop_indices[position]]
-                stops.append([lat, lon])
+                stops.append({
+                    "name": str(self.nodes[stop_node].get("name") or "Зупинка"),
+                    "lat": lat,
+                    "lon": lon,
+                })
 
         wait = self._wait_info(route_key, path_nodes[0], now, wait_cache)
         wait_min = wait.get("wait_min") or 0.0

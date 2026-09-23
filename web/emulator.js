@@ -630,10 +630,15 @@ const CHEVRON_SVG = '<svg viewBox="0 0 12 12" aria-hidden="true">' +
 
 /**
  * Промежуточная остановка: аккуратная белая точка с цветной обводкой маршрута.
+ * На клике/тапе показываем только название — без ETA и дополнительных действий.
  */
-function stopDot(point, colour) {
-  return L.marker(point, {
-    interactive: false,
+function stopDot(stop, colour) {
+  const legacy = Array.isArray(stop);
+  const point = legacy ? stop : [stop.lat, stop.lon];
+  const name = legacy ? '' : String(stop.name || '').trim();
+  const marker = L.marker(point, {
+    interactive: true,
+    keyboard: true,
     zIndexOffset: 100,
     icon: L.divIcon({
       className: 'plan-stop',
@@ -643,6 +648,20 @@ function stopDot(point, colour) {
       iconAnchor: [6, 6],
     }),
   });
+
+  if (name) {
+    // textContent важен: названия приходят из данных графа, их нельзя вставлять
+    // как HTML через bindTooltip (иначе спецсимволы/теги стали бы разметкой).
+    const label = document.createElement('span');
+    label.textContent = name;
+    marker.bindTooltip(label, {
+      className: 'plan-stop-tooltip',
+      direction: 'top',
+      offset: [0, -6],
+    });
+    marker.on('click', () => marker.openTooltip());
+  }
+  return marker;
 }
 
 /** Отдельный шеврон направления по центру сегмента линии. */

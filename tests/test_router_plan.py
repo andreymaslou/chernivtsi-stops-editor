@@ -47,7 +47,7 @@ def test_plan_response_contract(router, now):
     assert transit, "в плане должна быть хотя бы одна нога-поездка"
 
     leg_fields = {
-        "vehicle", "route", "from", "to", "path", "full_geom", "travel_min", "wait_min",
+        "vehicle", "route", "from", "to", "path", "stops", "full_geom", "travel_min", "wait_min",
         "price_grn", "live_bus", "eta", "vehicle_state", "color",
     }
     for leg in transit:
@@ -55,6 +55,10 @@ def test_plan_response_contract(router, now):
         assert leg["travel_min"] >= 0
         assert leg["wait_min"] is None or leg["wait_min"] >= 0
         assert leg["path"], "у ноги должен быть непустой путь для карты"
+        assert all(
+            {"name", "lat", "lon"} <= set(stop) and stop["name"]
+            for stop in leg["stops"]
+        ), "промежуточные остановки должны содержать имя и координаты"
         assert len(leg["full_geom"]) >= len(leg["path"]) >= 2, (
             "full_geom (хвіст маршруту) не може бути коротшим за активну ділянку"
         )
@@ -200,6 +204,17 @@ def test_ride_path_contains_all_intermediate_stops(router, now):
         "path обязан содержать все промежуточные остановки ноги"
     )
     assert leg["travel_min"] > 0
+
+    expected_stop_names = [
+        router.nodes[router.route_stops[route_key][position]]["name"]
+        for position in range(pos_first + 1, pos_last)
+    ]
+    expected_stop_coords = [
+        list(router.route_coords[route_key][stop_indices[position]])
+        for position in range(pos_first + 1, pos_last)
+    ]
+    assert [stop["name"] for stop in leg["stops"]] == expected_stop_names
+    assert [[stop["lat"], stop["lon"]] for stop in leg["stops"]] == expected_stop_coords
 
 
 def test_leg_full_geom_covers_active_path(router, now):
