@@ -11,7 +11,7 @@
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css?v=2026-09-20c" />
+  <link rel="stylesheet" href="style.css?v=2026-09-23a" />
   <!-- Панель эмулятора: стили скоупированы под #emu-panel (см. файл), чтобы
        не переопределять разметку/цвета редактора. -->
   <link rel="stylesheet" href="emulator-panel.css?v=2026-09-23a" />
@@ -272,12 +272,31 @@
     </div>
   </div>
 
+  <!-- Шторка дозволу мікрофона (pre-permission): браузер ПІСЛЯ відмови більше
+       не питає мікрофон сам — стан 'denied' живе до ручного скидання в
+       налаштуваннях сайту. Тому спочатку наша шторка пояснює, навіщо він
+       потрібен (режим ask), а після блокування — покрокова інструкція (режим
+       denied). Логіка — emulator.js (voicePerm*), стилі — style.css (.perm-body). -->
+  <div id="voice-perm-modal" class="modal-overlay hidden">
+    <div class="modal" style="width: 460px;">
+      <div class="modal-header">
+        <h3 id="voice-perm-title">🎤 Доступ до мікрофона</h3>
+        <button class="modal-close" id="voice-perm-close" aria-label="Закрити">✕</button>
+      </div>
+      <div class="perm-body" id="voice-perm-body"></div>
+      <div class="modal-footer">
+        <button class="btn btn-primary" id="voice-perm-ok">Дозволити</button>
+        <button class="btn btn-secondary" id="voice-perm-cancel">Пізніше</button>
+      </div>
+    </div>
+  </div>
+
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <!-- Порядок важен: app.js создаёт карту и публикует её как
        window.TRANSPORT_MAP; emulator.js подхватывает эту карту (а на
        отдельной странице /ui/emulator.html создаёт свою). -->
   <script src="app.js?v=2026-09-20c"></script>
-  <script src="emulator.js?v=2026-09-23b"></script>
+  <script src="emulator.js?v=2026-09-23c"></script>
 </body>
 
 </html>

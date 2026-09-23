@@ -687,6 +687,33 @@ input[type=number] {
   border-top: 1px solid var(--border);
 }
 
+/* ===== Voice permission modal (шторка дозволу мікрофона) =====
+ * Режим ask — пояснення перед нативним запитом браузера; режим denied —
+ * покрокова інструкція (браузер після відмови більше не питає сам).
+ * Розмітка — web/editor.html (#voice-perm-modal), логіка — emulator.js. */
+.perm-body {
+  padding: 16px 22px;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
+.perm-body p { margin: 0 0 10px; }
+.perm-body p:last-child { margin-bottom: 0; }
+.perm-body ol { margin: 0 0 10px; padding-left: 20px; }
+.perm-body li { margin: 4px 0; }
+
+.perm-body kbd {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-family: inherit;
+  font-size: 12px;
+}
+
+.perm-body .perm-warn { color: var(--danger); }
+
 /* ===== Leaflet overrides ===== */
 .leaflet-container {
   background: #181c24;

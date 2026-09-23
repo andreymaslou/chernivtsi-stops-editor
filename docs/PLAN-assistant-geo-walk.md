@@ -25,10 +25,20 @@
 
 * Голосовое ввод (Web Speech API) — коммит `b2d31cd`: `#ai-voice-btn`, состояние
   «(Слухаю...)» + класс `recording` (красный pulse), транскрипт → `#ask-text` →
-  автоклик `#ask-btn`, возврат состояния в `onend`/`onerror`, `NotAllowedError` → alert,
+  автоклик `#ask-btn`, возврат состояния в `onend`/`onerror`,
   браузеры без `SpeechRecognition` → кнопка скрыта.
-* Smoke-тест: `node tools/ui/check_voice.js` (мок Web Speech, браузер без поддержки,
-  CSS-состояние `.recording`).
+* Шторка доступа к микрофону (сессия 2026-09-23): pre-permission вместо голого
+  toast — `navigator.permissions` → `microphone` решает, что показать:
+  `granted` → сразу слушаем; `prompt` → первый клик объясняет, зачем микрофон
+  (кнопки «Дозволити»/«Пізніше», флаг в localStorage — повторно не показываем),
+  затем системный запрос браузера; `denied` → пошаговая инструкция (иконка ⚙/🔒
+  у адреси → Налаштування сайту → Мікрофон → Дозволити → F5), потому что
+  браузер после отказа больше НЕ спрашивает сам. `NotAllowedError` в `onerror`
+  тоже открывает режим denied. Разметка `#voice-perm-modal` в `editor.html`,
+  стили `.perm-body` в `style.css`, логика — `emulator.js` (voiceModal*).
+* Smoke-тест: `node tools/ui/check_voice.js` (пʼять сценаріїв: мок Web Speech при
+  granted, браузер без підтримки, реальний Web Speech, шторка 'prompt', шторка
+  'denied'; CSS-состояние `.recording`).
 
 ---
 

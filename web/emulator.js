@@ -1324,12 +1324,99 @@ if (modelTime) {
 // Екземпляр розпізнавання створюємо на кожен клік: Web Speech після помилки
 // не любить перезапуск, а один живий інстанс на всіх — джерело «залиплих»
 // станів і воронки мікрофона, яку браузер не відпускає.
+//
+// Доступ до мікрофона — машина станів (navigator.permissions → 'microphone'):
+//   * granted — слухаємо одразу, без жодних шторок;
+//   * prompt  — перший клік показує НАШУ шторку з поясненням (pre-permission);
+//               «Дозволити» стартує розпізнавання, і вже браузер показує
+//               системний запит. Надалі шторку не показуємо (прапорець у
+//               localStorage), щоб не набридати;
+//   * denied  — браузер сам більше НІКОЛИ не перепитає (відмова живе до ручного
+//               скидання в налаштуваннях сайту), тому показуємо шторку з
+//               покроковою інструкцією. Те саме — на 'not-allowed' в onerror
+//               (наприклад, HTTP без HTTPS на тестовому стенді).
 
 const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
 const voiceBtn = document.getElementById('ai-voice-btn');
 const voiceHint = document.querySelector('#ai-voice-hint span');
 let voiceRec = null;      // поточний екземпляр розпізнавання (null = не слухаємо)
 let voiceWanted = false;  // юзер хоче слухати (другий клік = стоп)
+
+// Шторка дозволу: розмітка #voice-perm-modal живе в editor.html (поруч із
+// export-modal), стилі — style.css (.perm-body). На emulator.html елементів
+// нема — voiceModal null, і ми просто працюємо по-старому.
+const VOICE_ASKED_KEY = 'transgps_voice_asked_mic';
+const voiceModal = document.getElementById('voice-perm-modal');
+const voiceModalTitle = document.getElementById('voice-perm-title');
+const voiceModalBody = document.getElementById('voice-perm-body');
+const voiceModalOk = document.getElementById('voice-perm-ok');
+const voiceModalCancel = document.getElementById('voice-perm-cancel');
+const voiceModalClose = document.getElementById('voice-perm-close');
+let voiceModalMode = 'ask';  // що зараз показано: 'ask' | 'denied'
+
+/** Стан дозволу мікрофона: 'granted' | 'denied' | 'prompt'. Браузери без
+ *  Permissions API або з невідомим іменем 'microphone' повертають 'prompt':
+ *  тоді спрацює наша шторка, а далі — системний запит браузера. */
+async function getMicPermissionState() {
+  try {
+    if (navigator.permissions && navigator.permissions.query) {
+      const result = await navigator.permissions.query({ name: 'microphone' });
+      if (result && result.state) return result.state;
+    }
+  } catch (err) { /* невідоме ім'я дозволу — нижче повернеться 'prompt' */ }
+  return 'prompt';
+}
+
+/** HTML тіла шторки: текст режиму + попередження, якщо сторінка без HTTPS
+ *  (на небезпечному зʼєднанні мікрофон блокується взагалі, без запиту). */
+function voiceModalBodyHtml(mode) {
+  let html = mode === 'ask'
+    ? '<p>Щоб диктувати запити голосом, сайту потрібен мікрофон 🎤.</p>'
+      + '<p>Натисніть «Дозволити» — браузер покаже системний запит, і вже після '
+      + 'нього почнеться прослуховування. Наступні рази ця шторка не зʼявлятиметься.</p>'
+    : '<p>Браузер не надав доступу до мікрофона. Щоб увімкнути його:</p>'
+      + '<ol>'
+      + '<li>Натисніть іконку <kbd>⚙</kbd> або <kbd>🔒</kbd> біля адреси сайту.</li>'
+      + '<li>Відкрийте <kbd>Налаштування сайту</kbd> → <kbd>Мікрофон</kbd>.</li>'
+      + '<li>Оберіть «Дозволити» і оновіть сторінку (F5).</li>'
+      + '</ol>';
+  if (!window.isSecureContext) {
+    html += '<p class="perm-warn">⚠️ Сторінка відкрита по небезпечному HTTP — '
+      + 'мікрофон тут не працюватиме, потрібен HTTPS.</p>';
+  }
+  return html;
+}
+
+/** Відкриває шторку потрібного режиму; без розмітки — toast/alert (fallback). */
+function openVoiceModal(mode) {
+  if (!voiceModal || !voiceModalTitle || !voiceModalBody) {
+    voiceNotify(mode === 'ask'
+      ? '🎤 Дозвольте мікрофон у запиті браузера, щоб говорити'
+      : '⚠ Немає доступу до мікрофона — дозвольте його в налаштуваннях сайту');
+    return;
+  }
+  voiceModalMode = mode;
+  voiceModalTitle.textContent = mode === 'ask' ? '🎤 Доступ до мікрофона' : '🔇 Мікрофон заблоковано';
+  voiceModalBody.innerHTML = voiceModalBodyHtml(mode);
+  if (voiceModalOk) voiceModalOk.textContent = mode === 'ask' ? 'Дозволити' : 'Зрозуміло';
+  if (voiceModalCancel) voiceModalCancel.style.display = mode === 'ask' ? '' : 'none';
+  voiceModal.classList.remove('hidden');
+}
+
+/** Закриває шторку (режим наступного разу задає openVoiceModal). */
+function closeVoiceModal() {
+  if (voiceModal) voiceModal.classList.add('hidden');
+}
+
+/** Прапорець «пояснювальну шторку вже показували» — localStorage; у приватному
+ *  режимі доступ кидає виключення — тому все у try/catch. */
+function markVoiceAsked() {
+  try { localStorage.setItem(VOICE_ASKED_KEY, '1'); } catch (err) { /* приватний режим */ }
+}
+
+function wasVoiceAsked() {
+  try { return localStorage.getItem(VOICE_ASKED_KEY) === '1'; } catch (err) { return false; }
+}
 
 /** Підказка у .map-hint повертається у спокійний стан, іконка — без блиску. */
 function resetVoiceHint() {
@@ -1352,10 +1439,25 @@ if (voiceBtn && voiceHint) {
     // не обіцяти голос, якого тут не буває.
     voiceBtn.style.display = 'none';
   } else {
-    voiceBtn.addEventListener('click', () => {
+    voiceBtn.addEventListener('click', async () => {
       // Другий клік під час запису — явна зупинка.
       if (voiceWanted && voiceRec) {
         voiceRec.stop();
+        return;
+      }
+      // Шторка вже відкрита — повторний клік під нею нічого не додає.
+      if (voiceModal && !voiceModal.classList.contains('hidden')) return;
+
+      // Машина станів дозволу (див. шапку блоку): denied — одразу інструкція,
+      // 'prompt' без прапорця — наша шторка-пояснення, решта — старт.
+      const state = await getMicPermissionState();
+      if (voiceWanted && voiceRec) return;  // поки питають — встигли стартувати
+      if (state === 'denied') {
+        openVoiceModal('denied');
+        return;
+      }
+      if (state !== 'granted' && voiceModal && !wasVoiceAsked()) {
+        openVoiceModal('ask');
         return;
       }
 
@@ -1385,7 +1487,9 @@ if (voiceBtn && voiceHint) {
       voiceRec.onerror = (event) => {
         const err = event && event.error;
         if (err === 'not-allowed' || err === 'NotAllowedError') {
-          voiceNotify('⚠ Немає доступу до мікрофона — дозвольте його в налаштуваннях сайту');
+          // Доступ заблоковано (відмова в системному запиті або HTTP без HTTPS):
+          // не тост, а шторка з покроковою інструкцією — браузер більше не питає.
+          openVoiceModal('denied');
         } else if (err !== 'aborted' && err !== 'no-speech') {
           // aborted — наш же стоп, no-speech — тиша: це не помилки для юзера.
           voiceNotify('⚠ Не вдалося розпізнати голос: ' + err);
@@ -1403,6 +1507,27 @@ if (voiceBtn && voiceHint) {
         voiceNotify('⚠ Не вдалося стартувати розпізнавання: ' + err.message);
       }
     });
+
+    // Кнопки шторки дозволу. «Дозволити» у режимі ask: прапорець «пояснення вже
+    // було» встановлюємо і робимо клік по кнопці мікрофона — станова машина
+    // виходить одразу на старт розпізнавання, а user activation від цього ж
+    // кліка ще дійсний, тому системний запит браузера встигне зʼявитись.
+    if (voiceModal && voiceModalOk && voiceModalCancel && voiceModalClose) {
+      voiceModalOk.addEventListener('click', () => {
+        const mode = voiceModalMode;
+        closeVoiceModal();
+        if (mode === 'ask') {
+          markVoiceAsked();
+          voiceBtn.click();
+        }
+      });
+      const dismiss = () => {
+        if (voiceModalMode === 'ask') markVoiceAsked();
+        closeVoiceModal();
+      };
+      voiceModalCancel.addEventListener('click', dismiss);
+      voiceModalClose.addEventListener('click', dismiss);
+    }
   }
 }
 

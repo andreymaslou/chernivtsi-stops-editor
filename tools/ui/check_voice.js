@@ -8,16 +8,23 @@
  * Запуск з корня репозиторію (потрібен сервер: python main.py):
  *   node tools/ui/check_voice.js
  *
- * Три сценарії:
- *   A. Мок Web Speech (підміна конструктора ДО скриптів сторінки): клік →
- *      «(Слухаю...)» + .recording → текст у #ask-text → клік #ask-btn
- *      (помічено POST /api/plan) → onend → базовий стан + CSS .recording.
+ * П'ять сценаріїв:
+ *   A. Мок Web Speech + дозвіл 'granted': клік → «(Слухаю...)» + .recording →
+ *      текст у #ask-text → клік #ask-btn (помічено POST /api/plan) → onend →
+ *      базовий стан + CSS .recording; шторка дозволу НЕ показується.
  *   B. Браузер «без Web Speech» (як Firefox): кнопка мікрофона прихована.
- *   C. Реальний Web Speech Chromium: старт/стоп без «залипання» стану.
+ *   C. Реальний Web Speech Chromium: старт/стоп без «залипання» стану; якщо
+ *      випала шторка дозволу — тест натискає у ній первинну кнопку.
+ *   D. Дозвіл 'prompt' (перший клік): шторка-пояснення → «Дозволити» → старт,
+ *      прапорець у localStorage → ДРУГИЙ клік уже без шторки.
+ *   E. Дозвіл 'denied': шторка-інструкція (заголовок, кроки, «Зрозуміло»,
+ *      без «Пізніше»), розпізнавання НЕ стартує; повторний клік — знову вона.
  *
  * Реальний сервіс розпізнавання у headless непередбачуваний (мережа, тиша,
- * not-allowed), тому головна логіка перевіряється моком у сценарії A, а C лише
- * переконується, що стан завжди прибирається.
+ * not-allowed), а реальний стан permissions у свіжому профілі — теж, тому
+ * тести задають його стабом navigator.permissions (evaluateOnNewDocument),
+ * головна логіка — моком (A/D/E), а C лише переконується, що стан завжди
+ * прибирається.
  */
 const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
@@ -92,6 +99,16 @@ async function scenarioMock(browser) {
     window.SpeechRecognition = FakeRecognition;
     window.webkitSpeechRecognition = FakeRecognition;
   }, TRANSCRIPT);
+  // Стан дозволу — 'granted': у цьому сценарії шторка не має втручатись,
+  // старт має йти напряму (її перевірки — окремими check нижче).
+  await page.evaluateOnNewDocument(() => {
+    try {
+      Object.defineProperty(navigator, 'permissions', {
+        configurable: true,
+        value: { query: async () => ({ state: 'granted', onchange: null }) },
+      });
+    } catch (err) { /* не вийшло — спрацює реальний стан браузера */ }
+  });
 
   await page.goto(URL, { waitUntil: 'networkidle2', timeout: 45000 });
   await page.waitForSelector('#ai-voice-btn', { timeout: 10000 });
@@ -119,6 +136,13 @@ async function scenarioMock(browser) {
       btn.classList.contains('recording') ? true : null;
   }, 4000, 25);
   check('A: стан «' + HINT_HEARING + '» і клас .recording', !!heard);
+
+  // При granted шторка дозволу не сміє втручатись — ні під час, ні після старту.
+  const modalHidden = await page.evaluate(() => {
+    const m = document.getElementById('voice-perm-modal');
+    return !m || m.classList.contains('hidden');
+  });
+  check('A: шторка дозволу НЕ показується при granted', modalHidden);
 
   // Читаємо саме фактичне значення (аргумент у page.evaluate не проброшується
   // через waitFor), воно ж іде в note для діагностики.
@@ -198,6 +222,19 @@ async function scenarioReal(browser) {
   check('C: реальний Web Speech у Chromium', hasApi);
 
   await page.click('#ai-voice-btn');
+
+  // Можлива шторка дозволу (стан 'prompt' у свіжому профілі): натискаємо у ній
+  // первинну кнопку — у режимі ask вона стартує розпізнавання, у denied лише
+  // закриється (тоді recording не зʼявиться, і C це чесно відмітить).
+  const modalUp = await waitFor(page, () => {
+    const m = document.getElementById('voice-perm-modal');
+    return m && !m.classList.contains('hidden') ? true : null;
+  }, 4000, 50);
+  if (modalUp) {
+    console.log('        (випала шторка дозволу — натиснули первинну кнопку)');
+    await page.click('#voice-perm-ok');
+  }
+
   // Реальний сервіс: або onstart (стан мелькає), або швидка помилка
   // (not-allowed/network) — у будь-якому разі onerror/onend має прибрати стан.
   const seenRecording = !!(await waitFor(page, () => {
@@ -222,6 +259,199 @@ async function scenarioReal(browser) {
 }
 
 // ---------------------------------------------------------------------------
+// D. Стан 'prompt': перший клік показує шторку-пояснення, «Дозволити» стартує
+//    розпізнавання (прапорець у localStorage), другий клік — уже без шторки
+// ---------------------------------------------------------------------------
+async function scenarioFirstAsk(browser) {
+  console.log('\n--- D. Дозвіл prompt: шторка-пояснення ---');
+  const page = await browser.newPage();
+  const errors = [];
+  page.on('pageerror', (err) => errors.push(String(err)));
+  await page.setViewport({ width: 1400, height: 900 });
+  // Мок Web Speech + стан 'prompt' — обидва ДО скриптів сторінки.
+  await page.evaluateOnNewDocument((text) => {
+    class FakeRecognition {
+      start() {
+        setTimeout(() => this.onstart && this.onstart(), 100);
+        setTimeout(() => {
+          if (this.onresult) this.onresult({ results: [[{ transcript: text }]] });
+          setTimeout(() => this.onend && this.onend(), 300);
+        }, 700);
+      }
+      stop() {
+        if (this.onend) this.onend();
+      }
+    }
+    window.SpeechRecognition = FakeRecognition;
+    window.webkitSpeechRecognition = FakeRecognition;
+    try {
+      Object.defineProperty(navigator, 'permissions', {
+        configurable: true,
+        value: { query: async () => ({ state: 'prompt', onchange: null }) },
+      });
+    } catch (err) { /* не вийшло — спрацює реальний стан браузера */ }
+  }, TRANSCRIPT);
+
+  await page.goto(URL, { waitUntil: 'networkidle2', timeout: 45000 });
+  await page.waitForSelector('#ai-voice-btn', { timeout: 10000 });
+  // Прапорець міг лишитись від попередніх сценаріїв (спільний профіль) — чистимо,
+  // бо саме він вирішує, показувати шторку чи ні.
+  await page.evaluate(() => {
+    try { localStorage.removeItem('transgps_voice_asked_mic'); } catch (err) { /* приватний режим */ }
+  });
+
+  await page.click('#ai-voice-btn');
+
+  const modal = await waitFor(page, () => {
+    const m = document.getElementById('voice-perm-modal');
+    if (!m || m.classList.contains('hidden')) return null;
+    return {
+      title: (document.getElementById('voice-perm-title') || {}).textContent || '',
+      ok: (document.getElementById('voice-perm-ok') || {}).textContent || '',
+      cancelDisplay: (document.getElementById('voice-perm-cancel') || {}).style.display,
+      body: (document.getElementById('voice-perm-body') || {}).innerHTML || '',
+    };
+  }, 4000, 50);
+  check('D: шторка дозволу відкрилась', !!modal, JSON.stringify(modal));
+  if (modal) {
+    check('D: заголовок «Доступ до мікрофона»', modal.title === '🎤 Доступ до мікрофона', modal.title);
+    check('D: кнопка «Дозволити», «Пізніше» видима',
+      modal.ok === 'Дозволити' && modal.cancelDisplay !== 'none',
+      modal.ok + ' / display=' + (modal.cancelDisplay || '""'));
+    check('D: тіло пояснює навіщо мікрофон',
+      modal.body.indexOf('потрібен мікрофон') !== -1, modal.body.slice(0, 80));
+  }
+
+  // До натискання «Дозволити» розпізнавання не стартує — лише шторка.
+  const before = await page.evaluate(() => {
+    const btn = document.getElementById('ai-voice-btn');
+    const span = document.querySelector('#ai-voice-hint span');
+    return { hint: span && span.textContent, rec: !!(btn && btn.classList.contains('recording')) };
+  });
+  check('D: до «Дозволити» стан спокійний', before.hint === HINT_IDLE && !before.rec,
+    before.hint + ' / recording=' + before.rec);
+
+  await page.click('#voice-perm-ok');
+
+  const heard = await waitFor(page, () => {
+    const btn = document.getElementById('ai-voice-btn');
+    const span = document.querySelector('#ai-voice-hint span');
+    return btn && span && span.textContent === '(Слухаю...)' &&
+      btn.classList.contains('recording') ? true : null;
+  }, 4000, 25);
+  check('D: «Дозволити» → «(Слухаю...)» + .recording', !!heard);
+
+  const after = await page.evaluate(() => {
+    const m = document.getElementById('voice-perm-modal');
+    let flag = null;
+    try { flag = localStorage.getItem('transgps_voice_asked_mic'); } catch (err) { /* ignore */ }
+    return { closed: !m || m.classList.contains('hidden'), flag: flag };
+  });
+  check('D: шторка закрилась після «Дозволити»', after.closed);
+  check('D: прапорець у localStorage', after.flag === '1', String(after.flag));
+
+  const settled = await waitFor(page, () => {
+    const btn = document.getElementById('ai-voice-btn');
+    const span = document.querySelector('#ai-voice-hint span');
+    return btn && span && span.textContent === '(AI-ЗАПИТАЙ МЕНЕ)' &&
+      !btn.classList.contains('recording') ? true : null;
+  }, 5000, 50);
+  check('D: після onend базовий стан', !!settled);
+
+  // Другий клік: прапорець є — старт БЕЗ шторки (стан ще 'prompt').
+  await page.click('#ai-voice-btn');
+  const second = await waitFor(page, () => {
+    const btn = document.getElementById('ai-voice-btn');
+    const span = document.querySelector('#ai-voice-hint span');
+    const m = document.getElementById('voice-perm-modal');
+    if (m && !m.classList.contains('hidden')) return 'modal';
+    if (btn && span && span.textContent === '(Слухаю...)' && btn.classList.contains('recording')) {
+      return 'recording';
+    }
+    return null;
+  }, 4000, 25);
+  check('D: другий клік — одразу запис, без шторки', second === 'recording', String(second));
+  if (second === 'recording') {
+    await sleep(300);
+    await page.click('#ai-voice-btn');  // toggle-стоп
+  }
+  check('D: сторінка без необроблених помилок', errors.length === 0, errors.join(' | '));
+  await page.close();
+}
+
+// ---------------------------------------------------------------------------
+// E. Стан 'denied': шторка-інструкція замість тоста; розпізнавання не стартує,
+//    повторний клік — знову інструкція (відмова не лікується сама)
+// ---------------------------------------------------------------------------
+async function scenarioDenied(browser) {
+  console.log('\n--- E. Дозвіл denied: шторка-інструкція ---');
+  const page = await browser.newPage();
+  const errors = [];
+  page.on('pageerror', (err) => errors.push(String(err)));
+  await page.setViewport({ width: 1400, height: 900 });
+  await page.evaluateOnNewDocument(() => {
+    try {
+      Object.defineProperty(navigator, 'permissions', {
+        configurable: true,
+        value: { query: async () => ({ state: 'denied', onchange: null }) },
+      });
+    } catch (err) { /* не вийшло — спрацює реальний стан браузера */ }
+  });
+
+  await page.goto(URL, { waitUntil: 'networkidle2', timeout: 45000 });
+  await page.waitForSelector('#ai-voice-btn', { timeout: 10000 });
+
+  await page.click('#ai-voice-btn');
+  const modal = await waitFor(page, () => {
+    const m = document.getElementById('voice-perm-modal');
+    if (!m || m.classList.contains('hidden')) return null;
+    return {
+      title: (document.getElementById('voice-perm-title') || {}).textContent || '',
+      ok: (document.getElementById('voice-perm-ok') || {}).textContent || '',
+      cancelDisplay: (document.getElementById('voice-perm-cancel') || {}).style.display,
+      body: (document.getElementById('voice-perm-body') || {}).innerHTML || '',
+    };
+  }, 4000, 50);
+  check('E: шторка-інструкція відкрилась', !!modal, JSON.stringify(modal));
+  if (modal) {
+    check('E: заголовок «Мікрофон заблоковано»',
+      modal.title === '🔇 Мікрофон заблоковано', modal.title);
+    check('E: кнопка «Зрозуміло», «Пізніше» сховано',
+      modal.ok === 'Зрозуміло' && modal.cancelDisplay === 'none',
+      modal.ok + ' / display=' + (modal.cancelDisplay || '""'));
+    check('E: тіло — покрокова інструкція (ol + kbd)',
+      modal.body.indexOf('<ol>') !== -1 && modal.body.indexOf('Налаштування сайту') !== -1,
+      modal.body.slice(0, 120));
+  }
+
+  // Головне: попри denied розпізнавання не стартувало, хинт не чіпався.
+  const idle = await page.evaluate(() => {
+    const btn = document.getElementById('ai-voice-btn');
+    const span = document.querySelector('#ai-voice-hint span');
+    return { hint: span && span.textContent, rec: !!(btn && btn.classList.contains('recording')) };
+  });
+  check('E: розпізнавання НЕ стартувало', idle.hint === HINT_IDLE && !idle.rec,
+    idle.hint + ' / recording=' + idle.rec);
+
+  await page.click('#voice-perm-ok');
+  const closed = await page.evaluate(() => {
+    const m = document.getElementById('voice-perm-modal');
+    return !m || m.classList.contains('hidden');
+  });
+  check('E: «Зрозуміло» закриває шторку', closed);
+
+  // Відмова не лікується сама — повторний клік знову показує інструкцію.
+  await page.click('#ai-voice-btn');
+  const again = await waitFor(page, () => {
+    const m = document.getElementById('voice-perm-modal');
+    return m && !m.classList.contains('hidden') ? true : null;
+  }, 4000, 50);
+  check('E: повторний клік — знову інструкція', !!again);
+  check('E: сторінка без необроблених помилок', errors.length === 0, errors.join(' | '));
+  await page.close();
+}
+
+// ---------------------------------------------------------------------------
 
 (async () => {
   const browser = await puppeteer.launch({
@@ -238,6 +468,8 @@ async function scenarioReal(browser) {
     await scenarioMock(browser);
     await scenarioNoApi(browser);
     await scenarioReal(browser);
+    await scenarioFirstAsk(browser);
+    await scenarioDenied(browser);
   } finally {
     await browser.close();
   }
