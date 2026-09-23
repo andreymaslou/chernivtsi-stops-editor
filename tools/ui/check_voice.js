@@ -7,6 +7,12 @@
  *
  * Запуск з корня репозиторію (потрібен сервер: python main.py):
  *   node tools/ui/check_voice.js
+ *   node tools/ui/check_voice.js https://169.58.82.105.nip.io/ui/editor.html --user admin --pass ПАРОЛЬ
+ *
+ * --url — яку сторінку перевіряти (приймається і позиційно, першим аргументом
+ * без «--»); --user/--pass — опційний HTTP Basic Auth: на стенді за nginx без
+ * нього сторінка віддає 401 і тест не стартує. Без цих флагів поведінка
+ * не змінюється — локальний сервер пароля не просить.
  *
  * Шість сценаріїв:
  *   A. Мок Web Speech + дозвіл 'granted': клік → «(Слухаю...)» + .recording →
@@ -41,7 +47,30 @@ function argValue(name, fallback) {
   return index >= 0 && args[index + 1] ? args[index + 1] : fallback;
 }
 
-const URL = argValue('--url', 'http://127.0.0.1:8000/ui/editor.html');
+/** Аргумент без «--», який не є значенням попереднього флага, — позиційний URL
+ *  (щоб не обов'язково писати --url: check_voice.js https://host/ --user u). */
+function positionalUrl() {
+  for (let i = 0; i < args.length; i += 1) {
+    if (i > 0 && args[i - 1].startsWith('--')) continue; // це значення флага
+    if (!args[i].startsWith('--')) return args[i];
+  }
+  return '';
+}
+
+const URL = argValue('--url', positionalUrl() || 'http://127.0.0.1:8000/ui/editor.html');
+// Опційний HTTP Basic Auth (стенд за nginx: https://<IP>.nip.io/). Обидва
+// флаги — пара; порізно ігноруємо, щоб випадковий один флаг не зламав прогін.
+const AUTH_USER = argValue('--user', '');
+const AUTH_PASS = argValue('--pass', '');
+const AUTH = AUTH_USER && AUTH_PASS ? { username: AUTH_USER, password: AUTH_PASS } : null;
+
+/** Нова сторінка з креденшелами (якщо задані). page.authenticate() мусить бути
+ *  викликаний ДО page.goto(): інакше nginx віддає 401 і сторінка не грузиться. */
+async function openPage(browser) {
+  const page = await browser.newPage();
+  if (AUTH) await page.authenticate(AUTH);
+  return page;
+}
 const HINT_IDLE = '(AI-ЗАПИТАЙ МЕНЕ)';
 const HINT_HEARING = '(Слухаю...)';
 const TRANSCRIPT = 'з Калинки до Універу';
@@ -75,7 +104,7 @@ async function waitFor(page, predicate, timeout, step = 50) {
 // ---------------------------------------------------------------------------
 async function scenarioMock(browser) {
   console.log('\n--- A. Мок Web Speech ---');
-  const page = await browser.newPage();
+  const page = await openPage(browser);
   const errors = [];
   let planRequests = 0;
   page.on('pageerror', (err) => errors.push(String(err)));
@@ -189,7 +218,7 @@ async function scenarioMock(browser) {
 // ---------------------------------------------------------------------------
 async function scenarioNoApi(browser) {
   console.log('\n--- B. Браузер без SpeechRecognition ---');
-  const page = await browser.newPage();
+  const page = await openPage(browser);
   await page.evaluateOnNewDocument(() => {
     try { window.SpeechRecognition = undefined; } catch (err) { /* нема чого міняти */ }
     try { window.webkitSpeechRecognition = undefined; } catch (err) { /* нема чого міняти */ }
@@ -214,7 +243,7 @@ async function scenarioNoApi(browser) {
 // ---------------------------------------------------------------------------
 async function scenarioReal(browser) {
   console.log('\n--- C. Реальний Web Speech ---');
-  const page = await browser.newPage();
+  const page = await openPage(browser);
   const errors = [];
   page.on('pageerror', (err) => errors.push(String(err)));
   await page.setViewport({ width: 1400, height: 900 });
@@ -268,7 +297,7 @@ async function scenarioReal(browser) {
 // ---------------------------------------------------------------------------
 async function scenarioFirstAsk(browser) {
   console.log('\n--- D. Дозвіл prompt: шторка-пояснення ---');
-  const page = await browser.newPage();
+  const page = await openPage(browser);
   const errors = [];
   page.on('pageerror', (err) => errors.push(String(err)));
   await page.setViewport({ width: 1400, height: 900 });
@@ -389,7 +418,7 @@ async function scenarioFirstAsk(browser) {
 // ---------------------------------------------------------------------------
 async function scenarioDenied(browser) {
   console.log('\n--- E. Дозвіл denied: шторка-інструкція ---');
-  const page = await browser.newPage();
+  const page = await openPage(browser);
   const errors = [];
   page.on('pageerror', (err) => errors.push(String(err)));
   await page.setViewport({ width: 1400, height: 900 });
@@ -463,7 +492,7 @@ async function scenarioDenied(browser) {
 // ---------------------------------------------------------------------------
 async function scenarioInsecureContext(browser) {
   console.log('\n--- F. Небезпечний контекст (HTTP без HTTPS) ---');
-  const page = await browser.newPage();
+  const page = await openPage(browser);
   const errors = [];
   page.on('pageerror', (err) => errors.push(String(err)));
   await page.setViewport({ width: 1400, height: 900 });
@@ -553,6 +582,10 @@ async function scenarioInsecureContext(browser) {
       '--use-fake-device-for-media-stream',
     ],
   });
+  console.log('Перевіряю ' + URL + (AUTH ? ' | Basic Auth: ' + AUTH_USER : ' | без пароля'));
+  if ((AUTH_USER && !AUTH_PASS) || (!AUTH_USER && AUTH_PASS)) {
+    console.log('Увага: --user і --pass задаються парою — Basic Auth вимкнено.');
+  }
   try {
     await scenarioMock(browser);
     await scenarioNoApi(browser);

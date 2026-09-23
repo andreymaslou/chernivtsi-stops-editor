@@ -6,8 +6,13 @@
  *   node tools/ui/check_emulator.js
  *   node tools/ui/check_emulator.js --url http://169.58.82.105:8000/ui/emulator.html --out C:\\Temp\\ui_vps
  *
- * --url — какой эмулятор проверять, --text — фраза для сценария плана,
+ * --url — какой эмулятор проверять (принимается и позиционно, первым
+ * аргументом без «--»), --text — фраза для сценария плана,
  * --out — куда сложить PNG и report.json (по умолчанию tools/ui/out).
+ * --user/--pass — опциональный HTTP Basic Auth: стенд за nginx без него отдаёт
+ * 401, и страница не откроется. Пример против стенда:
+ *   node tools/ui/check_emulator.js https://169.58.82.105.nip.io/ui/emulator.html --user admin --pass ПАРОЛЬ
+ * Без этих флагов поведение прежнее (локальный сервер пароля не просит).
  *
  * Что проверяется:
  *   1. страница грузится без ошибок консоли и без упавших запросов;
@@ -48,7 +53,17 @@ function argValue(name, fallback) {
   return index >= 0 && args[index + 1] ? args[index + 1] : fallback;
 }
 
-const URL = argValue('--url', 'http://127.0.0.1:8000/ui/emulator.html');
+/** Аргумент без «--», не являющийся значением предыдущего флага, — позиционный
+ *  URL (чтобы не писать --url: check_emulator.js https://host/ --user u). */
+function positionalUrl() {
+  for (let i = 0; i < args.length; i += 1) {
+    if (i > 0 && args[i - 1].startsWith('--')) continue; // это значение флага
+    if (!args[i].startsWith('--')) return args[i];
+  }
+  return '';
+}
+
+const URL = argValue('--url', positionalUrl() || 'http://127.0.0.1:8000/ui/emulator.html');
 const PHRASE = argValue('--text', 'Я на Соборці, їду на Гравітон');
 // Фіксований час плану (опціонально): інтерсепт POST /api/plan і додає ?now.
 // Потрібен, коли на поточний час у маршруту лише 1 пересадка — тоді сервер
@@ -60,6 +75,21 @@ const PLAN_NOW = argValue('--plan-now', '');
 const MODEL_TIME = argValue('--model-time', '2026-09-17T12:00');
 const OUT = path.resolve(argValue('--out', path.join(__dirname, 'out')));
 fs.mkdirSync(OUT, { recursive: true });
+
+// Опциональный HTTP Basic Auth (стенд за nginx: https://<IP>.nip.io/). Флаги
+// задаются парой; одиночный флаг игнорируем, чтобы случайная опечатка не
+// сломала прогон. Без флагов поведение прежнее.
+const AUTH_USER = argValue('--user', '');
+const AUTH_PASS = argValue('--pass', '');
+const AUTH = AUTH_USER && AUTH_PASS ? { username: AUTH_USER, password: AUTH_PASS } : null;
+
+/** Новая страница с кредами (если заданы). page.authenticate() вызывается ДО
+ *  page.goto(): иначе nginx отдаёт 401 и страница не грузится. */
+async function openPage(browser) {
+  const page = await browser.newPage();
+  if (AUTH) await page.authenticate(AUTH);
+  return page;
+}
 
 const report = { url: URL, phrase: PHRASE, checks: {}, errors: [], shots: [] };
 
@@ -393,7 +423,11 @@ const probe = () => ({
 });
 (async () => {
   const browser = await puppeteer.launch({ headless: 'new', args: ['--no-sandbox'] });
-  const page = await browser.newPage();
+  if (AUTH) console.log('Basic Auth: ' + AUTH_USER + ' | адрес: ' + URL);
+  if ((AUTH_USER && !AUTH_PASS) || (!AUTH_USER && AUTH_PASS)) {
+    console.log('Предупреждение: --user и --pass задаются парой — Basic Auth выключен.');
+  }
+  const page = await openPage(browser);
   await page.setViewport({ width: 1400, height: 900 });
   // Headless Chrome по умолчанию отдаёт prefers-reduced-motion: reduce, и наши
   // пульсации честно выключаются (@media в emulator.html). Для проверки
