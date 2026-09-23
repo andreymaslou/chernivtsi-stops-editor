@@ -53,6 +53,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
+from time_utils import now_kyiv
+
 logger = logging.getLogger("transgps-graph")
 
 # ---------------------------------------------------------------------------
@@ -823,7 +825,7 @@ def build_graph(
             )
 
     return {
-        "generated": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "generated": now_kyiv().strftime("%Y-%m-%d %H:%M:%S"),
         "params": {
             "detour_factor": DETOUR_FACTOR,
             "commercial_speed_kmh": COMMERCIAL_SPEED_KMH,

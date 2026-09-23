@@ -28,6 +28,8 @@ import zlib
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
+from time_utils import as_kyiv, now_kyiv
+
 # Интервалы по умолчанию, если маршрута нет в routes_schedule.json.
 DEFAULT_FIRST = "06:00"
 DEFAULT_LAST = "22:00"
@@ -227,7 +229,7 @@ class SimLayer:
         include_depo приймаються для сумісності — у симуляції всі машини
         живі і не в депо.
         """
-        now = now or datetime.now()
+        now = as_kyiv(now) if now is not None else now_kyiv()
         all_vehicles = self._compute_vehicles(now)
 
         counts = {

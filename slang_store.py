@@ -30,6 +30,8 @@ import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Sequence
 
+from time_utils import now_kyiv
+
 from graph_layer import is_generic_stop_name
 from storage import SLANG_PATH, read_json, write_json_atomic
 
@@ -57,7 +59,7 @@ def save_overrides(data: Dict[str, Any]) -> Dict[str, Any]:
     """Сохраняет файл правок, проставляя версию и время изменения."""
     payload = {
         "version": OVERRIDES_VERSION,
-        "updated": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "updated": now_kyiv().strftime("%Y-%m-%d %H:%M:%S"),
         "stops": data.get("stops") or {},
     }
     write_json_atomic(SLANG_PATH, payload)
@@ -102,7 +104,7 @@ def upsert_stop(
     if comment is not None:
         entry["comment"] = str(comment).strip()
 
-    entry["updated"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    entry["updated"] = now_kyiv().strftime("%Y-%m-%d %H:%M:%S")
     data["stops"][key] = entry
     save_overrides(data)
     return entry

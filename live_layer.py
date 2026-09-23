@@ -36,6 +36,8 @@ import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+from time_utils import APP_TIMEZONE, as_kyiv, format_kyiv, now_kyiv
+
 import httpx
 
 logger = logging.getLogger("transgps-live-layer")
@@ -125,17 +127,17 @@ def colour_to_hex(colour_name: Optional[str]) -> str:
 
 def parse_gpstime(raw: Any) -> Optional[datetime]:
     """
-    Разбирает gpstime ("2026-09-15 20:05:51") в naive datetime.
+    Разбирает gpstime ("2026-09-15 20:05:51") как aware datetime.
 
     Время в источнике — локальное (Europe/Kyiv), поэтому и сравниваем его
-    с локальным временем процесса: сервер живёт в том же часовом поясе.
+    с локальным временем приложения, независимо от timezone хоста/Docker.
     """
     if not raw:
         return None
     text = str(raw).strip()
     for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%d.%m.%Y %H:%M:%S"):
         try:
-            return datetime.strptime(text[:19], fmt)
+            return datetime.strptime(text[:19], fmt).replace(tzinfo=APP_TIMEZONE)
         except ValueError:
             continue
     return None
@@ -186,7 +188,7 @@ def normalize_vehicle(
     «виходи зараз». Остальные отдаются клиенту со статусом stale/depo,
     чтобы UI мог показать «⚪ за розкладом» вместо живой метки.
     """
-    now = now or datetime.now()
+    now = as_kyiv(now) if now is not None else now_kyiv()
 
     gps_dt = parse_gpstime(raw.get("gpstime"))
     age_seconds: Optional[float] = None
@@ -412,7 +414,7 @@ class LiveTracker:
             except Exception as exc:  # не критично для самого среза
                 logger.warning("Живой слой: не удалось обновить справочник: %s", exc)
 
-        now = datetime.now()
+        now = now_kyiv()
         vehicles = [
             normalize_vehicle(
                 raw,
@@ -476,7 +478,7 @@ class LiveTracker:
 
         return {
             "source": self.base_url,
-            "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "generated_at": format_kyiv(),
             "last_success_at": (
                 self._last_success_at.strftime("%Y-%m-%d %H:%M:%S") if self._last_success_at else None
             ),

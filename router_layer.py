@@ -33,6 +33,8 @@ import math
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
+from time_utils import as_kyiv, now_kyiv
+
 # Скільки пересадок шукаємо максимум (0-2 за ТЗ).
 MAX_TRANSFERS = 2
 
@@ -321,7 +323,7 @@ class TransitRouter:
         него), для реального трекера — «сейчас».
         """
         self._live_vehicles = list(vehicles)
-        self._live_snapshot_at = snapshot_at
+        self._live_snapshot_at = as_kyiv(snapshot_at) if snapshot_at is not None else None
         self._fleet_source = source
         # Сброс пространственного кэша — только если изменилась ГЕОМЕТРИЯ парка.
         # eta в записях кэша — величина относительная («через сколько минут от
@@ -390,7 +392,7 @@ class TransitRouter:
         і глобальна правка — це гонка між запитами. Другим прогоном будуються
         варіанти плану (`build_variants`, поставка 1, §13 брифа).
         """
-        now = now or datetime.now()
+        now = as_kyiv(now) if now is not None else now_kyiv()
         from_nodes = self._resolve_to_nodes(int(from_stop_id))
         to_nodes = self._resolve_to_nodes(int(to_stop_id))
         if not from_nodes or not to_nodes:
@@ -458,7 +460,7 @@ class TransitRouter:
         Возвращает `(variants, note)`: список вариантов (первый — всегда дефолт) и
         человеческую пометку, когда второго варианта сейчас нет.
         """
-        now = now or datetime.now()
+        now = as_kyiv(now) if now is not None else now_kyiv()
         default = default_plan if default_plan is not None else self.plan(
             from_stop_id, to_stop_id, now=now
         )
@@ -886,6 +888,7 @@ class TransitRouter:
         wait_cache: Optional[Dict[Tuple[str, int], Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         """Нога «їдемо маршрутом»: від першого до останнього вузла підряд."""
+        now = as_kyiv(now) if now is not None else now_kyiv()
         route = self.routes.get(route_key) or {}
         prefix = self.route_prefix[route_key]
         pos_first = self.route_pos[route_key][path_nodes[0]]
@@ -1031,6 +1034,7 @@ class TransitRouter:
         розрахунку він сталий, а спільний між запитами кеш дав би відповідь
         «з іншого часу».
         """
+        now = as_kyiv(now) if now is not None else now_kyiv()
         # Ключ включает момент посадки (с точностью до минуты): время поездки
         # стало честным, поэтому в один и тот же узел можно прийти в разное
         # время, и ожидание будет разным. Секунды отбрасываем — расписание
@@ -1125,6 +1129,9 @@ class TransitRouter:
         монотонно по eta, поэтому отдельная сортировка не нужна).
         """
         # Скільки хвилин мине від моменту среза парка до нашої посадки.
+        # Кэш геометрии зависит от среза и не от времени посадки, но арифметика
+        # board_time - snapshot_at должна быть в одной timezone-модели.
+        board_time = as_kyiv(board_time)
         arrive_min = 0.0
         if self._live_snapshot_at is not None:
             arrive_min = max(

@@ -687,9 +687,10 @@ function midChevron(point, bearing, colour) {
 }
 
 /** Бейдж шага плана: посадка, где пассажиру ждать. Крупный и пульсирует. */
-function stepBadge(step, point, colour) {
-  return L.marker(point, {
-    interactive: false,
+function stepBadge(step, point, colour, name) {
+  const marker = L.marker(point, {
+    interactive: true,
+    keyboard: true,
     zIndexOffset: 500,
     icon: L.divIcon({
       className: 'plan-step-wrap',
@@ -699,12 +700,24 @@ function stepBadge(step, point, colour) {
       iconAnchor: [15, 15],
     }),
   });
+  if (name) {
+    const label = document.createElement('span');
+    label.textContent = name;
+    marker.bindTooltip(label, {
+      className: 'plan-stop-tooltip',
+      direction: 'top',
+      offset: [0, -10],
+    });
+    marker.on('click', () => marker.openTooltip());
+  }
+  return marker;
 }
 
 /** Финиш плана — кінцева пассажира. */
-function finishBadge(point) {
-  return L.marker(point, {
-    interactive: false,
+function finishBadge(point, name) {
+  const marker = L.marker(point, {
+    interactive: true,
+    keyboard: true,
     zIndexOffset: 500,
     icon: L.divIcon({
       className: 'plan-finish-wrap',
@@ -713,6 +726,17 @@ function finishBadge(point) {
       iconAnchor: [12, 12],
     }),
   });
+  if (name) {
+    const label = document.createElement('span');
+    label.textContent = name;
+    marker.bindTooltip(label, {
+      className: 'plan-stop-tooltip',
+      direction: 'top',
+      offset: [0, -10],
+    });
+    marker.on('click', () => marker.openTooltip());
+  }
+  return marker;
 }
 
 /** Пешеходный отрезок: иконка на середине линии. */
@@ -807,7 +831,7 @@ function renderPlan(plan) {
       }
 
       // Посадка: номер шага вместо безликой точки — глаз цепляется сразу.
-      if (path.length) stepBadge(step, path[0], colour).addTo(legLayer);
+      if (path.length) stepBadge(step, path[0], colour, leg.from).addTo(legLayer);
 
       // Ожидание: если показанная цифра посчитана по расписанию (нет живого борта
       // или живой приедет позже расписания), помечаем её как расчётную, а живой
@@ -878,7 +902,8 @@ function renderPlan(plan) {
   const toStop = state.stops[plan.to_stop_id];
   const finishPoint = toStop ? [toStop.lat, toStop.lon] : legEnds.filter(Boolean).pop();
   if (finishPoint) {
-    finishBadge(finishPoint).addTo(layerGroup);
+    const finishName = toStop ? toStop.name : (plan.legs[plan.legs.length - 1].to || 'Кінцева');
+    finishBadge(finishPoint, finishName).addTo(layerGroup);
     bounds.push(finishPoint);
   }
 

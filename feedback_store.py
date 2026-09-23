@@ -19,6 +19,8 @@ import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+from time_utils import now_kyiv
+
 from storage import FEEDBACK_DIR, append_jsonl, ensure_data_dir, write_json_atomic
 
 logger = logging.getLogger("transgps-feedback")
@@ -53,7 +55,7 @@ def save_feedback(payload: Dict[str, Any]) -> Dict[str, Any]:
         client    — браузер, экран, версия приложения
     """
     ensure_data_dir()
-    now = datetime.now()
+    now = now_kyiv()
 
     kind = str(payload.get("kind") or "other").strip().lower()
     if kind not in FEEDBACK_KINDS:

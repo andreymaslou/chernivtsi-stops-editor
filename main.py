@@ -27,6 +27,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
+from time_utils import as_kyiv, format_kyiv, now_kyiv
+
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse
@@ -73,6 +75,12 @@ TELEMETRY_LOG_PATH = BASE_DIR / "logs" / "telemetry_plan_choices.jsonl"
 # «вклинятся» друг в друга при конкурентной записи (O_APPEND этого не обещает
 # на Windows). Нагрузка стенда мизерная, блокировка не узкое место.
 _TELEMETRY_LOCK = threading.Lock()
+
+# ``/api/plan`` — обычный sync-endpoint, поэтому FastAPI выполняет запросы в
+# threadpool. Роутер хранит последний fleet и его кэши, поэтому нельзя
+# разрешать двум запросам одновременно менять этот объект. Lock намеренно
+# короткий: он защищает только CPU-расчёт, не сетевой LLM и не live-опрос.
+_ROUTER_LOCK = threading.Lock()
 
 
 # Порог уверенности (в процентах) для срабатывания Уровня 1 (остановки).
@@ -868,7 +876,7 @@ def _collect_fleet(
         snapshot = sim_layer.snapshot(now=plan_now)
         # Симулятор строит парк на plan_now; если его нет — на фактическое
         # «сейчас», как и раньше (роутер сверяет ETA с моментом среза).
-        snapshot_at = plan_now if plan_now is not None else datetime.now()
+        snapshot_at = plan_now if plan_now is not None else now_kyiv()
         return snapshot.get("vehicles", []), snapshot_at, "sim"
 
     if PARK_SOURCE == "gps":
@@ -876,7 +884,7 @@ def _collect_fleet(
         if tracker is None:
             return [], None, "real"
         snapshot = tracker.snapshot(only_fresh=True)
-        return snapshot.get("vehicles", []), datetime.now(), "real"
+        return snapshot.get("vehicles", []), now_kyiv(), "real"
 
     # PARK_SOURCE == "auto": опрашиваем оба источника и сливаем.
     sim_vehicles: List[Dict[str, Any]] = []
@@ -899,13 +907,47 @@ def _collect_fleet(
         sum(1 for v in merged if v.get("source") == "real"),
         sum(1 for v in merged if v.get("source") == "sim"),
     )
-    snapshot_at = plan_now if plan_now is not None else datetime.now()
+    snapshot_at = plan_now if plan_now is not None else now_kyiv()
     return merged, snapshot_at, "auto"
 
 
 
 # Маршрутизация: полный план поездки (роутер на графе остановок)
 # ---------------------------------------------------------------------------
+
+
+def _calculate_plan_locked(
+    router: TransitRouter,
+    from_stop_id: int,
+    to_stop_id: int,
+    fleet: List[Dict[str, Any]],
+    snapshot_at: Optional[datetime],
+    fleet_source: str,
+    plan_now: datetime,
+) -> Tuple[Optional[Dict[str, Any]], List[Dict[str, Any]], Optional[str]]:
+    """Рассчитать план и варианты под одним short-lived router lock.
+
+    ``set_live`` и ``build_variants`` меняют/читают состояние общего
+    TransitRouter. Нельзя разнести их по разным секциям: параллельный запрос
+    успеет подменить fleet между вызовом. Сетевой LLM уже завершён до этого
+    блока, поэтому lock не держит соединение и не блокирует event loop.
+    """
+    with _ROUTER_LOCK:
+        try:
+            router.set_live(fleet, snapshot_at=snapshot_at, source=fleet_source)
+        except Exception:
+            # План строится и без парка (ожидание по расписанию), поэтому
+            # survivability важнее: теряем live-ETA, но не ответ.
+            router.set_live([], snapshot_at=snapshot_at, source=fleet_source)
+
+        plan = router.plan(from_stop_id, to_stop_id, now=plan_now)
+        if plan is None:
+            return None, [], None
+
+        variants, variants_note = router.build_variants(
+            from_stop_id, to_stop_id, now=plan_now, default_plan=plan
+        )
+        return plan, variants, variants_note
 
 class PlanRequest(BaseModel):
     text: str
@@ -971,38 +1013,33 @@ def get_plan(request: PlanRequest):
         )
 
     # «Модельное время» умеет только сервер (тесты/демо); приложение не шлёт.
-    # Разбираем его ДО живого среза: ТС нужно подбирать на тот же момент,
-    # для которого считаем план. Иначе ночные тесты показывают машины,
-    # которые едут «сейчас», и одинаковые запросы дают разный ответ.
-    plan_now: Optional[datetime] = None
+    # Разбираем его ДО живого среза и сразу приводим к Europe/Kyiv. В частности,
+    # ISO с `Z`/offset нельзя просто «срезать» timezone: это сдвинет расчёт.
     if request.now:
         try:
             raw_now = request.now.replace("Z", "+00:00")
-            plan_now = datetime.fromisoformat(raw_now)
-            if plan_now.tzinfo is not None:
-                plan_now = plan_now.replace(tzinfo=None)
+            plan_now = as_kyiv(datetime.fromisoformat(raw_now))
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=f"Field 'now' is not ISO-8601: {exc}")
+    else:
+        # Один и тот же момент для обоих прогонов (дефолт и вариант «≤1
+        # пересадка») и для среза парка: иначе цифры карточек не сойдутся.
+        plan_now = now_kyiv()
 
     # Парк машин: реальный трекер и/или симулятор, по PARK_SOURCE (§3 брифа).
-    # Роутер сам не определит источник среза — сим-машины тоже приходят с
-    # is_live=True, поэтому source приходит сюда вместе с машинами. В режиме
-    # auto источник каждой отдельной машины уезжает в ногу плана, и телеметрия
-    # различает технический бакет (sim) и предпочтения реальных пассажиров.
+    # Срез собирается до lock: сетевой источник не должен удерживать общий
+    # роутер. В lock попадает только set_live → plan → build_variants.
     fleet, snapshot_at, fleet_source = _collect_fleet(plan_now)
-    try:
-        router.set_live(fleet, snapshot_at=snapshot_at, source=fleet_source)
-    except Exception:
-        # План строится и без парка (ожидание по расписанию), поэтому
-        # survivability важнее: теряем live-ETA, но не ответ.
-        router.set_live([], source=fleet_source)
+    plan, variants, variants_note = _calculate_plan_locked(
+        router,
+        from_stop_id,
+        to_stop_id,
+        fleet,
+        snapshot_at,
+        fleet_source,
+        plan_now,
+    )
 
-    if plan_now is None:
-        # Один и тот же момент для обоих прогонов (дефолт и вариант «≤1
-        # пересадка»): иначе ожидания второго прогона считались бы от другого
-        # «сейчас», и цифры карточек не сходились бы между собой.
-        plan_now = datetime.now()
-    plan = router.plan(from_stop_id, to_stop_id, now=plan_now)
     if plan is None:
         stop_by_id = {str(stop["id"]): stop for stop in locator.stops}
         from_name = stop_by_id.get(str(from_stop_id), {}).get("name")
@@ -1032,13 +1069,7 @@ def get_plan(request: PlanRequest):
             "note": note,
         }
 
-    # Варианты плана для карточек (поставка 1, §13 брифа): аддитивно — корневой
-    # ответ не меняется, выбранный по умолчанию вариант остаётся в корне, а
-    # остальные лежат в `variants`. `variants_note` объясняет, почему вариант
-    # один (честное «сейчас нет» вместо пустого списка).
-    variants, variants_note = router.build_variants(
-        from_stop_id, to_stop_id, now=plan_now, default_plan=plan
-    )
+    # Варианты уже собраны под lock; корневой ответ остаётся совместимым.
     plan["variants"] = variants
     plan["variants_note"] = variants_note
     plan["user_text"] = request.text
@@ -1163,7 +1194,7 @@ def log_plan_choice(request: PlanChoiceTelemetry):
     payload = request.model_dump()
     # Серверная метка приёма: час клиента может гулять, а для анализа нужна
     # достоверная хронология. Контрактные поля клиента не затираем.
-    payload["received_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    payload["received_at"] = format_kyiv()
 
     try:
         with _TELEMETRY_LOCK:
@@ -1260,9 +1291,7 @@ def get_live_vehicles(
     if now:
         try:
             raw_now = now.replace("Z", "+00:00")
-            query_now = datetime.fromisoformat(raw_now)
-            if query_now.tzinfo is not None:
-                query_now = query_now.replace(tzinfo=None)
+            query_now = as_kyiv(datetime.fromisoformat(raw_now))
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=f"Query 'now' is not ISO-8601: {exc}")
 
