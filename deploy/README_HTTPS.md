@@ -7,6 +7,59 @@
 > на `127.0.0.1`), а приложение живёт по `https://<домен>/` под Basic Auth.
 > Nginx обойти нельзя: единственный вход — через него.
 
+## 0.1 Фактическое состояние (сделано 2026-09-23, домен через nip.io)
+
+Стенд **уже работает по HTTPS** — без покупки домена, через публичный DNS-сервис
+`nip.io` (любое имя вида `<IP>.nip.io` резолвится в этот IP, и Let's Encrypt
+выдаёт на такое имя сертификат):
+
+* адрес: **`https://169.58.82.105.nip.io/`** (`:80` → 301 → `:443`, Basic Auth,
+  редирект корня на `/ui/editor.html`);
+* бэкенд: `api_router` слушает только `127.0.0.1:8000` (биндинг в
+  `docker-compose.yml`), прямой `http://<IP>:8000` снаружи закрыт;
+* сертификат: `/etc/letsencrypt/live/169.58.82.105.nip.io/` (ECDSA, Let's
+  Encrypt, до 2026-12-22), автопродление — `certbot.timer` + deploy-хук;
+* логин/пароль Basic Auth: хеши в `/etc/nginx/.htpasswd_transgps`, значения —
+  `/root/https_basic_auth_credentials.txt` на сервере. **В git не коммитим:**
+  репозиторий публичный, а адрес стенда и так виден в Certificate Transparency;
+* зачем: Web Speech API (голосовой ввод AI-помощника) и Geolocation работают
+  только в secure context — по `http://<IP>` браузер блокирует микрофон целиком,
+  без системного запроса (`permissions` сразу `denied`, `mediaDevices` вообще
+  отсутствует).
+
+### Что выстрелило по пути (пригодится при повторе на другом сервере)
+
+1. **`htpasswd -c` — интерактивная команда.** Если запускать скрипт через
+   `ssh … "bash -s" < script`, её промпт читает stdin, то есть скрипт «съедает»
+   собственные строки. Лечение: создать файл логинов заранее, неинтерактивно, —
+   тогда шаг 3 скрипта увидит готовый файл и пропустит промпт:
+   ```bash
+   PASS="$(openssl rand -base64 24 | tr -dc 'A-Za-z0-9' | cut -c1-20)"
+   printf 'admin:%s\n' "$(openssl passwd -apr1 "$PASS")" > /etc/nginx/.htpasswd_transgps
+   chown root:www-data /etc/nginx/.htpasswd_transgps && chmod 640 /etc/nginx/.htpasswd_transgps
+   ```
+2. **Права файла логинов.** При `640 root:root` воркеры nginx (под `www-data`)
+   не могут его прочитать, и вместо честного `401` приходит **`500`**, а в
+   `/var/log/nginx/error.log` — `open() "/etc/nginx/.htpasswd_transgps" failed
+   (13: Permission denied)`. Правильно: `chown root:www-data` + `chmod 640`
+   (сам `setup-https.sh` это делает — а вот при ручной настройке легко забыть).
+3. **Порядок с ufw.** В `setup-https.sh` правило `ufw allow 'Nginx Full'` стоит
+   в шаге 8, а `certbot` — в шаге 5. Если ufw активен и порт 80 закрыт,
+   сертификат не выпустится. На нашем VPS `ufw` был `inactive` (правил не
+   потребовалось), но при включённом ufw сначала `sudo ufw allow 80,443/tcp`.
+4. **Проверка ACME до запуска certbot** (быстро снимает риск «упасть в середине
+   скрипта»): положить пробный файл в
+   `/var/www/certbot/.well-known/acme-challenge/preflight.txt` и запросить его
+   снаружи — `curl http://169.58.82.105.nip.io/.well-known/acme-challenge/preflight.txt`.
+   Если содержимое отдаётся, `--webroot` пройдёт.
+5. **Запускать долгие шаги не в интерактивной ssh-сессии**: при обрыве клиента
+   скрипт умирает по SIGPIPE на ближайшем `echo` (пакеты уже поставлены, а
+   конфиг — нет). Надёжнее `nohup setsid bash deploy/setup-https.sh … > /root/https_setup.log 2>&1 &`
+   и смотреть лог.
+6. **nip.io — решение для стенда, не для прода.** Для боевого домена нужна своя
+   A-запись на `169.58.82.105` (см. §1) — дальше всё то же: подменить домен в
+   конфиге и выпустить сертификат.
+
 ## 0. Что за что отвечает (файлы в `deploy/`)
 
 | Файл | Роль |

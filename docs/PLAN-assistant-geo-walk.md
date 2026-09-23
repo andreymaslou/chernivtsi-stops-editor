@@ -36,9 +36,17 @@
   браузер после отказа больше НЕ спрашивает сам. `NotAllowedError` в `onerror`
   тоже открывает режим denied. Разметка `#voice-perm-modal` в `editor.html`,
   стили `.perm-body` в `style.css`, логика — `emulator.js` (voiceModal*).
-* Smoke-тест: `node tools/ui/check_voice.js` (пʼять сценаріїв: мок Web Speech при
-  granted, браузер без підтримки, реальний Web Speech, шторка 'prompt', шторка
-  'denied'; CSS-состояние `.recording`).
+* Smoke-тест: `node tools/ui/check_voice.js` (шесть сценариев: мок Web Speech при
+  granted, браузер без поддержки, реальный Web Speech, шторка 'prompt', шторка
+  'denied', небезпечний контекст — сценарий F).
+* **HTTPS включён (2026-09-23)** — то, без чего голос не работал вообще: стенд
+  отдаётся как `https://169.58.82.105.nip.io/` (nginx + Let's Encrypt + Basic
+  Auth), `:8000` наружу закрыт. До этого на `http://<IP>` браузер блокировал
+  микрофон целиком (`permissions` сразу `denied`, `mediaDevices` отсутствует) —
+  именно поэтому кнопка «не подключалась». Шторка теперь различает случаи: при
+  небезопасном соединении показывает «🔒 Потрібен HTTPS» вместо инструкций по
+  настройке микрофона (`voiceInsecure()`, `mode: 'insecure'`). Детали — §5.1 в
+  `STATUS.md` и `deploy/README_HTTPS.md` (§0.1).
 
 ---
 
@@ -58,9 +66,11 @@
 уже заложено в контракт `EMULATOR_PLAN.md` §3, но в живом коде его нет (только
 `text` и `now`).
 
-**Грабли:** Web Speech и Geolocation **не работают на простом HTTP** (кроме localhost)
-— в проде обязателен HTTPS (`deploy/setup-https.sh`; внимание: текущий DNS
-`transgps.cv.ua` указывает не на наш VPS, см. `STATUS.md` §5 п.1).
+**Грабли:** Web Speech и Geolocation **не работают на простом HTTP** (кроме localhost).
+**Уже закрыто (2026-09-23):** стенд переведён на HTTPS — `https://169.58.82.105.nip.io/`
+(nginx + Let's Encrypt + Basic Auth, бэкенд только на `127.0.0.1:8000`); в браузере
+`isSecureContext = true`, `permissions.microphone = 'prompt'`. Для боевого домена
+нужна своя A-запись: текущий `transgps.cv.ua` ведёт не на наш VPS (см. `STATUS.md` §5.1).
 
 ---
 
@@ -116,4 +126,4 @@
 | 3 | Пеший пунктир по прямой до `board_node` выбранного варианта | ⬜ не начато |
 | 4 | Пунктир пешей пересадки (тот же механизм) | ⬜ после 3 |
 | 5 | OSM-геометрия (без смены контракта) | ⬜ когда потребуется |
-| 6 | HTTPS перед продом (обязательно для шагов 1–2) | ⬜ см. STATUS §5.1 |
+| 6 | HTTPS перед продом (обязательно для шагов 1–2) | ✅ сделано 2026-09-23: `https://169.58.82.105.nip.io/` (nip.io + Let's Encrypt + Basic Auth, `:8000` закрыт); свой домен — когда появится A-запись |
