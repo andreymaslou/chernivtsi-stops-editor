@@ -1,5 +1,5 @@
 {
- "generated": "2026-09-21 14:59:50",
+ "generated": "2026-09-24 17:58:58",
  "params": {
   "detour_factor": 1.25,
   "commercial_speed_kmh": 20.0,
@@ -7304,7 +7304,7 @@
    "stops_count": 14,
    "length_km": 9.97,
    "one_way_minutes": 35.3,
-   "live_route_name": null
+   "live_route_name": "10"
   },
   "bus:10:B": {
    "key": "bus:10:B",
@@ -7507,7 +7507,7 @@
    "stops_count": 12,
    "length_km": 9.93,
    "one_way_minutes": 34.4,
-   "live_route_name": null
+   "live_route_name": "10"
   },
   "bus:10A:A": {
    "key": "bus:10A:A",
@@ -10473,7 +10473,7 @@
    "stops_count": 12,
    "length_km": 7.79,
    "one_way_minutes": 27.9,
-   "live_route_name": null
+   "live_route_name": "19"
   },
   "bus:19:B": {
    "key": "bus:19:B",
@@ -10676,7 +10676,7 @@
    "stops_count": 12,
    "length_km": 7.78,
    "one_way_minutes": 27.9,
-   "live_route_name": null
+   "live_route_name": "19"
   },
   "bus:1:A": {
    "key": "bus:1:A",
@@ -11829,7 +11829,7 @@
    "stops_count": 20,
    "length_km": 10.9,
    "one_way_minutes": 40.6,
-   "live_route_name": null
+   "live_route_name": "20"
   },
   "bus:20:B": {
    "key": "bus:20:B",
@@ -12168,7 +12168,7 @@
    "stops_count": 20,
    "length_km": 10.88,
    "one_way_minutes": 40.6,
-   "live_route_name": null
+   "live_route_name": "20"
   },
   "bus:21:A": {
    "key": "bus:21:A",
@@ -15374,7 +15374,7 @@
    "stops_count": 15,
    "length_km": 13.72,
    "one_way_minutes": 47.0,
-   "live_route_name": null
+   "live_route_name": "25"
   },
   "bus:25:B": {
    "key": "bus:25:B",
@@ -15611,7 +15611,7 @@
    "stops_count": 14,
    "length_km": 19.83,
    "one_way_minutes": 64.9,
-   "live_route_name": null
+   "live_route_name": "25"
   },
   "bus:26:A": {
    "key": "bus:26:A",
@@ -16339,7 +16339,7 @@
    "stops_count": 9,
    "length_km": 5.93,
    "one_way_minutes": 21.1,
-   "live_route_name": null
+   "live_route_name": "27"
   },
   "bus:27:B": {
    "key": "bus:27:B",
@@ -16491,7 +16491,7 @@
    "stops_count": 9,
    "length_km": 5.82,
    "one_way_minutes": 20.8,
-   "live_route_name": null
+   "live_route_name": "27"
   },
   "bus:29:A": {
    "key": "bus:29:A",
@@ -20543,7 +20543,7 @@
    "stops_count": 20,
    "length_km": 8.79,
    "one_way_minutes": 34.3,
-   "live_route_name": null
+   "live_route_name": "39"
   },
   "bus:39:B": {
    "key": "bus:39:B",
@@ -20831,7 +20831,7 @@
    "stops_count": 17,
    "length_km": 7.73,
    "one_way_minutes": 29.9,
-   "live_route_name": null
+   "live_route_name": "39"
   },
   "bus:3:A": {
    "key": "bus:3:A",
@@ -22118,7 +22118,7 @@
    "stops_count": 12,
    "length_km": 7.95,
    "one_way_minutes": 28.4,
-   "live_route_name": null
+   "live_route_name": "4"
   },
   "bus:4:B": {
    "key": "bus:4:B",
@@ -22355,7 +22355,7 @@
    "stops_count": 14,
    "length_km": 7.92,
    "one_way_minutes": 29.2,
-   "live_route_name": null
+   "live_route_name": "4"
   },
   "bus:5:A": {
    "key": "bus:5:A",
@@ -25861,7 +25861,7 @@
    "stops_count": 14,
    "length_km": 8.41,
    "one_way_minutes": 30.6,
-   "live_route_name": null
+   "live_route_name": "9A"
   },
   "bus:9A:B": {
    "key": "bus:9A:B",
@@ -26115,7 +26115,7 @@
    "stops_count": 15,
    "length_km": 8.19,
    "one_way_minutes": 30.4,
-   "live_route_name": null
+   "live_route_name": "9A"
   },
   "trolley:1:A": {
    "key": "trolley:1:A",
@@ -26352,7 +26352,7 @@
    "stops_count": 14,
    "length_km": 6.41,
    "one_way_minutes": 24.6,
-   "live_route_name": null
+   "live_route_name": "1T"
   },
   "trolley:1:B": {
    "key": "trolley:1:B",
@@ -26555,7 +26555,7 @@
    "stops_count": 12,
    "length_km": 6.26,
    "one_way_minutes": 23.4,
-   "live_route_name": null
+   "live_route_name": "1T"
   },
   "trolley:2:A": {
    "key": "trolley:2:A",
@@ -26809,7 +26809,7 @@
    "stops_count": 15,
    "length_km": 7.59,
    "one_way_minutes": 28.6,
-   "live_route_name": null
+   "live_route_name": "2T"
   },
   "trolley:2:B": {
    "key": "trolley:2:B",
@@ -27029,7 +27029,7 @@
    "stops_count": 13,
    "length_km": 7.53,
    "one_way_minutes": 27.6,
-   "live_route_name": null
+   "live_route_name": "2T"
   },
   "trolley:3:A": {
    "key": "trolley:3:A",
@@ -27334,7 +27334,7 @@
    "stops_count": 18,
    "length_km": 10.45,
    "one_way_minutes": 38.4,
-   "live_route_name": null
+   "live_route_name": "11/3"
   },
   "trolley:3:B": {
    "key": "trolley:3:B",
@@ -27673,7 +27673,7 @@
    "stops_count": 20,
    "length_km": 10.62,
    "one_way_minutes": 39.8,
-   "live_route_name": null
+   "live_route_name": "11/3"
   },
   "trolley:4:A": {
    "key": "trolley:4:A",
@@ -27842,7 +27842,7 @@
    "stops_count": 10,
    "length_km": 5.83,
    "one_way_minutes": 21.3,
-   "live_route_name": null
+   "live_route_name": "4T"
   },
   "trolley:4:B": {
    "key": "trolley:4:B",
@@ -28028,7 +28028,7 @@
    "stops_count": 11,
    "length_km": 5.97,
    "one_way_minutes": 22.1,
-   "live_route_name": null
+   "live_route_name": "4T"
   },
   "trolley:5:A": {
    "key": "trolley:5:A",
@@ -28486,7 +28486,7 @@
    "stops_count": 27,
    "length_km": 16.73,
    "one_way_minutes": 61.0,
-   "live_route_name": null
+   "live_route_name": "5T"
   },
   "trolley:5:B": {
    "key": "trolley:5:B",
@@ -28961,7 +28961,7 @@
    "stops_count": 28,
    "length_km": 16.4,
    "one_way_minutes": 60.4,
-   "live_route_name": null
+   "live_route_name": "5T"
   },
   "trolley:6:A": {
    "key": "trolley:6:A",
@@ -29249,7 +29249,7 @@
    "stops_count": 17,
    "length_km": 8.69,
    "one_way_minutes": 32.7,
-   "live_route_name": null
+   "live_route_name": "6/6a"
   },
   "trolley:6:B": {
    "key": "trolley:6:B",
@@ -29520,7 +29520,7 @@
    "stops_count": 16,
    "length_km": 8.89,
    "one_way_minutes": 32.9,
-   "live_route_name": null
+   "live_route_name": "6/6a"
   },
   "trolley:6A:A": {
    "key": "trolley:6A:A",
@@ -29689,7 +29689,7 @@
    "stops_count": 10,
    "length_km": 6.16,
    "one_way_minutes": 22.2,
-   "live_route_name": null
+   "live_route_name": "6/6a"
   },
   "trolley:6A:B": {
    "key": "trolley:6A:B",
@@ -30045,7 +30045,7 @@
    "stops_count": 21,
    "length_km": 10.69,
    "one_way_minutes": 40.4,
-   "live_route_name": null
+   "live_route_name": "6/6a"
   },
   "trolley:8:A": {
    "key": "trolley:8:A",
@@ -30282,7 +30282,7 @@
    "stops_count": 14,
    "length_km": 7.23,
    "one_way_minutes": 27.1,
-   "live_route_name": null
+   "live_route_name": "8T"
   },
   "trolley:8:B": {
    "key": "trolley:8:B",
@@ -30468,7 +30468,7 @@
    "stops_count": 11,
    "length_km": 7.12,
    "one_way_minutes": 25.5,
-   "live_route_name": null
+   "live_route_name": "8T"
   }
  },
  "transfers": [
