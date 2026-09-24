@@ -1,5 +1,5 @@
 {
- "generated": "2026-09-24 17:58:58",
+ "generated": "2026-09-25 02:16:22",
  "params": {
   "detour_factor": 1.25,
   "commercial_speed_kmh": 20.0,
@@ -41,7 +41,7 @@
     "bus:10A:A",
     "bus:13:A",
     "bus:15:A",
-    "bus:15К:A",
+    "bus:15K:A",
     "bus:1:B",
     "bus:21:B",
     "bus:23:B",
@@ -72,7 +72,7 @@
     "bus:10A:A",
     "bus:13:A",
     "bus:15:A",
-    "bus:15К:A",
+    "bus:15K:A",
     "bus:1:B",
     "bus:21:B",
     "bus:23:B",
@@ -102,7 +102,7 @@
     "bus:10:A",
     "bus:13:A",
     "bus:15:A",
-    "bus:15К:A",
+    "bus:15K:A",
     "bus:1:B",
     "bus:21:B",
     "bus:23:B",
@@ -132,7 +132,7 @@
     "bus:10:A",
     "bus:13:A",
     "bus:15:A",
-    "bus:15К:A",
+    "bus:15K:A",
     "bus:1:B",
     "bus:21:B",
     "bus:23:B",
@@ -162,7 +162,7 @@
     "bus:10:A",
     "bus:13:A",
     "bus:15:A",
-    "bus:15К:A",
+    "bus:15K:A",
     "bus:1:B",
     "bus:21:B",
     "bus:23:B",
@@ -464,7 +464,7 @@
     "bus:10A:B",
     "bus:13:B",
     "bus:15:B",
-    "bus:15К:B",
+    "bus:15K:B",
     "bus:1:A",
     "bus:21:A",
     "bus:23:A",
@@ -492,7 +492,7 @@
     "bus:10A:B",
     "bus:13:B",
     "bus:15:B",
-    "bus:15К:B",
+    "bus:15K:B",
     "bus:1:A",
     "bus:21:A",
     "bus:24:A",
@@ -521,7 +521,7 @@
     "bus:10A:B",
     "bus:13:B",
     "bus:15:B",
-    "bus:15К:B",
+    "bus:15K:B",
     "bus:1:A",
     "bus:21:A",
     "bus:23:A",
@@ -552,7 +552,7 @@
     "bus:10A:B",
     "bus:13:B",
     "bus:15:B",
-    "bus:15К:B",
+    "bus:15K:B",
     "bus:1:A",
     "bus:21:A",
     "bus:23:A",
@@ -589,8 +589,8 @@
     "bus:13:B",
     "bus:15:A",
     "bus:15:B",
-    "bus:15К:A",
-    "bus:15К:B",
+    "bus:15K:A",
+    "bus:15K:B",
     "bus:19:A",
     "bus:19:B",
     "bus:21:B",
@@ -626,7 +626,7 @@
     "bus:29:A",
     "bus:5:B",
     "bus:6:A",
-    "bus:8А:B",
+    "bus:8A:B",
     "bus:9:B",
     "bus:9A:A",
     "trolley:1:B",
@@ -671,7 +671,7 @@
     "bus:10A:A",
     "bus:13:A",
     "bus:15:A",
-    "bus:15К:A",
+    "bus:15K:A",
     "bus:1:B",
     "bus:21:B",
     "bus:24:B",
@@ -747,7 +747,7 @@
     "bus:10A:B",
     "bus:13:B",
     "bus:15:B",
-    "bus:15К:B",
+    "bus:15K:B",
     "bus:1:A",
     "bus:21:A",
     "bus:24:A",
@@ -778,7 +778,7 @@
     "bus:29:B",
     "bus:5:A",
     "bus:6:B",
-    "bus:8А:A",
+    "bus:8A:A",
     "bus:9:A",
     "bus:9A:B",
     "trolley:1:A",
@@ -801,7 +801,7 @@
    "routes": [
     "bus:13:A",
     "bus:15:A",
-    "bus:15К:A",
+    "bus:15K:A",
     "bus:1:B",
     "bus:21:B",
     "bus:36:A",
@@ -827,7 +827,7 @@
    "routes": [
     "bus:13:A",
     "bus:15:A",
-    "bus:15К:A",
+    "bus:15K:A",
     "bus:1:B",
     "bus:21:B",
     "bus:23:B",
@@ -854,7 +854,7 @@
    "routes": [
     "bus:13:A",
     "bus:15:A",
-    "bus:15К:A",
+    "bus:15K:A",
     "bus:1:B",
     "bus:21:B",
     "bus:23:B",
@@ -881,7 +881,7 @@
    "routes": [
     "bus:13:A",
     "bus:15:A",
-    "bus:15К:A",
+    "bus:15K:A",
     "bus:21:B",
     "bus:23:B",
     "bus:24:B",
@@ -906,7 +906,7 @@
    "routes": [
     "bus:13:A",
     "bus:15:A",
-    "bus:15К:A",
+    "bus:15K:A",
     "bus:37:A"
    ]
   },
@@ -1127,7 +1127,7 @@
    "routes": [
     "bus:13:B",
     "bus:15:B",
-    "bus:15К:B",
+    "bus:15K:B",
     "bus:37:B",
     "bus:7:B"
    ]
@@ -1146,7 +1146,7 @@
    "routes": [
     "bus:13:B",
     "bus:15:B",
-    "bus:15К:B",
+    "bus:15K:B",
     "bus:1:A",
     "bus:21:A",
     "bus:23:A",
@@ -1173,7 +1173,7 @@
    "routes": [
     "bus:13:B",
     "bus:15:B",
-    "bus:15К:B",
+    "bus:15K:B",
     "bus:1:A",
     "bus:21:A",
     "bus:23:A",
@@ -1200,7 +1200,7 @@
    "routes": [
     "bus:13:B",
     "bus:15:B",
-    "bus:15К:B",
+    "bus:15K:B",
     "bus:1:A",
     "bus:21:A",
     "bus:23:A",
@@ -1226,7 +1226,7 @@
    "group_id": null,
    "routes": [
     "bus:15:A",
-    "bus:15К:A",
+    "bus:15K:A",
     "bus:37:A"
    ]
   },
@@ -1243,7 +1243,7 @@
    "group_id": 47,
    "routes": [
     "bus:15:A",
-    "bus:15К:A",
+    "bus:15K:A",
     "bus:37:A"
    ]
   },
@@ -1260,7 +1260,7 @@
    "group_id": 103,
    "routes": [
     "bus:15:A",
-    "bus:15К:A",
+    "bus:15K:A",
     "bus:37:A"
    ]
   },
@@ -1277,7 +1277,7 @@
    "group_id": 1,
    "routes": [
     "bus:15:A",
-    "bus:15К:A",
+    "bus:15K:A",
     "bus:37:A"
    ]
   },
@@ -1294,7 +1294,7 @@
    "group_id": 115,
    "routes": [
     "bus:15:A",
-    "bus:15К:A",
+    "bus:15K:A",
     "bus:37:A"
    ]
   },
@@ -1311,7 +1311,7 @@
    "group_id": 65,
    "routes": [
     "bus:15:A",
-    "bus:15К:A",
+    "bus:15K:A",
     "bus:37:A"
    ]
   },
@@ -1328,7 +1328,7 @@
    "group_id": 54,
    "routes": [
     "bus:15:A",
-    "bus:15К:A",
+    "bus:15K:A",
     "bus:37:A"
    ]
   },
@@ -1345,7 +1345,7 @@
    "group_id": 73,
    "routes": [
     "bus:15:A",
-    "bus:15К:A",
+    "bus:15K:A",
     "bus:36:A",
     "bus:37:A"
    ]
@@ -1503,7 +1503,7 @@
    "group_id": null,
    "routes": [
     "bus:15:B",
-    "bus:15К:B",
+    "bus:15K:B",
     "bus:36:B",
     "bus:37:B"
    ]
@@ -1521,7 +1521,7 @@
    "group_id": 54,
    "routes": [
     "bus:15:B",
-    "bus:15К:B",
+    "bus:15K:B",
     "bus:37:B"
    ]
   },
@@ -1538,7 +1538,7 @@
    "group_id": 65,
    "routes": [
     "bus:15:B",
-    "bus:15К:B",
+    "bus:15K:B",
     "bus:37:B"
    ]
   },
@@ -1555,7 +1555,7 @@
    "group_id": 115,
    "routes": [
     "bus:15:B",
-    "bus:15К:B",
+    "bus:15K:B",
     "bus:37:B"
    ]
   },
@@ -1572,7 +1572,7 @@
    "group_id": 1,
    "routes": [
     "bus:15:B",
-    "bus:15К:B",
+    "bus:15K:B",
     "bus:37:B"
    ]
   },
@@ -1589,7 +1589,7 @@
    "group_id": 103,
    "routes": [
     "bus:15:B",
-    "bus:15К:B",
+    "bus:15K:B",
     "bus:37:B"
    ]
   },
@@ -1606,7 +1606,7 @@
    "group_id": 47,
    "routes": [
     "bus:15:B",
-    "bus:15К:B",
+    "bus:15K:B",
     "bus:37:B"
    ]
   },
@@ -1623,7 +1623,7 @@
    "group_id": null,
    "routes": [
     "bus:15:B",
-    "bus:15К:B",
+    "bus:15K:B",
     "bus:1:B",
     "bus:21:A",
     "bus:23:A",
@@ -1647,8 +1647,8 @@
    "stop_id": 4499,
    "group_id": null,
    "routes": [
-    "bus:15К:A",
-    "bus:15К:B",
+    "bus:15K:A",
+    "bus:15K:B",
     "bus:36:A",
     "bus:36:B",
     "bus:37:A",
@@ -1667,8 +1667,8 @@
    "stop_id": 25339,
    "group_id": null,
    "routes": [
-    "bus:15К:A",
-    "bus:15К:B"
+    "bus:15K:A",
+    "bus:15K:B"
    ]
   },
   "83": {
@@ -1683,7 +1683,7 @@
    "stop_id": 25336,
    "group_id": 86,
    "routes": [
-    "bus:15К:A"
+    "bus:15K:A"
    ]
   },
   "84": {
@@ -1698,8 +1698,8 @@
    "stop_id": 4498,
    "group_id": null,
    "routes": [
-    "bus:15К:A",
-    "bus:15К:B"
+    "bus:15K:A",
+    "bus:15K:B"
    ]
   },
   "85": {
@@ -1714,7 +1714,7 @@
    "stop_id": 25338,
    "group_id": 86,
    "routes": [
-    "bus:15К:B"
+    "bus:15K:B"
    ]
   },
   "86": {
@@ -2307,7 +2307,7 @@
     "bus:1:B",
     "bus:20:B",
     "bus:29:A",
-    "bus:8А:B",
+    "bus:8A:B",
     "trolley:3:B",
     "trolley:6:B"
    ]
@@ -2327,7 +2327,7 @@
     "bus:1:B",
     "bus:20:B",
     "bus:29:A",
-    "bus:8А:B",
+    "bus:8A:B",
     "trolley:3:B",
     "trolley:6:B"
    ]
@@ -2347,7 +2347,7 @@
     "bus:1:B",
     "bus:20:B",
     "bus:29:A",
-    "bus:8А:B",
+    "bus:8A:B",
     "trolley:3:B",
     "trolley:6:B"
    ]
@@ -2747,8 +2747,8 @@
    "group_id": 85,
    "routes": [
     "bus:20:B",
-    "bus:8А:A",
-    "bus:8А:B",
+    "bus:8A:A",
+    "bus:8A:B",
     "trolley:5:A",
     "trolley:8:A"
    ]
@@ -2767,7 +2767,7 @@
    "routes": [
     "bus:20:B",
     "bus:23:A",
-    "bus:8А:B",
+    "bus:8A:B",
     "trolley:3:B",
     "trolley:6:B"
    ]
@@ -2786,7 +2786,7 @@
    "routes": [
     "bus:20:B",
     "bus:23:A",
-    "bus:8А:B",
+    "bus:8A:B",
     "trolley:3:B",
     "trolley:6:B"
    ]
@@ -3134,7 +3134,7 @@
     "bus:23:A",
     "bus:29:B",
     "bus:5:A",
-    "bus:8А:A",
+    "bus:8A:A",
     "bus:9:A",
     "trolley:1:A",
     "trolley:6:A",
@@ -3158,7 +3158,7 @@
     "bus:23:A",
     "bus:29:B",
     "bus:5:A",
-    "bus:8А:A",
+    "bus:8A:A",
     "bus:9:A",
     "trolley:1:A",
     "trolley:6:A",
@@ -3181,7 +3181,7 @@
     "bus:21:A",
     "bus:23:A",
     "bus:29:B",
-    "bus:8А:A",
+    "bus:8A:A",
     "bus:9:A",
     "trolley:1:A",
     "trolley:6:A",
@@ -3204,7 +3204,7 @@
     "bus:21:A",
     "bus:23:A",
     "bus:39:A",
-    "bus:8А:A",
+    "bus:8A:A",
     "trolley:5:A",
     "trolley:6:A",
     "trolley:6A:B",
@@ -3336,7 +3336,7 @@
     "bus:21:B",
     "bus:23:B",
     "bus:29:A",
-    "bus:8А:B",
+    "bus:8A:B",
     "bus:9:B",
     "trolley:1:B",
     "trolley:6:B",
@@ -3360,7 +3360,7 @@
     "bus:23:B",
     "bus:29:A",
     "bus:5:B",
-    "bus:8А:B",
+    "bus:8A:B",
     "bus:9:B",
     "trolley:1:B",
     "trolley:6:B",
@@ -3632,8 +3632,8 @@
    "routes": [
     "bus:23:A",
     "bus:5:A",
-    "bus:8А:A",
-    "bus:8А:B",
+    "bus:8A:A",
+    "bus:8A:B",
     "trolley:1:A",
     "trolley:6A:A",
     "trolley:6A:B",
@@ -3656,7 +3656,7 @@
     "bus:29:B",
     "bus:5:A",
     "bus:6:B",
-    "bus:8А:A",
+    "bus:8A:A",
     "bus:9:A",
     "bus:9A:B",
     "trolley:1:A",
@@ -3679,7 +3679,7 @@
    "routes": [
     "bus:23:A",
     "bus:39:A",
-    "bus:8А:A",
+    "bus:8A:A",
     "trolley:5:A",
     "trolley:6:A",
     "trolley:6A:B",
@@ -3700,7 +3700,7 @@
    "routes": [
     "bus:23:A",
     "bus:39:A",
-    "bus:8А:A",
+    "bus:8A:A",
     "trolley:5:A",
     "trolley:6:A",
     "trolley:6A:B",
@@ -3885,7 +3885,7 @@
     "bus:26:B",
     "bus:29:A",
     "bus:43:B",
-    "bus:8А:B",
+    "bus:8A:B",
     "trolley:6:B"
    ]
   },
@@ -3904,7 +3904,7 @@
     "bus:23:B",
     "bus:29:A",
     "bus:39:B",
-    "bus:8А:B",
+    "bus:8A:B",
     "trolley:6:B"
    ]
   },
@@ -3923,7 +3923,7 @@
     "bus:23:B",
     "bus:29:A",
     "bus:39:B",
-    "bus:8А:B",
+    "bus:8A:B",
     "trolley:5:B",
     "trolley:6:B",
     "trolley:6A:A",
@@ -3945,7 +3945,7 @@
     "bus:23:B",
     "bus:29:A",
     "bus:39:B",
-    "bus:8А:B",
+    "bus:8A:B",
     "trolley:5:B",
     "trolley:6:B",
     "trolley:6A:A",
@@ -3968,7 +3968,7 @@
     "bus:29:A",
     "bus:5:B",
     "bus:6:A",
-    "bus:8А:B",
+    "bus:8A:B",
     "trolley:1:B",
     "trolley:6A:A",
     "trolley:8:B"
@@ -4510,7 +4510,7 @@
     "bus:26:B",
     "bus:29:A",
     "bus:43:B",
-    "bus:8А:B",
+    "bus:8A:B",
     "trolley:6:B"
    ]
   },
@@ -4530,7 +4530,7 @@
     "bus:29:A",
     "bus:43:B",
     "bus:5:B",
-    "bus:8А:B",
+    "bus:8A:B",
     "trolley:6:B"
    ]
   },
@@ -6821,7 +6821,7 @@
    "stop_id": 91,
    "group_id": 97,
    "routes": [
-    "bus:8А:A",
+    "bus:8A:A",
     "trolley:5:A",
     "trolley:8:A"
    ]
@@ -7304,6 +7304,10 @@
    "stops_count": 14,
    "length_km": 9.97,
    "one_way_minutes": 35.3,
+   "live_route_names": [
+    "10"
+   ],
+   "display_name": "10",
    "live_route_name": "10"
   },
   "bus:10:B": {
@@ -7507,6 +7511,10 @@
    "stops_count": 12,
    "length_km": 9.93,
    "one_way_minutes": 34.4,
+   "live_route_names": [
+    "10"
+   ],
+   "display_name": "10",
    "live_route_name": "10"
   },
   "bus:10A:A": {
@@ -7693,7 +7701,12 @@
    "stops_count": 11,
    "length_km": 7.74,
    "one_way_minutes": 27.4,
-   "live_route_name": null
+   "live_route_names": [
+    "10A",
+    "10А"
+   ],
+   "display_name": "10A",
+   "live_route_name": "10A"
   },
   "bus:10A:B": {
    "key": "bus:10A:B",
@@ -7896,7 +7909,12 @@
    "stops_count": 12,
    "length_km": 9.84,
    "one_way_minutes": 34.1,
-   "live_route_name": null
+   "live_route_names": [
+    "10A",
+    "10А"
+   ],
+   "display_name": "10A",
+   "live_route_name": "10A"
   },
   "bus:13:A": {
    "key": "bus:13:A",
@@ -8269,7 +8287,11 @@
    "stops_count": 22,
    "length_km": 13.87,
    "one_way_minutes": 50.4,
-   "live_route_name": null
+   "live_route_names": [
+    "13"
+   ],
+   "display_name": "13",
+   "live_route_name": "13"
   },
   "bus:13:B": {
    "key": "bus:13:B",
@@ -8608,7 +8630,11 @@
    "stops_count": 20,
    "length_km": 13.64,
    "one_way_minutes": 48.8,
-   "live_route_name": null
+   "live_route_names": [
+    "13"
+   ],
+   "display_name": "13",
+   "live_route_name": "13"
   },
   "bus:15:A": {
    "key": "bus:15:A",
@@ -9083,7 +9109,11 @@
    "stops_count": 28,
    "length_km": 14.64,
    "one_way_minutes": 55.2,
-   "live_route_name": null
+   "live_route_names": [
+    "15"
+   ],
+   "display_name": "15",
+   "live_route_name": "15"
   },
   "bus:15:B": {
    "key": "bus:15:B",
@@ -9490,12 +9520,16 @@
    "stops_count": 24,
    "length_km": 14.49,
    "one_way_minutes": 53.0,
-   "live_route_name": null
+   "live_route_names": [
+    "15"
+   ],
+   "display_name": "15",
+   "live_route_name": "15"
   },
-  "bus:15К:A": {
-   "key": "bus:15К:A",
+  "bus:15K:A": {
+   "key": "bus:15K:A",
    "vehicle_type": "bus",
-   "route_name": "15К",
+   "route_name": "15K",
    "direction": "A",
    "source_file": "route_bus_15К_A.json",
    "stops": [
@@ -9897,12 +9931,17 @@
    "stops_count": 24,
    "length_km": 14.62,
    "one_way_minutes": 53.4,
-   "live_route_name": null
+   "live_route_names": [
+    "15K",
+    "15К"
+   ],
+   "display_name": "15K",
+   "live_route_name": "15K"
   },
-  "bus:15К:B": {
-   "key": "bus:15К:B",
+  "bus:15K:B": {
+   "key": "bus:15K:B",
    "vehicle_type": "bus",
-   "route_name": "15К",
+   "route_name": "15K",
    "direction": "B",
    "source_file": "route_bus_15К_B.json",
    "stops": [
@@ -10270,7 +10309,12 @@
    "stops_count": 22,
    "length_km": 14.47,
    "one_way_minutes": 52.2,
-   "live_route_name": null
+   "live_route_names": [
+    "15K",
+    "15К"
+   ],
+   "display_name": "15K",
+   "live_route_name": "15K"
   },
   "bus:19:A": {
    "key": "bus:19:A",
@@ -10473,6 +10517,10 @@
    "stops_count": 12,
    "length_km": 7.79,
    "one_way_minutes": 27.9,
+   "live_route_names": [
+    "19"
+   ],
+   "display_name": "19",
    "live_route_name": "19"
   },
   "bus:19:B": {
@@ -10676,6 +10724,10 @@
    "stops_count": 12,
    "length_km": 7.78,
    "one_way_minutes": 27.9,
+   "live_route_names": [
+    "19"
+   ],
+   "display_name": "19",
    "live_route_name": "19"
   },
   "bus:1:A": {
@@ -11083,7 +11135,11 @@
    "stops_count": 24,
    "length_km": 15.86,
    "one_way_minutes": 57.2,
-   "live_route_name": null
+   "live_route_names": [
+    "1"
+   ],
+   "display_name": "1",
+   "live_route_name": "1"
   },
   "bus:1:B": {
    "key": "bus:1:B",
@@ -11490,7 +11546,11 @@
    "stops_count": 24,
    "length_km": 16.07,
    "one_way_minutes": 57.8,
-   "live_route_name": null
+   "live_route_names": [
+    "1"
+   ],
+   "display_name": "1",
+   "live_route_name": "1"
   },
   "bus:20:A": {
    "key": "bus:20:A",
@@ -11829,6 +11889,10 @@
    "stops_count": 20,
    "length_km": 10.9,
    "one_way_minutes": 40.6,
+   "live_route_names": [
+    "20"
+   ],
+   "display_name": "20",
    "live_route_name": "20"
   },
   "bus:20:B": {
@@ -12168,6 +12232,10 @@
    "stops_count": 20,
    "length_km": 10.88,
    "one_way_minutes": 40.6,
+   "live_route_names": [
+    "20"
+   ],
+   "display_name": "20",
    "live_route_name": "20"
   },
   "bus:21:A": {
@@ -12626,7 +12694,11 @@
    "stops_count": 27,
    "length_km": 17.78,
    "one_way_minutes": 64.2,
-   "live_route_name": null
+   "live_route_names": [
+    "21"
+   ],
+   "display_name": "21",
+   "live_route_name": "21"
   },
   "bus:21:B": {
    "key": "bus:21:B",
@@ -13084,7 +13156,11 @@
    "stops_count": 27,
    "length_km": 17.62,
    "one_way_minutes": 63.7,
-   "live_route_name": null
+   "live_route_names": [
+    "21"
+   ],
+   "display_name": "21",
+   "live_route_name": "21"
   },
   "bus:23:A": {
    "key": "bus:23:A",
@@ -13746,7 +13822,11 @@
    "stops_count": 39,
    "length_km": 22.05,
    "one_way_minutes": 82.0,
-   "live_route_name": null
+   "live_route_names": [
+    "23"
+   ],
+   "display_name": "23",
+   "live_route_name": "23"
   },
   "bus:23:B": {
    "key": "bus:23:B",
@@ -14357,7 +14437,11 @@
    "stops_count": 36,
    "length_km": 21.94,
    "one_way_minutes": 80.4,
-   "live_route_name": null
+   "live_route_names": [
+    "23"
+   ],
+   "display_name": "23",
+   "live_route_name": "23"
   },
   "bus:24:A": {
    "key": "bus:24:A",
@@ -14696,7 +14780,11 @@
    "stops_count": 20,
    "length_km": 12.95,
    "one_way_minutes": 46.8,
-   "live_route_name": null
+   "live_route_names": [
+    "24"
+   ],
+   "display_name": "24",
+   "live_route_name": "24"
   },
   "bus:24:B": {
    "key": "bus:24:B",
@@ -15120,7 +15208,11 @@
    "stops_count": 25,
    "length_km": 13.16,
    "one_way_minutes": 49.5,
-   "live_route_name": null
+   "live_route_names": [
+    "24"
+   ],
+   "display_name": "24",
+   "live_route_name": "24"
   },
   "bus:25:A": {
    "key": "bus:25:A",
@@ -15374,6 +15466,10 @@
    "stops_count": 15,
    "length_km": 13.72,
    "one_way_minutes": 47.0,
+   "live_route_names": [
+    "25"
+   ],
+   "display_name": "25",
    "live_route_name": "25"
   },
   "bus:25:B": {
@@ -15611,6 +15707,10 @@
    "stops_count": 14,
    "length_km": 19.83,
    "one_way_minutes": 64.9,
+   "live_route_names": [
+    "25"
+   ],
+   "display_name": "25",
    "live_route_name": "25"
   },
   "bus:26:A": {
@@ -15899,7 +15999,11 @@
    "stops_count": 17,
    "length_km": 8.46,
    "one_way_minutes": 32.1,
-   "live_route_name": null
+   "live_route_names": [
+    "26"
+   ],
+   "display_name": "26",
+   "live_route_name": "26"
   },
   "bus:26:B": {
    "key": "bus:26:B",
@@ -16187,7 +16291,11 @@
    "stops_count": 17,
    "length_km": 9.06,
    "one_way_minutes": 33.9,
-   "live_route_name": null
+   "live_route_names": [
+    "26"
+   ],
+   "display_name": "26",
+   "live_route_name": "26"
   },
   "bus:27:A": {
    "key": "bus:27:A",
@@ -16339,6 +16447,10 @@
    "stops_count": 9,
    "length_km": 5.93,
    "one_way_minutes": 21.1,
+   "live_route_names": [
+    "27"
+   ],
+   "display_name": "27",
    "live_route_name": "27"
   },
   "bus:27:B": {
@@ -16491,6 +16603,10 @@
    "stops_count": 9,
    "length_km": 5.82,
    "one_way_minutes": 20.8,
+   "live_route_names": [
+    "27"
+   ],
+   "display_name": "27",
    "live_route_name": "27"
   },
   "bus:29:A": {
@@ -16966,7 +17082,11 @@
    "stops_count": 28,
    "length_km": 15.53,
    "one_way_minutes": 57.8,
-   "live_route_name": null
+   "live_route_names": [
+    "29"
+   ],
+   "display_name": "29",
+   "live_route_name": "29"
   },
   "bus:29:B": {
    "key": "bus:29:B",
@@ -17407,7 +17527,11 @@
    "stops_count": 26,
    "length_km": 13.84,
    "one_way_minutes": 51.9,
-   "live_route_name": null
+   "live_route_names": [
+    "29"
+   ],
+   "display_name": "29",
+   "live_route_name": "29"
   },
   "bus:33:A": {
    "key": "bus:33:A",
@@ -17610,7 +17734,11 @@
    "stops_count": 12,
    "length_km": 8.82,
    "one_way_minutes": 31.0,
-   "live_route_name": null
+   "live_route_names": [
+    "33"
+   ],
+   "display_name": "33",
+   "live_route_name": "33"
   },
   "bus:33:B": {
    "key": "bus:33:B",
@@ -17762,7 +17890,11 @@
    "stops_count": 9,
    "length_km": 6.71,
    "one_way_minutes": 23.5,
-   "live_route_name": null
+   "live_route_names": [
+    "33"
+   ],
+   "display_name": "33",
+   "live_route_name": "33"
   },
   "bus:34:A": {
    "key": "bus:34:A",
@@ -18135,7 +18267,11 @@
    "stops_count": 22,
    "length_km": 11.58,
    "one_way_minutes": 43.5,
-   "live_route_name": null
+   "live_route_names": [
+    "34"
+   ],
+   "display_name": "34",
+   "live_route_name": "34"
   },
   "bus:34:B": {
    "key": "bus:34:B",
@@ -18508,7 +18644,11 @@
    "stops_count": 22,
    "length_km": 11.61,
    "one_way_minutes": 43.6,
-   "live_route_name": null
+   "live_route_names": [
+    "34"
+   ],
+   "display_name": "34",
+   "live_route_name": "34"
   },
   "bus:36:A": {
    "key": "bus:36:A",
@@ -18983,7 +19123,11 @@
    "stops_count": 28,
    "length_km": 19.36,
    "one_way_minutes": 69.3,
-   "live_route_name": null
+   "live_route_names": [
+    "36"
+   ],
+   "display_name": "36",
+   "live_route_name": "36"
   },
   "bus:36:B": {
    "key": "bus:36:B",
@@ -19407,7 +19551,11 @@
    "stops_count": 25,
    "length_km": 19.32,
    "one_way_minutes": 68.0,
-   "live_route_name": null
+   "live_route_names": [
+    "36"
+   ],
+   "display_name": "36",
+   "live_route_name": "36"
   },
   "bus:37:A": {
    "key": "bus:37:A",
@@ -19831,7 +19979,11 @@
    "stops_count": 25,
    "length_km": 16.81,
    "one_way_minutes": 60.4,
-   "live_route_name": null
+   "live_route_names": [
+    "37"
+   ],
+   "display_name": "37",
+   "live_route_name": "37"
   },
   "bus:37:B": {
    "key": "bus:37:B",
@@ -20204,7 +20356,11 @@
    "stops_count": 22,
    "length_km": 16.67,
    "one_way_minutes": 58.8,
-   "live_route_name": null
+   "live_route_names": [
+    "37"
+   ],
+   "display_name": "37",
+   "live_route_name": "37"
   },
   "bus:39:A": {
    "key": "bus:39:A",
@@ -20543,6 +20699,10 @@
    "stops_count": 20,
    "length_km": 8.79,
    "one_way_minutes": 34.3,
+   "live_route_names": [
+    "39"
+   ],
+   "display_name": "39",
    "live_route_name": "39"
   },
   "bus:39:B": {
@@ -20831,6 +20991,10 @@
    "stops_count": 17,
    "length_km": 7.73,
    "one_way_minutes": 29.9,
+   "live_route_names": [
+    "39"
+   ],
+   "display_name": "39",
    "live_route_name": "39"
   },
   "bus:3:A": {
@@ -21034,7 +21198,11 @@
    "stops_count": 12,
    "length_km": 6.37,
    "one_way_minutes": 23.7,
-   "live_route_name": null
+   "live_route_names": [
+    "3"
+   ],
+   "display_name": "3",
+   "live_route_name": "3"
   },
   "bus:3:B": {
    "key": "bus:3:B",
@@ -21254,7 +21422,11 @@
    "stops_count": 13,
    "length_km": 6.38,
    "one_way_minutes": 24.1,
-   "live_route_name": null
+   "live_route_names": [
+    "3"
+   ],
+   "display_name": "3",
+   "live_route_name": "3"
   },
   "bus:43:A": {
    "key": "bus:43:A",
@@ -21593,7 +21765,11 @@
    "stops_count": 20,
    "length_km": 10.02,
    "one_way_minutes": 38.0,
-   "live_route_name": null
+   "live_route_names": [
+    "43"
+   ],
+   "display_name": "43",
+   "live_route_name": "43"
   },
   "bus:43:B": {
    "key": "bus:43:B",
@@ -21915,7 +22091,11 @@
    "stops_count": 19,
    "length_km": 9.98,
    "one_way_minutes": 37.4,
-   "live_route_name": null
+   "live_route_names": [
+    "43"
+   ],
+   "display_name": "43",
+   "live_route_name": "43"
   },
   "bus:4:A": {
    "key": "bus:4:A",
@@ -22118,6 +22298,10 @@
    "stops_count": 12,
    "length_km": 7.95,
    "one_way_minutes": 28.4,
+   "live_route_names": [
+    "4"
+   ],
+   "display_name": "4",
    "live_route_name": "4"
   },
   "bus:4:B": {
@@ -22355,6 +22539,10 @@
    "stops_count": 14,
    "length_km": 7.92,
    "one_way_minutes": 29.2,
+   "live_route_names": [
+    "4"
+   ],
+   "display_name": "4",
    "live_route_name": "4"
   },
   "bus:5:A": {
@@ -22609,7 +22797,11 @@
    "stops_count": 15,
    "length_km": 6.6,
    "one_way_minutes": 25.6,
-   "live_route_name": null
+   "live_route_names": [
+    "5"
+   ],
+   "display_name": "5",
+   "live_route_name": "5"
   },
   "bus:5:B": {
    "key": "bus:5:B",
@@ -22880,7 +23072,11 @@
    "stops_count": 16,
    "length_km": 6.81,
    "one_way_minutes": 26.7,
-   "live_route_name": null
+   "live_route_names": [
+    "5"
+   ],
+   "display_name": "5",
+   "live_route_name": "5"
   },
   "bus:6:A": {
    "key": "bus:6:A",
@@ -23168,7 +23364,11 @@
    "stops_count": 17,
    "length_km": 7.69,
    "one_way_minutes": 29.7,
-   "live_route_name": null
+   "live_route_names": [
+    "6"
+   ],
+   "display_name": "6",
+   "live_route_name": "6"
   },
   "bus:6:B": {
    "key": "bus:6:B",
@@ -23422,7 +23622,11 @@
    "stops_count": 15,
    "length_km": 7.03,
    "one_way_minutes": 26.9,
-   "live_route_name": null
+   "live_route_names": [
+    "6"
+   ],
+   "display_name": "6",
+   "live_route_name": "6"
   },
   "bus:7:A": {
    "key": "bus:7:A",
@@ -23761,7 +23965,11 @@
    "stops_count": 20,
    "length_km": 10.56,
    "one_way_minutes": 39.6,
-   "live_route_name": null
+   "live_route_names": [
+    "7"
+   ],
+   "display_name": "7",
+   "live_route_name": "7"
   },
   "bus:7:B": {
    "key": "bus:7:B",
@@ -23998,7 +24206,11 @@
    "stops_count": 14,
    "length_km": 10.87,
    "one_way_minutes": 38.0,
-   "live_route_name": null
+   "live_route_names": [
+    "7"
+   ],
+   "display_name": "7",
+   "live_route_name": "7"
   },
   "bus:8:A": {
    "key": "bus:8:A",
@@ -24252,7 +24464,11 @@
    "stops_count": 15,
    "length_km": 6.27,
    "one_way_minutes": 24.6,
-   "live_route_name": null
+   "live_route_names": [
+    "8"
+   ],
+   "display_name": "8",
+   "live_route_name": "8"
   },
   "bus:8:B": {
    "key": "bus:8:B",
@@ -24455,12 +24671,16 @@
    "stops_count": 12,
    "length_km": 6.04,
    "one_way_minutes": 22.7,
-   "live_route_name": null
+   "live_route_names": [
+    "8"
+   ],
+   "display_name": "8",
+   "live_route_name": "8"
   },
-  "bus:8А:A": {
-   "key": "bus:8А:A",
+  "bus:8A:A": {
+   "key": "bus:8A:A",
    "vehicle_type": "bus",
-   "route_name": "8А",
+   "route_name": "8A",
    "direction": "A",
    "source_file": "route_bus_8А_A.json",
    "stops": [
@@ -24641,12 +24861,17 @@
    "stops_count": 11,
    "length_km": 6.3,
    "one_way_minutes": 23.1,
-   "live_route_name": null
+   "live_route_names": [
+    "8A",
+    "8А"
+   ],
+   "display_name": "8A",
+   "live_route_name": "8A"
   },
-  "bus:8А:B": {
-   "key": "bus:8А:B",
+  "bus:8A:B": {
+   "key": "bus:8A:B",
    "vehicle_type": "bus",
-   "route_name": "8А",
+   "route_name": "8A",
    "direction": "B",
    "source_file": "route_bus_8А_B.json",
    "stops": [
@@ -24929,7 +25154,12 @@
    "stops_count": 17,
    "length_km": 10.8,
    "one_way_minutes": 39.1,
-   "live_route_name": null
+   "live_route_names": [
+    "8A",
+    "8А"
+   ],
+   "display_name": "8A",
+   "live_route_name": "8A"
   },
   "bus:9:A": {
    "key": "bus:9:A",
@@ -25302,7 +25532,11 @@
    "stops_count": 22,
    "length_km": 11.01,
    "one_way_minutes": 41.8,
-   "live_route_name": null
+   "live_route_names": [
+    "9"
+   ],
+   "display_name": "9",
+   "live_route_name": "9"
   },
   "bus:9:B": {
    "key": "bus:9:B",
@@ -25624,7 +25858,11 @@
    "stops_count": 19,
    "length_km": 10.21,
    "one_way_minutes": 38.1,
-   "live_route_name": null
+   "live_route_names": [
+    "9"
+   ],
+   "display_name": "9",
+   "live_route_name": "9"
   },
   "bus:9A:A": {
    "key": "bus:9A:A",
@@ -25861,6 +26099,11 @@
    "stops_count": 14,
    "length_km": 8.41,
    "one_way_minutes": 30.6,
+   "live_route_names": [
+    "9A",
+    "9А"
+   ],
+   "display_name": "9A",
    "live_route_name": "9A"
   },
   "bus:9A:B": {
@@ -26115,6 +26358,11 @@
    "stops_count": 15,
    "length_km": 8.19,
    "one_way_minutes": 30.4,
+   "live_route_names": [
+    "9A",
+    "9А"
+   ],
+   "display_name": "9A",
    "live_route_name": "9A"
   },
   "trolley:1:A": {
@@ -26352,7 +26600,12 @@
    "stops_count": 14,
    "length_km": 6.41,
    "one_way_minutes": 24.6,
-   "live_route_name": "1T"
+   "live_route_names": [
+    "1",
+    "1T"
+   ],
+   "display_name": "1",
+   "live_route_name": "1"
   },
   "trolley:1:B": {
    "key": "trolley:1:B",
@@ -26555,7 +26808,12 @@
    "stops_count": 12,
    "length_km": 6.26,
    "one_way_minutes": 23.4,
-   "live_route_name": "1T"
+   "live_route_names": [
+    "1",
+    "1T"
+   ],
+   "display_name": "1",
+   "live_route_name": "1"
   },
   "trolley:2:A": {
    "key": "trolley:2:A",
@@ -26809,7 +27067,12 @@
    "stops_count": 15,
    "length_km": 7.59,
    "one_way_minutes": 28.6,
-   "live_route_name": "2T"
+   "live_route_names": [
+    "2",
+    "2T"
+   ],
+   "display_name": "2",
+   "live_route_name": "2"
   },
   "trolley:2:B": {
    "key": "trolley:2:B",
@@ -27029,7 +27292,12 @@
    "stops_count": 13,
    "length_km": 7.53,
    "one_way_minutes": 27.6,
-   "live_route_name": "2T"
+   "live_route_names": [
+    "2",
+    "2T"
+   ],
+   "display_name": "2",
+   "live_route_name": "2"
   },
   "trolley:3:A": {
    "key": "trolley:3:A",
@@ -27334,6 +27602,12 @@
    "stops_count": 18,
    "length_km": 10.45,
    "one_way_minutes": 38.4,
+   "live_route_names": [
+    "3/3a",
+    "3",
+    "3T"
+   ],
+   "display_name": "3",
    "live_route_name": "3/3a"
   },
   "trolley:3:B": {
@@ -27673,6 +27947,12 @@
    "stops_count": 20,
    "length_km": 10.62,
    "one_way_minutes": 39.8,
+   "live_route_names": [
+    "3/3a",
+    "3",
+    "3T"
+   ],
+   "display_name": "3",
    "live_route_name": "3/3a"
   },
   "trolley:4:A": {
@@ -27842,7 +28122,12 @@
    "stops_count": 10,
    "length_km": 5.83,
    "one_way_minutes": 21.3,
-   "live_route_name": "4T"
+   "live_route_names": [
+    "4",
+    "4T"
+   ],
+   "display_name": "4",
+   "live_route_name": "4"
   },
   "trolley:4:B": {
    "key": "trolley:4:B",
@@ -28028,7 +28313,12 @@
    "stops_count": 11,
    "length_km": 5.97,
    "one_way_minutes": 22.1,
-   "live_route_name": "4T"
+   "live_route_names": [
+    "4",
+    "4T"
+   ],
+   "display_name": "4",
+   "live_route_name": "4"
   },
   "trolley:5:A": {
    "key": "trolley:5:A",
@@ -28486,7 +28776,12 @@
    "stops_count": 27,
    "length_km": 16.73,
    "one_way_minutes": 61.0,
-   "live_route_name": "5T"
+   "live_route_names": [
+    "5",
+    "5T"
+   ],
+   "display_name": "5",
+   "live_route_name": "5"
   },
   "trolley:5:B": {
    "key": "trolley:5:B",
@@ -28961,7 +29256,12 @@
    "stops_count": 28,
    "length_km": 16.4,
    "one_way_minutes": 60.4,
-   "live_route_name": "5T"
+   "live_route_names": [
+    "5",
+    "5T"
+   ],
+   "display_name": "5",
+   "live_route_name": "5"
   },
   "trolley:6:A": {
    "key": "trolley:6:A",
@@ -29249,6 +29549,12 @@
    "stops_count": 17,
    "length_km": 8.69,
    "one_way_minutes": 32.7,
+   "live_route_names": [
+    "6/6a",
+    "6",
+    "6T"
+   ],
+   "display_name": "6",
    "live_route_name": "6/6a"
   },
   "trolley:6:B": {
@@ -29520,6 +29826,12 @@
    "stops_count": 16,
    "length_km": 8.89,
    "one_way_minutes": 32.9,
+   "live_route_names": [
+    "6/6a",
+    "6",
+    "6T"
+   ],
+   "display_name": "6",
    "live_route_name": "6/6a"
   },
   "trolley:6A:A": {
@@ -29689,7 +30001,12 @@
    "stops_count": 10,
    "length_km": 6.16,
    "one_way_minutes": 22.2,
-   "live_route_name": "6/6a"
+   "live_route_names": [
+    "6A",
+    "6А"
+   ],
+   "display_name": "6A",
+   "live_route_name": "6A"
   },
   "trolley:6A:B": {
    "key": "trolley:6A:B",
@@ -30045,7 +30362,12 @@
    "stops_count": 21,
    "length_km": 10.69,
    "one_way_minutes": 40.4,
-   "live_route_name": "6/6a"
+   "live_route_names": [
+    "6A",
+    "6А"
+   ],
+   "display_name": "6A",
+   "live_route_name": "6A"
   },
   "trolley:8:A": {
    "key": "trolley:8:A",
@@ -30282,7 +30604,12 @@
    "stops_count": 14,
    "length_km": 7.23,
    "one_way_minutes": 27.1,
-   "live_route_name": "8T"
+   "live_route_names": [
+    "8",
+    "8T"
+   ],
+   "display_name": "8",
+   "live_route_name": "8"
   },
   "trolley:8:B": {
    "key": "trolley:8:B",
@@ -30468,7 +30795,12 @@
    "stops_count": 11,
    "length_km": 7.12,
    "one_way_minutes": 25.5,
-   "live_route_name": "8T"
+   "live_route_names": [
+    "8",
+    "8T"
+   ],
+   "display_name": "8",
+   "live_route_name": "8"
   }
  },
  "transfers": [

@@ -15,6 +15,6 @@ description: "Whitelist of active transit routes in Chernivtsi. No other routes 
 `1`, `2`, `3`, `4`, `5`, `6`, `6A`, `8`
 
 ### Important Constraints
-- **Strict Matching:** Drop or ignore any data containing routes not explicitly present in this list.
-- **Trolleybus 3:** Must be referred to simply as `3` (not `11/3` or any other temporary alias).
-- **Modification:** Do not modify this whitelist without explicit permission from the user.
+- **Strict Internal Matching:** Only these 38 routes exist in the system as internal IDs (e.g., `trolley:3`).
+- **Live Aliases (GPS):** The external GPS tracker may send older or alternative names (like `3/3a` or `3T` for trolleybus 3). These are permitted **ONLY as `live_names`** inside `data/routes_manifest.json` for mapping purposes. They must NEVER be used as the internal `id` or the `display_name`.
+- **Rejection:** Completely historical routes (like `11/3`) that no longer physically operate and are not mapped in the manifest must be rejected entirely.

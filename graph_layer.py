@@ -54,6 +54,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 from time_utils import now_kyiv
+from route_manifest import load_manifest, RouteManifest
 
 logger = logging.getLogger("transgps-graph")
 
@@ -697,7 +698,7 @@ def build_groups(
 def build_graph(
     scraped_dir: Path,
     stops_path: Path,
-    live_route_names: Optional[Dict[str, List[str]]] = None,
+    manifest_path: Optional[Path] = None,
 ) -> Dict[str, Any]:
     """
     Собирает полный граф маршрутов из файлов проекта.
@@ -716,11 +717,21 @@ def build_graph(
     """
     route_directions = load_route_directions(scraped_dir)
     canonical_stops = load_canonical_stops(stops_path)
+    
+    manifest = load_manifest(manifest_path) if manifest_path else None
 
     # Плоский список всех остановок всех направлений + карта «направление → индексы».
     raw_stops: List[Dict[str, Any]] = []
     per_direction_indices: List[List[int]] = []
+    
+    filtered_directions = []
     for direction in route_directions:
+        if manifest and not manifest.is_active(direction["vehicle_type"], direction["route_name"]):
+            logger.warning(f'Ignoring route {direction["vehicle_type"]}:{direction["route_name"]} (not in manifest)')
+            continue
+        filtered_directions.append(direction)
+        
+    for direction in filtered_directions:
         indices: List[int] = []
         for stop in direction["stops"]:
             indices.append(len(raw_stops))
@@ -735,7 +746,7 @@ def build_graph(
     id_stats = attach_stop_ids(nodes, canonical_stops)
 
     routes: Dict[str, Dict[str, Any]] = {}
-    for direction, indices in zip(route_directions, per_direction_indices):
+    for direction, indices in zip(filtered_directions, per_direction_indices):
         node_chain: List[int] = []
         for raw_index in indices:
             node_id = index_to_node[raw_index]
@@ -759,11 +770,13 @@ def build_graph(
                 "minutes": segment_minutes(meters),
             })
 
-        key = f'{direction["vehicle_type"]}:{direction["route_name"]}:{direction["direction"]}'
+        # Используем манифест для нормализации кириллицы (А -> A)
+        normalized_name = direction["route_name"].replace("А", "A").replace("К", "K")
+        key = f'{direction["vehicle_type"]}:{normalized_name}:{direction["direction"]}'
         routes[key] = {
             "key": key,
             "vehicle_type": direction["vehicle_type"],
-            "route_name": direction["route_name"],
+            "route_name": normalized_name,
             "direction": direction["direction"],
             "source_file": direction["file"],
             "stops": node_chain,
@@ -771,7 +784,10 @@ def build_graph(
             "stops_count": len(node_chain),
             "length_km": round(length_m / 1000.0, 2),
             "one_way_minutes": round(sum(s["minutes"] for s in segments), 1),
-            "live_route_name": None,
+            "live_route_names": manifest.get_live_names(key.rsplit(":", 1)[0]) if manifest else [],
+            "display_name": manifest.get_display_name(key.rsplit(":", 1)[0]) if manifest else direction["route_name"],
+            # Для обратной совместимости, хотя теперь есть список:
+            "live_route_name": manifest.get_live_names(key.rsplit(":", 1)[0])[0] if manifest and manifest.get_live_names(key.rsplit(":", 1)[0]) else None,
         }
 
     # --- Геометрия сегмента: прямая между остановками ---
@@ -816,13 +832,7 @@ def build_graph(
         stats=transfer_stats,
     )
 
-    if live_route_names:
-        for route in routes.values():
-            route["live_route_name"] = match_live_route_name(
-                route["route_name"],
-                live_route_names.get(route["vehicle_type"], []),
-                route["vehicle_type"],
-            )
+    # live_route_names (старая эвристика) убрана, теперь всё берется из manifest
 
     return {
         "generated": now_kyiv().strftime("%Y-%m-%d %H:%M:%S"),
@@ -875,6 +885,10 @@ def load_graph(path: Path) -> Dict[str, Any]:
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
     base_dir = Path(__file__).resolve().parent
-    built = build_graph(base_dir / "scraped_data", base_dir / "stops.json")
+    built = build_graph(
+        base_dir / "scraped_data", 
+        base_dir / "stops.json",
+        base_dir / "data" / "routes_manifest.json"
+    )
     save_graph(built, base_dir / "graph.json")
     print(json.dumps(built["stats"], ensure_ascii=False, indent=2))
