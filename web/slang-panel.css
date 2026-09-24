@@ -1,0 +1,63 @@
+/* Контекстна панель сленгу: desktop — біля зупинки, mobile — нижня шторка. */
+.slang-panel {
+  position: absolute;
+  z-index: 1300;
+  top: 18px;
+  left: 18px;
+  width: min(390px, calc(100% - 36px));
+  max-height: calc(100% - 36px);
+  overflow: auto;
+  padding: 14px;
+  color: var(--text-primary);
+  background: var(--bg-card);
+  border: 1px solid var(--border-focus);
+  border-radius: 12px;
+  box-shadow: 0 12px 38px rgba(0, 0, 0, .45);
+  font-size: 13px;
+}
+.slang-panel[hidden] { display: none; }
+.slang-panel-head, .slang-label-row, .slang-panel-actions { display: flex; align-items: center; gap: 8px; }
+.slang-panel-head { justify-content: space-between; align-items: flex-start; margin-bottom: 12px; }
+.slang-panel-kicker { color: var(--accent-light); font-size: 11px; font-weight: 700; }
+.slang-panel-title { margin-top: 3px; font-size: 16px; font-weight: 700; }
+.slang-panel-meta, .slang-context { color: var(--text-muted); font-size: 11px; line-height: 1.4; }
+.slang-context { margin-bottom: 10px; padding: 7px 8px; background: var(--bg-section); border-radius: 6px; }
+.slang-icon-btn, .slang-add-btn, .slang-alias-remove { border: 0; cursor: pointer; color: var(--text-secondary); background: var(--bg-card-hover); border-radius: 6px; }
+.slang-icon-btn { width: 28px; height: 28px; font-size: 16px; }
+.slang-icon-btn:hover, .slang-alias-remove:hover { color: var(--danger); }
+.slang-label { display: block; margin: 9px 0 5px; color: var(--text-secondary); font-size: 11px; font-weight: 700; }
+.slang-label-row { justify-content: space-between; margin-top: 3px; }
+.slang-label-row .slang-label { margin-bottom: 5px; }
+.slang-add-btn { padding: 4px 7px; color: var(--accent-light); font-size: 11px; }
+.slang-aliases { display: flex; flex-direction: column; gap: 5px; }
+.slang-alias-row { display: flex; gap: 5px; }
+.slang-alias-input { flex: 1; min-width: 0; padding: 7px 9px; font-size: 12px; }
+.slang-alias-remove { width: 30px; flex: 0 0 30px; }
+.slang-alias-empty, .slang-status { color: var(--text-muted); font-size: 11px; line-height: 1.4; }
+.slang-status { min-height: 16px; margin-top: 9px; }
+.slang-duplicates { margin-top: 9px; padding: 7px; background: rgba(217, 119, 6, .12); border: 1px solid rgba(217, 119, 6, .5); border-radius: 7px; }
+.slang-duplicates-title { color: #fbbf24; font-size: 11px; font-weight: 700; margin-bottom: 4px; }
+.slang-duplicate-row { display: flex; flex-wrap: wrap; gap: 5px; width: 100%; padding: 5px 3px; border: 0; border-top: 1px solid rgba(217, 119, 6, .25); color: var(--text-primary); background: transparent; text-align: left; cursor: pointer; font-size: 11px; }
+.slang-duplicate-row:hover { color: var(--accent-light); }
+.slang-duplicate-row small { color: var(--text-muted); }
+.slang-panel-actions { justify-content: flex-end; margin-top: 12px; }
+.slang-panel-actions .btn { padding: 7px 12px; font-size: 12px; }
+
+
+@media (max-width: 760px) {
+  .slang-panel {
+    top: auto;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    max-height: min(78vh, 640px);
+    padding: 14px 14px calc(14px + env(safe-area-inset-bottom));
+    border-width: 1px 0 0;
+    border-radius: 16px 16px 0 0;
+    box-shadow: 0 -10px 36px rgba(0, 0, 0, .5);
+  }
+  .slang-panel::before { content: ''; display: block; width: 40px; height: 4px; margin: -4px auto 10px; background: var(--border-focus); border-radius: 4px; }
+  .slang-panel-title { font-size: 15px; }
+  .slang-panel-actions { position: sticky; bottom: 0; padding-top: 8px; background: var(--bg-card); }
+}

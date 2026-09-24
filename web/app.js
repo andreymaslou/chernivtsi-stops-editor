@@ -713,6 +713,7 @@ function placeStopMarker(stop, index) {
       }).addTo(map);
     }
     if (window.highlightActiveStopInList) window.highlightActiveStopInList(index - 1);
+    if (window.SlangPanel) window.SlangPanel.open(stop);
   });
 
   state.stopMarkers.push(marker);
@@ -847,6 +848,7 @@ function renderStopsList() {
       badge.style.background = 'linear-gradient(135deg, #6c63ff 0%, #8b85ff 100%)';
 
       window.highlightActiveStopInList(i);
+      if (window.SlangPanel) window.SlangPanel.open(stop);
     });
 
     // Delete
