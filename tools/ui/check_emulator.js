@@ -239,10 +239,24 @@ const probe = () => ({
         colour: el.getAttribute('data-colour'),
         background: style.backgroundColor,
         width: parseFloat(style.width),
+        height: parseFloat(style.height),
+        boxShadow: style.boxShadow,
         animation: style.animationName,
         text: el.textContent.trim(),
       };
     });
+    const visualMetrics = (el) => {
+      if (!el) return null;
+      const style = getComputedStyle(el);
+      return {
+        width: parseFloat(style.width),
+        height: parseFloat(style.height),
+        borderRadius: style.borderRadius,
+        borderWidth: parseFloat(style.borderTopWidth),
+        background: style.backgroundColor,
+        boxShadow: style.boxShadow,
+      };
+    };
     const line = (selector) => {
       const el = document.querySelector(selector);
       const style = el ? getComputedStyle(el) : null;
@@ -271,6 +285,8 @@ const probe = () => ({
         ? getComputedStyle(walkLine).strokeDasharray.replace(/px/g, '') : null,
       walkIcons: document.querySelectorAll('.plan-walk-icon').length,
       finish: document.querySelectorAll('.plan-finish').length,
+      stopDotStyle: visualMetrics(document.querySelector('.plan-stop-dot')),
+      finishStyle: visualMetrics(document.querySelector('.plan-finish')),
       panelDots: [...document.querySelectorAll('#answer .step-dot')]
         .map((el) => el.textContent.trim()),
       stopDots: document.querySelectorAll('.plan-stop-dot').length,
@@ -708,6 +724,10 @@ const probe = () => ({
       JSON.stringify(ux.chevrons.filter((item) => !item.ok).slice(0, 3))));
   check('точки проміжних зупинок', ux.stopDots === ux.expectedStops,
     'точок: ' + ux.stopDots + ' (очікується ' + ux.expectedStops + ')');
+  check('проміжні точки збільшені для тапа',
+    !!ux.stopDotStyle && ux.stopDotStyle.width >= 16 && ux.stopDotStyle.height >= 16 &&
+    ux.stopDotStyle.borderRadius === '50%' && ux.stopDotStyle.boxShadow !== 'none',
+    JSON.stringify(ux.stopDotStyle));
   check('клік по точці показує тільки назву',
     !!ux.stopTooltip && ux.stopTooltip.text === ux.stopTooltip.expected,
     ux.stopTooltip ? 'tooltip: "' + ux.stopTooltip.text + '", очікувалося: "' +
@@ -727,6 +747,15 @@ const probe = () => ({
     !!plan.mapWalk && String(plan.mapWalk.dash).replace(/\s+/g, '') === '1,10',
     'stroke-dasharray: ' + (plan.mapWalk ? plan.mapWalk.dash : 'немає'));
   check('фініш позначено', ux.finish === 1, 'іконок фінішу: ' + ux.finish);
+  check('фініш у білому круглому бейджі',
+    !!ux.finishStyle && ux.steps.length > 0 &&
+    ux.finishStyle.width === ux.steps[0].width &&
+    ux.finishStyle.height === ux.steps[0].height &&
+    ux.finishStyle.width === 30 && ux.finishStyle.height === 30 &&
+    ux.finishStyle.borderRadius === '50%' && ux.finishStyle.borderWidth >= 2 &&
+    ux.finishStyle.background === 'rgb(255, 255, 255)' &&
+    ux.finishStyle.boxShadow === ux.steps[0].boxShadow,
+    JSON.stringify({ finish: ux.finishStyle, boarding: ux.steps[0] }));
   check('цифри кроків у панелі = бейджам на карті',
     (ux.panelDots || []).length === ux.transit &&
     (ux.panelDots || []).join(',') === stepNumbers,

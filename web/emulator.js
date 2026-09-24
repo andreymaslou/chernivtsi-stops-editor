@@ -644,8 +644,8 @@ function stopDot(stop, colour) {
       className: 'plan-stop',
       html: '<span class="plan-stop-dot" data-lat="' + point[0] + '" data-lon="' + point[1] +
         '" style="--route-colour: ' + colour + '"></span>',
-      iconSize: [12, 12],
-      iconAnchor: [6, 6],
+      iconSize: [18, 18],
+      iconAnchor: [9, 9],
     }),
   });
 
@@ -722,8 +722,8 @@ function finishBadge(point, name) {
     icon: L.divIcon({
       className: 'plan-finish-wrap',
       html: '<div class="plan-finish">🏁</div>',
-      iconSize: [24, 24],
-      iconAnchor: [12, 12],
+      iconSize: [30, 30],
+      iconAnchor: [15, 15],
     }),
   });
   if (name) {
