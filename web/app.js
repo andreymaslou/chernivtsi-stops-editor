@@ -444,7 +444,8 @@ updateEditModeUi();
 // ===== Map Click =====
 map.on('click', function (e) {
   // Просмотр маршрута эмулятора: карта не должна добавлять остановки.
-  if (!state.editMode) return;
+  return; // ВРЕМЕННО ОТКЛЮЧЕНО по просьбе пользователя
+  // if (!state.editMode) return;
 
   const { lat, lng } = e.latlng;
   document.getElementById('stop-lat').value = lat.toFixed(6);
