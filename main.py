@@ -467,24 +467,24 @@ llm_client = OpenAI(
 # Системный промпт для LLM. Жёстко требуем ТОЛЬКО JSON без каких-либо
 # пояснений, чтобы результат можно было безопасно распарсить.
 SYSTEM_PROMPT = """\
-Ти — модуль розбору тексту для транспортного застосунку міста Чернівці.
-Користувач пише запит українською мовою або суржиком (розмовна українсько-\
-російська мова), наприклад: "як доїхати з калинки до універу", \
-"мені треба з театральної на соборну", "з вулиці головної до ринку".
+Ти — розумний помічник для транспортного застосунку міста Чернівці.
+Користувач пише запит українською мовою або суржиком (наприклад: "як доїхати з калинки до універу", "яка сьогодні погода", "рецепт борщу").
 
-Твоє єдине завдання: витягнути з тексту дві локації — звідки їде користувач \
-("from") і куди він їде ("to"). Локація може бути назвою зупинки, вулиці, \
-площі, ринку, закладу, районною народною назвою тощо. Не виправляй, не \
-перекладай і не нормалізуй назву — передавай її так, як розпізнав із тексту \
-(можеш прибрати прийменники "з", "до", "на", "від", "у" та зайві слова типу \
-"доїхати", "проїхати", "маршрут").
+Твоє завдання — класифікувати запит і повернути СУВОРО чистий JSON.
 
-Якщо в тексті вказано лише одну локацію (наприклад, тільки "куди"), інше \
-поле поверни як порожній рядок "".
+Якщо користувач запитує про маршрут або проїзд:
+1. Витягни дві локації: звідки ("from") і куди ("to").
+2. Локація може бути зупинкою, вулицею, площею, закладом тощо. Не виправляй і не перекладай її.
+3. Поверни JSON формату:
+{"type": "route", "from": "назва", "to": "назва"}
+Якщо вказано лише одну локацію, іншу залиш порожньою ("").
 
-СУВОРО дотримуйся формату відповіді: поверни ТІЛЬКИ чистий JSON-об'єкт без \
-жодних пояснень, markdown-розмітки чи додаткового тексту, точно такого вигляду:
-{"from": "назва локації", "to": "назва локації"}
+Якщо запит НЕ стосується пошуку маршрутів, зупинок або громадського транспорту Чернівців (наприклад, погода, рецепти, загальні питання):
+1. Ввічливо поясни українською мовою, що ти допомагаєш лише з маршрутами та вартістю проїзду, і запитай звідки куди треба доїхати.
+2. Поверни JSON формату:
+{"type": "off_topic", "message": "твій текст пояснення"}
+
+Поверни ТІЛЬКИ JSON, без markdown-розмітки чи додаткових слів.
 """
 
 
@@ -525,7 +525,7 @@ def call_llm_extract_locations(user_text: str) -> Dict[str, str]:
                     {"role": "user", "content": user_text},
                 ],
                 temperature=0.0,  # детерминированный разбор, без "творчества"
-                max_tokens=120,   # хватит на {"from": "...", "to": "..."}
+                max_tokens=250,   # хватит на {"type": "off_topic", "message": "..."}
             )
             raw_content = response.choices[0].message.content or ""
             break  # Успешный вызов, прерываем цикл фоллбэка
@@ -546,6 +546,8 @@ def call_llm_extract_locations(user_text: str) -> Dict[str, str]:
         )
 
     result = {
+        "type": str(parsed.get("type", "route")).strip(),
+        "message": str(parsed.get("message", "")).strip(),
         "from": str(parsed.get("from") or "").strip(),
         "to": str(parsed.get("to") or "").strip(),
     }
@@ -711,9 +713,11 @@ class DebugInfo(BaseModel):
 
 
 class RouteResponse(BaseModel):
-    from_stop_id: Optional[int]
-    to_stop_id: Optional[int]
-    debug_info: DebugInfo
+    mode: Optional[str] = None
+    message: Optional[str] = None
+    from_stop_id: Optional[int] = None
+    to_stop_id: Optional[int] = None
+    debug_info: Optional[DebugInfo] = None
 
 
 # ---------------------------------------------------------------------------
@@ -763,6 +767,13 @@ def get_route(request: RouteRequest):
 
     # Шаг 1: LLM извлекает названия точек "откуда" и "куда" из свободного текста.
     locations = call_llm_extract_locations(request.text)
+    
+    if locations.get("type") == "off_topic":
+        return RouteResponse(
+            mode="off_topic",
+            message=locations.get("message") or "Вибачте, я можу допомогти лише з маршрутами."
+        )
+        
     from_query = locations["from"]
     to_query = locations["to"]
 
@@ -991,6 +1002,14 @@ def get_plan(request: PlanRequest):
     # Шаг 1 и 2 — ровно как в /api/route: LLM вытаскивает точки, Locator
     # превращает их в stop_id.
     locations = call_llm_extract_locations(request.text)
+    
+    if locations.get("type") == "off_topic":
+        return {
+            "mode": "off_topic",
+            "message": locations.get("message") or "Вибачте, я можу допомогти лише з маршрутами.",
+            "user_text": request.text
+        }
+        
     from_query, to_query = locations["from"], locations["to"]
     from_stop_id, from_type = locator.locate(from_query)
     to_stop_id, to_type = locator.locate(to_query)

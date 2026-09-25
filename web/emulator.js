@@ -522,7 +522,9 @@ function setPlaying(on) {
 
 function render(endpoint, data) {
   clearLayers();
-  if (data.mode === 'clarify' || data.mode === 'no_route') {
+  if (data.mode === 'off_topic') {
+    renderOffTopic(data);
+  } else if (data.mode === 'clarify' || data.mode === 'no_route') {
     renderInfo(data);
   } else if (Array.isArray(data.legs)) {
     renderPlan(data);
@@ -547,6 +549,22 @@ function renderInfo(data) {
   if (data.reask) parts.push('підказка: назвіть зупинку або вулицю, наприклад «Соборка», «Гравітон»');
   document.getElementById('answer').innerHTML = parts.join('\n');
   setStatus(data.reask ? 'переформулюйте фразу' : 'маршрут не знайдено', 'error');
+}
+
+/** Запит поза темою: користувач питає не про маршрути. */
+function renderOffTopic(data) {
+  const parts = [];
+  parts.push('<span class="badge" style="background:#ff9800; color:#fff; padding:3px 6px; border-radius:4px; font-weight:bold; font-size:12px; margin-right:6px;">поза темою</span>');
+  parts.push('<span style="font-size:15px; line-height:1.4;">' + (data.message || 'Запит поза межами моїх можливостей.') + '</span>');
+  document.getElementById('answer').innerHTML = parts.join('');
+  setStatus('запит не стосується маршрутів', 'ok');
+
+  if (data.message && typeof window.speechSynthesis !== 'undefined') {
+    stopVoice();
+    const utterance = new SpeechSynthesisUtterance(data.message);
+    utterance.lang = 'uk-UA';
+    window.speechSynthesis.speak(utterance);
+  }
 }
 
 /** Откат: сервер только понял фразу и вернул две остановки. */
