@@ -222,6 +222,19 @@ class TransitRouter:
                 )
 
         self.schedule: Dict[str, Dict[str, Dict[str, Any]]] = schedule or {}
+        # Индекс «нормализованная метка -> расписание». Файл расписания писался
+        # руками: часть меток там кириллицей («8А», «15К»), а граф отдаёт
+        # латиницу («8A», «15K»). Без индекса такие маршруты молча оставались
+        # без расписания: price_grn = 0, ожидание = DEFAULT_WAIT_MINUTES и
+        # ночной запрет «не ходить» не срабатывал (15K/8A — 16 % планов).
+        self._schedule_by_label: Dict[str, Dict[str, Dict[str, Any]]] = {
+            vehicle: {
+                self.normalize_label(label): entry
+                for label, entry in entries.items()
+            }
+            for vehicle, entries in self.schedule.items()
+            if isinstance(entries, dict)
+        }
         self._live_vehicles: List[Dict[str, Any]] = []
         # Источник среза парка: "real" | "sim" | None (не задан — тесты/инструменты).
         self._fleet_source: Optional[str] = None
@@ -1007,7 +1020,9 @@ class TransitRouter:
         route = self.routes.get(route_key)
         if not route:
             return None
-        return (self.schedule.get(route["vehicle_type"]) or {}).get(route["route_name"])
+        # Сверяем метки нормализованно: «8А»/«8A» и «15К»/«15K» — один маршрут.
+        entries = self._schedule_by_label.get(route["vehicle_type"]) or {}
+        return entries.get(self.normalize_label(route["route_name"]))
 
     def _wait_minutes(
         self,
@@ -1300,13 +1315,17 @@ class TransitRouter:
         """
         Нормализует подпись маршрута для сверки с меткой ТС перевозчика.
 
-        «6/6a» -> «6a», «2Т» -> «2t», «9A» -> «9a». Кириллические а/б/в
-        приводим к латинице: в графе и в трекере они встречаются вперемешку.
+        «2Т» -> «2t», «9A» -> «9a», «15К» -> «15k»; слэш убирается («6/6a» ->
+        «66a» — это унаследованное поведение, для сверки с трекером есть
+        `_route_labels_match`). Кириллические буквы приводим к латинице: в графе,
+        расписании и трекере они встречаются вперемешку (в `routes_schedule.json`
+        были «8А» и «15К»).
         """
         return (
             value.strip().lower()
             .replace("/", "")
             .replace("а", "a").replace("б", "b").replace("в", "v")
+            .replace("к", "k")
         )
 
     @staticmethod
