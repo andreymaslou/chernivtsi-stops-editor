@@ -480,9 +480,8 @@ SYSTEM_PROMPT = """\
 Якщо вказано лише одну локацію, іншу залиш порожньою ("").
 
 Якщо запит НЕ стосується пошуку маршрутів, зупинок або громадського транспорту Чернівців (наприклад, погода, рецепти, загальні питання):
-1. Ввічливо поясни українською мовою, що ти допомагаєш лише з маршрутами та вартістю проїзду, і запитай звідки куди треба доїхати.
-2. Поверни JSON формату:
-{"type": "off_topic", "message": "твій текст пояснення"}
+1. Поверни JSON формату:
+{"type": "off_topic"}
 
 Поверни ТІЛЬКИ JSON, без markdown-розмітки чи додаткових слів.
 """
@@ -535,19 +534,15 @@ def call_llm_extract_locations(user_text: str) -> Dict[str, str]:
 
     if not raw_content and last_exc:
         logger.error("Все модели из списка фоллбэка упали. Последняя ошибка: %s", last_exc)
-        raise HTTPException(status_code=502, detail=f"LLM requests failed. Last error: {last_exc}") from last_exc
+        return {"type": "error"}
 
     parsed = _parse_llm_json(raw_content)
     if parsed is None:
         logger.error("LLM вернула не-JSON ответ: %r", raw_content)
-        raise HTTPException(
-            status_code=502,
-            detail="LLM returned a response that could not be parsed as JSON",
-        )
+        return {"type": "error"}
 
     result = {
         "type": str(parsed.get("type", "route")).strip(),
-        "message": str(parsed.get("message", "")).strip(),
         "from": str(parsed.get("from") or "").strip(),
         "to": str(parsed.get("to") or "").strip(),
     }
@@ -715,6 +710,7 @@ class DebugInfo(BaseModel):
 class RouteResponse(BaseModel):
     mode: Optional[str] = None
     message: Optional[str] = None
+    note: Optional[str] = None
     from_stop_id: Optional[int] = None
     to_stop_id: Optional[int] = None
     debug_info: Optional[DebugInfo] = None
@@ -768,10 +764,16 @@ def get_route(request: RouteRequest):
     # Шаг 1: LLM извлекает названия точек "откуда" и "куда" из свободного текста.
     locations = call_llm_extract_locations(request.text)
     
+    if locations.get("type") == "error":
+        return RouteResponse(
+            mode="clarify",
+            note="Не вдалося зрозуміти запит. Спробуйте назвати звідки і куди потрібно доїхати."
+        )
+
     if locations.get("type") == "off_topic":
         return RouteResponse(
             mode="off_topic",
-            message="На жаль, я можу допомогти лише з маршрутами по напрямкам, вартості та часу."
+            message="Я можу допомогти знайти маршрут, пересадки, час у дорозі та вартість поїздки. Звідки і куди потрібно доїхати?"
         )
         
     from_query = locations["from"]
@@ -1003,10 +1005,17 @@ def get_plan(request: PlanRequest):
     # превращает их в stop_id.
     locations = call_llm_extract_locations(request.text)
     
+    if locations.get("type") == "error":
+        return {
+            "mode": "clarify",
+            "note": "Не вдалося зрозуміти запит. Спробуйте назвати звідки і куди потрібно доїхати.",
+            "user_text": request.text
+        }
+        
     if locations.get("type") == "off_topic":
         return {
             "mode": "off_topic",
-            "message": "На жаль, я можу допомогти лише з маршрутами по напрямкам, вартості та часу.",
+            "message": "Я можу допомогти знайти маршрут, пересадки, час у дорозі та вартість поїздки. Звідки і куди потрібно доїхати?",
             "user_text": request.text
         }
         
