@@ -1,0 +1,229 @@
+{
+  "version": 1,
+  "updated": "2026-09-25",
+  "currency": "UAH",
+  "scope_note": "Тільки комунальний транспорт КП «ЧТУ»: усі тролейбуси + комунальні автобуси (перелік нижче). Приватні перевізники (маршрутки) не підтверджені жодним джерелом і в тарифікації не враховані.",
+  "sources": [
+    {
+      "id": "chtu-oplata",
+      "title": "КП ЧТУ — Оплата проїзду в комунальному транспорті",
+      "url": "https://trolleybus.cv.ua/oplata",
+      "checked": "2026-09-25"
+    },
+    {
+      "id": "chtu-school",
+      "title": "КП ЧТУ — Транспортна картка «Учнівська»",
+      "url": "https://trolleybus.cv.ua/cards/shcol",
+      "checked": "2026-09-25"
+    },
+    {
+      "id": "chtu-student",
+      "title": "КП ЧТУ — Транспортна картка «Студентська»",
+      "url": "https://trolleybus.cv.ua/cards/st",
+      "checked": "2026-09-25"
+    },
+    {
+      "id": "chtu-privileged",
+      "title": "КП ЧТУ — Транспортна картка «Пільгова»",
+      "url": "https://trolleybus.cv.ua/cards/pl",
+      "checked": "2026-09-25"
+    },
+    {
+      "id": "chtu-categories",
+      "title": "КП ЧТУ — Перелік окремих категорій громадян, які мають право на пільгове перевезення (переліки — PDF)",
+      "url": "https://trolleybus.cv.ua/e-kart-pl/listkategor",
+      "checked": "2026-09-25"
+    },
+    {
+      "id": "promin-2026-08-31",
+      "title": "Чернівецький промінь, 31.08.2026 — пояснення ЧТУ про тарифи з 1 вересня",
+      "url": "https://promin.cv.ua/2026/08/31/u-chernivtsiakh-nahadaly-pro-vartist-proizdu-dlia-uchniv-ta-studentiv-u-komunalnomu-transporti.html",
+      "checked": "2026-09-25"
+    },
+    {
+      "id": "ua0372-2026-07-02",
+      "title": "0372.ua, 02.07.2026 — умови проїзду школярів і студентів на літні канікули",
+      "url": "https://0372.ua/news/4125189/u-cernivcah-zminili-pravila-proizdu-dla-skolariv-i-studentiv-na-lito",
+      "checked": "2026-09-25"
+    },
+    {
+      "id": "city-card",
+      "title": "Чернівецька міська рада — «Картка чернівчанина» (муніципальна соціальна картка, не транспортна)",
+      "url": "https://city.cv.ua/mt/pro-misto/kartka-chernivchanina-70",
+      "checked": "2026-09-25"
+    }
+  ],
+  "base_fare": {
+    "trolley": 16,
+    "bus": 20,
+    "source": "chtu-oplata",
+    "note": "Загальний квиток. Тролейбуси — 16 грн, комунальні автобуси — 20 грн."
+  },
+  "routes": {
+    "trolley": "all",
+    "communal_bus": ["1", "5", "6", "7", "8", "8A", "9", "10A", "13", "15", "15K", "23", "24", "29", "34", "43"],
+    "communal_bus_source": "chtu-oplata",
+    "privileged_free_bus": ["1", "6", "7", "8", "8A", "9", "10A", "13", "15", "23", "24"],
+    "privileged_free_bus_source": "chtu-privileged",
+    "privileged_excluded_bus": ["5", "29", "34", "43"],
+    "privileged_excluded_note": "ЧТУ прямо пише: «Не діє на непільгових маршрутах №5, 29, 34 та 43».",
+    "private_bus_unknown": ["3", "4", "9A", "10", "19", "20", "21", "25", "26", "27", "33", "36", "37", "39"],
+    "private_bus_note": "Є в нашому графі, але немає в переліку комунальних ЧТУ → тарифи й пільги невідомі, потребують окремої перевірки в перевізників."
+  },
+  "cards": {
+    "general": {
+      "name": "Транспортна картка «Загальна» (у ЧТУ також «Громадська»)",
+      "for": "adult",
+      "note": "Поповнюється на будь-яку кількість поїздок."
+    },
+    "school": {
+      "name": "«Учнівська»",
+      "for": "schoolchild",
+      "issued": "у навчальних закладах (списки подає Управління освіти)",
+      "reissue_grn": 75,
+      "requires": "учнівський квиток для підтвердження особи",
+      "source": "chtu-school"
+    },
+    "student": {
+      "name": "«Студентська»",
+      "for": "student",
+      "sold_at": "у водіїв комунальних автобусів і тролейбусів",
+      "card_price_grn": 200,
+      "preloaded_grn": 125,
+      "requires": "студентський квиток для підтвердження особи",
+      "source": "chtu-student"
+    },
+    "privileged": {
+      "name": "«Пільгова»",
+      "for": "privileged",
+      "issued": "ЦНАП, вул. Героїв Майдану, 7 (паспорт + документ на пільгу)",
+      "requires": "валідація при кожній поїздці; картка персональна (з фото)",
+      "source": "chtu-privileged"
+    }
+  },
+  "categories": {
+    "adult": {
+      "label": "Дорослий (загальний тариф)",
+      "card": "general",
+      "requires_document": null,
+      "rules": [
+        {"vehicle": "trolley", "amount": 16, "source": "chtu-oplata"},
+        {"vehicle": "bus", "amount": 20, "source": "chtu-oplata"}
+      ]
+    },
+    "schoolchild": {
+      "label": "Учень (школяр)",
+      "card": "school",
+      "requires_document": "учнівський квиток",
+      "rules": [
+        {
+          "vehicle": "trolley",
+          "amount": 0,
+          "conditions": {"period": "calendar_year"},
+          "note": "Безоплатно протягом календарного року, обов'язкова валідація «Учнівської».",
+          "source": "chtu-school"
+        },
+        {
+          "vehicle": "bus",
+          "scope": "communal",
+          "amount": 10,
+          "conditions": {"period": "school_year", "days": "weekdays"},
+          "note": "На період навчального року, крім вихідних і святкових днів.",
+          "source": "chtu-oplata"
+        },
+        {
+          "vehicle": "bus",
+          "scope": "communal",
+          "amount": 20,
+          "conditions": {"period": "school_year", "days": "weekends_holidays"},
+          "source": "chtu-oplata"
+        },
+        {
+          "vehicle": "bus",
+          "scope": "communal",
+          "amount": 20,
+          "conditions": {"period": "summer_break"},
+          "note": "З 1 липня до 1 вересня — повна вартість.",
+          "source": "ua0372-2026-07-02"
+        }
+      ]
+    },
+    "student": {
+      "label": "Студент",
+      "card": "student",
+      "requires_document": "студентський квиток",
+      "rules": [
+        {
+          "vehicle": "trolley",
+          "amount": 8,
+          "conditions": {"period": "school_year"},
+          "note": "Електротранспорт на період навчального року.",
+          "source": "chtu-student"
+        },
+        {
+          "vehicle": "trolley",
+          "amount": 16,
+          "conditions": {"period": "summer_break"},
+          "note": "На літніх канікулах пільга не діє — повний тариф.",
+          "source": "ua0372-2026-07-02"
+        },
+        {
+          "vehicle": "bus",
+          "amount": 20,
+          "note": "У комунальних автобусах — повна вартість квитка.",
+          "source": "chtu-oplata"
+        }
+      ]
+    },
+    "privileged": {
+      "label": "Пільгова категорія (за посвідченням)",
+      "card": "privileged",
+      "requires_document": "посвідчення, що дає право на пільгу (не будь-який пенсіонер)",
+      "rules": [
+        {
+          "vehicle": "trolley",
+          "amount": 0,
+          "note": "Безоплатно на всіх тролейбусних маршрутах, обов'язкова валідація «Пільгової».",
+          "source": "chtu-privileged"
+        },
+        {
+          "vehicle": "bus",
+          "scope": "communal",
+          "routes": ["1", "6", "7", "8", "8A", "9", "10A", "13", "15", "23", "24"],
+          "amount": 0,
+          "note": "Комунальні автобуси, де передбачені пільгові місця.",
+          "source": "chtu-privileged"
+        },
+        {
+          "vehicle": "bus",
+          "scope": "else",
+          "amount": 20,
+          "note": "Поза пільговим переліком (зокрема №5, 29, 34, 43) — повна вартість.",
+          "source": "chtu-privileged"
+        }
+      ]
+    }
+  },
+  "tickets": {
+    "day": {
+      "amount": 90,
+      "valid": "доба з моменту активації до 23:00, необмежена кількість поїздок",
+      "routes": "усі тролейбуси + автобуси 1,5,6,7,8,8A,9,10A,13,15,23,24,29,34",
+      "bought_at": "у водія",
+      "source": "chtu-oplata"
+    },
+    "terminal_60min": {
+      "transfer_window_min": 60,
+      "note": "Квиток з термінала самообслуговування діє 60 хв; у межах ліміту можна пересідати без додаткової оплати.",
+      "source": "chtu-oplata"
+    }
+  },
+  "open_questions": [
+    "Дві сторінки ЧТУ дають різні переліки пільгових автобусів: /oplata — 1,6,8,8A,9,10A,13,15,15K,23,24; /cards/pl — 1,6,7,8,8A,9,10A,13,15,23,24 і прямо виключає 5,29,34,43. Потрібне уточнення в ЧТУ, який перелік чинний.",
+    "Перелік пільгових категорій лежить у PDF на сайті ЧТУ — потрібно завантажити й вичитати (чи є «пенсіонери за віком» окремою категорією або лише в межах інших пільг).",
+    "Тарифи приватних перевізників (13 маршрутів із private_bus_unknown) не підтверджені: можливі інші ціни та відсутність пільг.",
+    "«Картка чернівчанина» — муніципальна соціальна картка (пільги, доплати, ідентифікація пільговика), а не транспортна; плутати з транспортною «Пільговою» не можна.",
+    "Літні правила: 1 липня — 1 вересня школярі в автобусах платять повну вартість, студенти втрачають пільгу в тролейбусі (16 грн). У тарифікації це треба враховувати.",
+    "60-хвилинний квиток з терміналів дозволяє пересадки без доплати — це не збігається з поточною моделлю «ціна = сума тарифів за кожну поїздку» (router_layer._transit_leg). Треба вирішити, як рахувати пересадки, якщо квиток придбано в терміналі."
+  ]
+}
