@@ -216,6 +216,13 @@
             aria-label="Згорнути емулятор">▾</button>
         </div>
 
+        <!-- Картки варіантів плану (поставка 1, §13 брифа): рендерить
+             emulator.js, тільки коли /api/plan повернув >1 варіанта. Живуть
+             НАД саммарі (#answer). Клік перемальовує план без повторного
+             запиту; стилі — у emulator-panel.css, скоуповані під #emu-panel. -->
+        <div id="plan-variants" class="plan-variants" hidden aria-label="Варіанти маршруту"></div>
+        <div id="answer" class="answer"></div>
+
         <textarea id="ask-text" placeholder="Наприклад: Я на Соборці, треба на Гравітон"></textarea>
 
         <div class="chips" id="chips"></div>
@@ -237,12 +244,7 @@
 
         <div id="status" class="status">готовий до роботи</div>
 
-        <!-- Картки варіантів плану (поставка 1, §13 брифа): рендерить
-             emulator.js, тільки коли /api/plan повернув >1 варіанта. Живуть
-             НАД саммарі (#answer). Клік перемальовує план без повторного
-             запиту; стилі — у emulator-panel.css, скоуповані під #emu-panel. -->
-        <div id="plan-variants" class="plan-variants" hidden aria-label="Варіанти маршруту"></div>
-        <div id="answer" class="answer"></div>
+        <!-- Картки перенесено наверх -->
 
         <!-- Форма скарги: відкривається кнопкою «Це бред» -->
         <div id="report-form" class="hidden" style="margin-top:10px;">
