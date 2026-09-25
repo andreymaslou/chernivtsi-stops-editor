@@ -87,30 +87,88 @@ def test_privileged_rules():
     assert _amount("privileged", "bus", scope="privileged_private") == 0
     assert _amount("privileged", "bus", scope="else") == 20
     free = TARIFFS["routes"]["privileged_free_bus"]
-    assert free == ["1", "6", "7", "8", "8A", "9", "10A", "13", "15", "23", "24"]
+    assert free == ["1", "6", "7", "8", "8A", "9", "10A", "13", "15", "15K", "23", "24"]
     # Перелік виконкому охоплює і приватні маршрутки (пільгові місця).
     private = TARIFFS["routes"]["privileged_free_bus_private"]
     assert private == ["3", "4", "19", "21", "26", "27", "36", "37"]
-    # ЧТУ прямо перелічує «непільгові» маршрути — вони не мають бути у жодному списку.
-    for route in TARIFFS["routes"]["privileged_excluded_bus"]:
+    # Документ має окремий розділ «Автобусні маршрути без забезпечення пільгових
+    # перевезень» — ці номери не мають бути у жодному з пільгових списків.
+    for route in TARIFFS["routes"]["privileged_not_covered_bus"]:
         assert route not in free and route not in private
     # Пенсія сама собою не дає безкоштовного проїзду — потрібне посвідчення.
     assert "посвідчення" in TARIFFS["categories"]["privileged"]["requires_document"]
     assert TARIFFS["routes"]["privileged_seats_share"] == 0.3
 
 
-def test_15k_conflict_is_documented_not_guessed():
-    """15K є лише в застарілому тексті ЧТУ — у коді поки не пільговий.
+def _document_label(route):
+    """Метка маршрута как в документе: без дефиса, латиница, верхний регистр."""
+    return str(route).upper().replace("А", "A").replace("К", "K").replace("-", "").strip()
 
-    Розходження двох сторінок ЧТУ має бути зафіксоване в даних, а не вирішене
-    «на око»: /cards/pl (PDF 2026/08) новіший і містить №7 замість 15K.
+
+def _document_status(route):
+    """Статус маршрута по документу: 'privileged' | 'without' | None (не покрыт).
+
+    В документе часть вариантов записана базовым номером (есть «8», нет «8А»;
+    есть «15», нет «15К»), а часть — отдельной строкой (9 и 9-А, 10 и 10-А).
+    Поэтому сначала точное совпадение, потом откат к базовому номеру.
     """
-    unclear = TARIFFS["routes"]["privileged_unclear_bus"]
-    assert unclear == ["15K"]
-    assert "15K" not in TARIFFS["routes"]["privileged_free_bus"]
-    assert "7" in TARIFFS["routes"]["privileged_free_bus"], "№7 пільговий з 01.08.2026"
-    note = TARIFFS["routes"]["privileged_unclear_note"]
-    assert "15K" in note and "2026/08" in note
+    privileged = {_document_label(r) for r in TARIFFS["routes"]["privileged_document_entries"]}
+    without = {_document_label(r) for r in TARIFFS["routes"]["privileged_not_covered_bus"]}
+    label = _document_label(route)
+    base = label.rstrip("ABCDEFGHIJKLMNOPQRSTUVWXYZ") or label
+    if label in privileged:
+        return "privileged"
+    if label in without:
+        return "without"
+    if base in privileged:
+        return "privileged"
+    if base in without:
+        return "without"
+    return None
+
+
+def test_privileged_document_covers_every_bus_route():
+    """Все 30 автобусов графа должны быть в одном из двух разделов решения.
+
+    Список не «примерный»: виконком делит маршруты на «на яких відшкодовуються
+    втрати…» (18) і «без забезпечення пільгових перевезень» (16). Покриття
+    проверяется по базовому номеру, чтобы 8А/15К не выпадали (их в документе
+    нет отдельной строкой, но есть их базовые 8 и 15).
+    """
+    privileged_entries = TARIFFS["routes"]["privileged_document_entries"]
+    without_entries = TARIFFS["routes"]["privileged_not_covered_bus"]
+    assert len(privileged_entries) == 18
+    assert len(without_entries) == 16
+
+    unclassified = [route for route in SCHEDULE["bus"] if _document_status(route) is None]
+    assert unclassified == [], "документ не покриває: %s" % unclassified
+
+    # Курируемые списки обязаны совпасть с тем, что следует из документа.
+    from_document = {
+        _document_label(route)
+        for route in SCHEDULE["bus"]
+        if _document_status(route) == "privileged"
+    }
+    curated = {
+        _document_label(route)
+        for route in (TARIFFS["routes"]["privileged_free_bus"]
+                      + TARIFFS["routes"]["privileged_free_bus_private"])
+    }
+    assert curated == from_document, sorted(from_document ^ curated)
+
+
+def test_8a_and_15k_are_privileged_as_variants():
+    """8А і 15К у документі не мають власного рядка — це варіанти 8 і 15."""
+    free = TARIFFS["routes"]["privileged_free_bus"]
+    assert "8A" in free and "15K" in free
+    assert _document_status("8A") == "privileged"
+    assert _document_status("15K") == "privileged"
+    # А ось 9А і 10 — окремі рядки документа, і вони БЕЗ пільг.
+    assert _document_status("9A") == "without"
+    assert _document_status("10") == "without"
+    assert _document_status("10A") == "privileged"
+    note = TARIFFS["routes"]["privileged_document_note"]
+    assert "15K" in note and "8A" in note
 
 
 def test_privileged_has_official_decision_references():
