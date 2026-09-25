@@ -44,14 +44,17 @@ def test_meta_and_sources_are_present():
     assert TARIFFS["version"] >= 1
     assert TARIFFS["updated"] == "2026-09-25"
     assert TARIFFS["currency"] == "UAH"
-    assert len(TARIFFS["sources"]) >= 5
+    source_ids = {source["id"] for source in TARIFFS["sources"]}
+    assert len(source_ids) >= 8
     for source in TARIFFS["sources"]:
         assert source["url"].startswith("http")
         assert source["checked"]
-    # У каждого правила, где цифра неочевидна, должна быть ссылка на источник.
+    # У каждого правила, где цифра неочевидна, должна быть ссылка на источник,
+    # и этот источник обязан существовать в списке (иначе ссылка «в никуда»).
     for name, category in TARIFFS["categories"].items():
         for rule in category["rules"]:
             assert rule.get("source"), "правило без source: %s %r" % (name, rule)
+            assert rule["source"] in source_ids, rule["source"]
 
 
 def test_adult_tariff_matches_schedule():
@@ -80,15 +83,45 @@ def test_student_rules():
 
 def test_privileged_rules():
     assert _amount("privileged", "trolley") == 0
-    assert _amount("privileged", "bus", scope="communal") == 0
+    assert _amount("privileged", "bus", scope="privileged_communal") == 0
+    assert _amount("privileged", "bus", scope="privileged_private") == 0
     assert _amount("privileged", "bus", scope="else") == 20
     free = TARIFFS["routes"]["privileged_free_bus"]
     assert free == ["1", "6", "7", "8", "8A", "9", "10A", "13", "15", "23", "24"]
-    # ЧТУ прямо перелічує «непільгові» маршрути — вони не мають бути у вільному списку.
+    # Перелік виконкому охоплює і приватні маршрутки (пільгові місця).
+    private = TARIFFS["routes"]["privileged_free_bus_private"]
+    assert private == ["3", "4", "19", "21", "26", "27", "36", "37"]
+    # ЧТУ прямо перелічує «непільгові» маршрути — вони не мають бути у жодному списку.
     for route in TARIFFS["routes"]["privileged_excluded_bus"]:
-        assert route not in free
+        assert route not in free and route not in private
     # Пенсія сама собою не дає безкоштовного проїзду — потрібне посвідчення.
     assert "посвідчення" in TARIFFS["categories"]["privileged"]["requires_document"]
+    assert TARIFFS["routes"]["privileged_seats_share"] == 0.3
+
+
+def test_15k_conflict_is_documented_not_guessed():
+    """15K є лише в застарілому тексті ЧТУ — у коді поки не пільговий.
+
+    Розходження двох сторінок ЧТУ має бути зафіксоване в даних, а не вирішене
+    «на око»: /cards/pl (PDF 2026/08) новіший і містить №7 замість 15K.
+    """
+    unclear = TARIFFS["routes"]["privileged_unclear_bus"]
+    assert unclear == ["15K"]
+    assert "15K" not in TARIFFS["routes"]["privileged_free_bus"]
+    assert "7" in TARIFFS["routes"]["privileged_free_bus"], "№7 пільговий з 01.08.2026"
+    note = TARIFFS["routes"]["privileged_unclear_note"]
+    assert "15K" in note and "2026/08" in note
+
+
+def test_privileged_has_official_decision_references():
+    """Перелік затверджує виконком — посилання на рішення мусять бути в даних."""
+    documents = TARIFFS["routes"]["privileged_documents"]
+    acts = " ".join(item["act"] for item in documents)
+    assert "673/35" in acts
+    assert any(item["date"] == "2022-11-08" for item in documents)
+    assert any(item["date"] == "2026-07-29" for item in documents), "маршрут №7"
+    for item in documents:
+        assert item["url"].startswith("http")
 
 
 def test_bus_routes_are_fully_classified():
