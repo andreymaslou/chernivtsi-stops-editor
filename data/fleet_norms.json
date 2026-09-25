@@ -1,0 +1,52 @@
+{
+  "version": 1,
+  "checked": "2026-09-26",
+  "read_from": "Скан рішення виконкому ЧМР від 14.07.2026 (на скані №344/16), файл маршрути.pdf (trolleybus.cv.ua/wp-content/uploads/2026/08). Витягнуто з зображень: tools/perf/out/маршрути_img1..3.jpg",
+  "columns": {
+    "mode": "Режим руху / дні виконання",
+    "buses_weekday": "Кількість автобусів у робочі дні",
+    "buses_weekend": "Кількість автобусів у вихідні дні"
+  },
+  "notes": [
+    "«Маршрутне таксі / 2,3,4,5,6,7» — дні тижня роботи маршруту: у понеділок він не працює.",
+    "Кількість автобусів — норма випуску на маршрут (обидва напрямки разом).",
+    "Варіанти 8A і 15K окремих рядків у документі не мають — норми успадковуються від 8 і 15.",
+    "Цифри зчитані зі скану: джерело первинне, але перед використанням у проді варто вибірково звірити."
+  ],
+  "routes": [
+    {"route": "1", "name": "с.Коровія – ТЦ «Метро»", "mode": "Звичайний", "days": "щодня", "buses_weekday": 4, "buses_weekend": 2, "privileged": true, "in_graph": true},
+    {"route": "3", "name": "Вул. Садова – вул. Вижницька", "mode": "Звичайний", "days": "щодня", "buses_weekday": 2, "buses_weekend": 2, "privileged": true, "in_graph": true},
+    {"route": "4", "name": "Вул. Садова – вул. Прип'ятьська,12 «Пеціно»", "mode": "Звичайний", "days": "щодня", "buses_weekday": 3, "buses_weekend": 2, "privileged": true, "in_graph": true},
+    {"route": "5", "name": "Вул. Ентузіастів – Університет", "mode": "Звичайний", "days": "щодня", "buses_weekday": 8, "buses_weekend": 7, "privileged": false, "in_graph": true},
+    {"route": "6", "name": "Вул. Садова – вул. Заставнянська", "mode": "Звичайний", "days": "щодня", "buses_weekday": 3, "buses_weekend": 2, "privileged": true, "in_graph": true},
+    {"route": "7", "name": "Вул. Садова – Нові Ленківці", "mode": "Звичайний", "days": "щодня", "buses_weekday": 1, "buses_weekend": 1, "privileged": true, "in_graph": true},
+    {"route": "8", "name": "Вул. Садова – Клокучка", "mode": "Звичайний", "days": "щодня", "buses_weekday": 2, "buses_weekend": 1, "privileged": true, "in_graph": true},
+    {"route": "9", "name": "Завод «Гравітон» – площа Соборна", "mode": "Звичайний", "days": "щодня", "buses_weekday": 9, "buses_weekend": 6, "privileged": true, "in_graph": true},
+    {"route": "9A", "name": "Завод «Гравітон» – площа Соборна (9-А)", "mode": "Звичайний", "days": "щодня", "buses_weekday": 4, "buses_weekend": 4, "privileged": false, "in_graph": true},
+    {"route": "10", "name": "Вул. Шкільна – вул. В.Александрі", "mode": "Звичайний", "days": "щодня", "buses_weekday": 3, "buses_weekend": 2, "privileged": false, "in_graph": true},
+    {"route": "10A", "name": "Вул. Садова – Садки (10-А)", "mode": "Звичайний", "days": "щодня", "buses_weekday": 1, "buses_weekend": 1, "privileged": true, "in_graph": true},
+    {"route": "13", "name": "Геріатричний пансіонат – вул. Садова", "mode": "Звичайний", "days": "щодня", "buses_weekday": 4, "buses_weekend": 3, "privileged": true, "in_graph": true},
+    {"route": "14", "name": "Ленківці – вул. Старожучківський Шлях", "mode": "Маршрутне таксі", "days": "2,3,4,5,6,7", "buses_weekday": 3, "buses_weekend": 3, "privileged": false, "in_graph": false},
+    {"route": "15", "name": "Вул. Д.Галицького – вул. Садова", "mode": "Звичайний", "days": "щодня", "buses_weekday": 4, "buses_weekend": 2, "privileged": true, "in_graph": true},
+    {"route": "19", "name": "Вул. Садова – вул. Литовська", "mode": "Звичайний", "days": "щодня", "buses_weekday": 2, "buses_weekend": 1, "privileged": true, "in_graph": true},
+    {"route": "20", "name": "Завод «Гравітон» – Центральне кладовище (вул. Героїв Майдану, 159-А)", "mode": "Звичайний", "days": "щодня", "buses_weekday": 4, "buses_weekend": 4, "privileged": false, "in_graph": true},
+    {"route": "21", "name": "Вул. П.Ткачука – вул. Рівненська", "mode": "Звичайний", "days": "щодня", "buses_weekday": 4, "buses_weekend": 2, "privileged": true, "in_graph": true},
+    {"route": "23", "name": "Садгора – вул. Південно-Кільцева", "mode": "Звичайний", "days": "щодня", "buses_weekday": 6, "buses_weekend": 4, "privileged": true, "in_graph": true},
+    {"route": "24", "name": "Ленківці – вул. Сторожинецька", "mode": "Звичайний", "days": "щодня", "buses_weekday": 1, "buses_weekend": 1, "privileged": true, "in_graph": true},
+    {"route": "25", "name": "Вул. Шкільна – вул. Підлісна", "mode": "Звичайний", "days": "щодня", "buses_weekday": 1, "buses_weekend": 1, "privileged": false, "in_graph": true},
+    {"route": "26", "name": "Завод «Гравітон» – вул. С.Скальда", "mode": "Звичайний", "days": "щодня", "buses_weekday": 4, "buses_weekend": 2, "privileged": true, "in_graph": true},
+    {"route": "27", "name": "Вул. Садова – вул. Я.Степового", "mode": "Звичайний", "days": "щодня", "buses_weekday": 1, "buses_weekend": 1, "privileged": true, "in_graph": true},
+    {"route": "29", "name": "Аеропорт – вул. Луковецька", "mode": "Звичайний", "days": "щодня", "buses_weekday": 3, "buses_weekend": 2, "privileged": false, "in_graph": true},
+    {"route": "30", "name": "Центральне кладовище (кільце Голіллів) – вул. Старожучківський Шлях", "mode": "Маршрутне таксі", "days": "2,3,4,5,6,7", "buses_weekday": 6, "buses_weekend": 6, "privileged": false, "in_graph": false},
+    {"route": "31", "name": "Вул. С.Скальда – вул. Старожучківський Шлях", "mode": "Маршрутне таксі", "days": "2,3,4,5,6,7", "buses_weekday": 7, "buses_weekend": 7, "privileged": false, "in_graph": false},
+    {"route": "32", "name": "Проспект Незалежності – вул. Старожучківський Шлях", "mode": "Маршрутне таксі", "days": "2,3,4,5,6,7", "buses_weekday": 7, "buses_weekend": 7, "privileged": false, "in_graph": false},
+    {"route": "33", "name": "Завод «Гравітон» – вул. Старожучківський Шлях", "mode": "Маршрутне таксі", "days": "2,3,4,5,6,7", "buses_weekday": 5, "buses_weekend": 5, "privileged": false, "in_graph": true},
+    {"route": "34", "name": "Завод «Гравітон» – ТРЦ «Буковина Молл»", "mode": "Звичайний", "days": "щодня", "buses_weekday": 2, "buses_weekend": 2, "privileged": false, "in_graph": true},
+    {"route": "35", "name": "Вул. Садова – вул. Старожучківський Шлях", "mode": "Маршрутне таксі", "days": "2,3,4,5,6,7", "buses_weekday": 5, "buses_weekend": 5, "privileged": false, "in_graph": false},
+    {"route": "36", "name": "Чорнівський млин – вул. Садова", "mode": "Звичайний", "days": "щодня", "buses_weekday": 1, "buses_weekend": 1, "privileged": true, "in_graph": true},
+    {"route": "37", "name": "Чорнівський млин – вул. Садова", "mode": "Звичайний", "days": "щодня", "buses_weekday": 1, "buses_weekend": 1, "privileged": true, "in_graph": true},
+    {"route": "39", "name": "Площа Пречистої Марії – вул. С.Скальда", "mode": "Звичайний", "days": "щодня", "buses_weekday": 6, "buses_weekend": 4, "privileged": false, "in_graph": true},
+    {"route": "41", "name": "Садгора – вул. Старожучківський Шлях", "mode": "Маршрутне таксі", "days": "2,3,4,5,6,7", "buses_weekday": 4, "buses_weekend": 4, "privileged": false, "in_graph": false},
+    {"route": "43", "name": "Вул. Березенська – Дослідна станція", "mode": "Звичайний", "days": "щодня", "buses_weekday": 1, "buses_weekend": 1, "privileged": false, "in_graph": true}
+  ]
+}
