@@ -1428,8 +1428,6 @@ function voiceModalBodyHtml(mode) {
   }
   return mode === 'ask'
     ? '<p>Щоб диктувати запити голосом, сайту потрібен мікрофон 🎤.</p>'
-      + '<p style="color:var(--text); font-size:13px; margin-top:8px;">'
-      + '<i>💡 Підказка: я допомагаю тільки з пошуком оптимальних маршрутів та оптимізацією вартості проїзду.</i></p>'
       + '<p>Натисніть «Дозволити» — браузер покаже системний запит, і вже після '
       + 'нього почнеться прослуховування. Наступні рази ця шторка не зʼявлятиметься.</p>'
     : '<p>Браузер не надав доступу до мікрофона. Щоб увімкнути його:</p>'
@@ -1482,7 +1480,7 @@ function resetVoiceHint() {
   voiceWanted = false;
   voiceRec = null;
   if (voiceBtn) voiceBtn.classList.remove('recording');
-  if (voiceHint) voiceHint.textContent = '(МАРШРУТИ ТА ЦІНИ)';
+  if (voiceHint) voiceHint.textContent = '(AI-ЗАПИТАЙ МЕНЕ)';
 }
 
 /** Повідомлення про збій: toast редактора (showToast з app.js) або alert,
