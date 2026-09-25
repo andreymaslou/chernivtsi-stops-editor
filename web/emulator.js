@@ -998,21 +998,24 @@ function stopVoice() {
 }
 
 /** Озвучення відповіді паралельно з появою карток (Web Speech, uk-UA).
- *  Текст складаємо з цифр плану — сервер голосових фраз не віддає. */
+ *  Формулюємо з даних плану: картка показує коротко («34 хвилини, 20 гривень»),
+ *  а голос має сказати, ЯК саме їхати — «автобусом номер 9», «з пересадкою на
+ *  тролейбус». Готову фразу собирає сервер у полі `speech.text`; якщо його
+ *  немає (старый сервер) — залишаємо короткий варіант из цифр плану. */
 function speakPlanSummary(plan) {
   if (typeof window.speechSynthesis === 'undefined' ||
       typeof window.SpeechSynthesisUtterance !== 'function') return;
   const mins = Number(plan && plan.total_min);
   if (!Number.isFinite(mins)) return;
   try {
-    let text = 'План: ' + Math.round(mins) + ' хвилин';
-    const price = Number(plan.price_grn);
-    if (Number.isFinite(price)) text += ', ' + Math.round(price) + ' гривень';
-    const variants = Array.isArray(plan.variants) ? plan.variants : [];
-    if (variants.length > 1 && Number.isFinite(Number(variants[1].total_min))) {
-      text += '. Або інший варіант: ' + Math.round(Number(variants[1].total_min)) + ' хвилин' +
-        (Number.isFinite(Number(variants[1].price_grn))
-          ? ', ' + Math.round(Number(variants[1].price_grn)) + ' гривень' : '');
+    // 1) Якщо сервер уже зібрав голосову фразу — читаємо саме її.
+    const speech = plan && plan.speech;
+    let text = (speech && typeof speech.text === 'string') ? speech.text.trim() : '';
+    if (!text) {
+      // 2) Fallback: коротко, як раніше.
+      text = 'План: ' + Math.round(mins) + ' хвилин';
+      const price = Number(plan.price_grn);
+      if (Number.isFinite(price)) text += ', ' + Math.round(price) + ' гривень';
     }
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = 'uk-UA';

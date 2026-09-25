@@ -1,4 +1,4 @@
-"""
+﻿"""
 API-сервер голосового помощника транспортного приложения г. Черновцы.
 
 Стек: FastAPI + Uvicorn + OpenAI SDK (клиент подключён к OpenRouter) +
@@ -410,8 +410,7 @@ class Locator:
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 OPENROUTER_MODELS_RAW = os.getenv(
     "OPENROUTER_MODEL",
-    "qwen/qwen3.8-flash,openai/gpt-4o-mini,"
-    "google/gemma-4-26b-a4b-it:free,qwen/qwen3.8-27b:free",
+    "openai/gpt-4o-mini,google/gemma-4-26b-a4b-it:free,qwen/qwen3.8-27b:free",
 )
 OPENROUTER_MODELS = [m.strip() for m in OPENROUTER_MODELS_RAW.split(",") if m.strip()]
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
@@ -470,25 +469,106 @@ llm_client = OpenAI(
 
 # Системный промпт для LLM. Жёстко требуем ТОЛЬКО JSON без каких-либо
 # пояснений, чтобы результат можно было безопасно распарсить.
-SYSTEM_PROMPT = """\
-Ти — розумний помічник для транспортного застосунку міста Чернівці.
-Користувач пише запит українською мовою або суржиком (наприклад: "як доїхати з калинки до універу", "яка сьогодні погода", "рецепт борщу").
+#
+# Список мест (PLACES_HINT) подставляется в промпт динамически: без него модель
+# работает вслепую и выдумывает названия — на вопрос «до ринку» отвечала
+# from="мені потрібно", а на «мені потрібно київська» придумывала from="південна",
+# которой в фразе не было. Сленг из data/slang_overrides.json («форик»,
+# «тралка», «соборка») модель тоже не знает, хотя Locator по нему ищет.
+SYSTEM_PROMPT_TEMPLATE = """\
+Ти — голосовий помічник транспорту міста Чернівці.
+Користувач пише або каже українською мовою чи суржиком.
 
-Твоє завдання — класифікувати запит і повернути СУВОРО чистий JSON.
+Твоє єдине завдання — зрозуміти запит і повернути СУВОРО чистий JSON.
 
-Якщо користувач запитує про маршрут або проїзд:
-1. Витягни дві локації: звідки ("from") і куди ("to").
-2. Локація може бути зупинкою, вулицею, площею, закладом тощо. Не виправляй і не перекладай її.
-3. Поверни JSON формату:
-{"type": "route", "from": "назва", "to": "назва"}
-Якщо вказано лише одну локацію, іншу залиш порожньою ("").
+Відомі місця, які називають мешканці (використовуй ці назви дослівно):
+{places}
 
-Якщо запит НЕ стосується пошуку маршрутів, зупинок або громадського транспорту Чернівців (наприклад, погода, рецепти, загальні питання):
-1. Поверни JSON формату:
-{"type": "off_topic"}
+1. Якщо запит про маршрут, проїзд, зупинку, пересадку, час у дорозі або ціну:
+   - "from" — звідки їхати, "to" — куди їхати;
+   - короткі назви на кшталт «ринок», «універ», «гравитон», «соборка» —
+     це теж місця, а не загальні слова;
+   - НІКОЛИ не вигадуй назву, якої немає в запиті користувача;
+   - якщо вказано лише одне місце, друге залиш порожнім ("");
+   - відповідь: {{"type": "route", "from": "назва", "to": "назва"}}
 
-Поверни ТІЛЬКИ JSON, без markdown-розмітки чи додаткових слів.
+2. Якщо запит НЕ стосується транспорту Чернівців (погода, рецепти, жарти,
+   новини, загальні питання про світ):
+   відповідь: {{"type": "off_topic"}}
+
+ВАЖЛИВО: короткий запит на кшталт «до ринку» або «на гравитон» — це
+запит про МАРШРУТ, а не off_topic. Не відкидай такі запити.
+
+Поверни ТІЛЬКИ JSON, без markdown-розмітки і без додаткових слів.
 """
+
+# Подсказка с местами. Собирается один раз при старте из stops.json + сленга,
+# ограничена по длине: слишком длинный промпт дороже и медленнее.
+PLACES_HINT_MAX_CHARS = 1800
+
+
+def _collect_places_hint(stops: List[Dict]) -> str:
+    """
+    Собирает компактный список мест, которые реально знает Locator.
+
+    Приоритет — сленг (data/slang_overrides.json): именно эти слова мешканцы
+    говорят вслух («форик», «тралка», «соборка»), и именно их модель не знает.
+    Затем добираем именованные остановки, пока не упрёмся в лимит длины.
+    """
+    parts: List[str] = []
+    seen = set()
+
+    def _push(value: str) -> bool:
+        text = " ".join(str(value or "").split()).strip(" ?.!,;:")
+        if not text or len(text) < 3:
+            return True
+        # Служебные пометки внутри алиасов («маг (зроби сам)») — это мусор для
+        # модели, а не место: такие обрезаем до основной части.
+        if "(" in text and ")" in text:
+            text = text.split("(", 1)[0].strip(" ?.!,;:")
+            if len(text) < 3:
+                return True
+        if not text or not any(ch.isalpha() for ch in text):
+            return True
+        key = text.lower()
+        if key in seen:
+            return True
+        seen.add(key)
+        # Проверяем лимит ДО добавления: если элемент уже не влезает, не
+        # добавляем его вовсе — иначе итоговая строка выходит за лимит.
+        total = sum(len(p) for p in parts) + 2 * len(parts)
+        if total + 2 + len(text) > PLACES_HINT_MAX_CHARS:
+            return False
+        parts.append(text)
+        return True
+
+    # 1) Сленг и псевдонимы — самое важное, идёт первым.
+    for stop in stops:
+        for alias in stop.get("aliases", []):
+            if not _push(alias):
+                return ", ".join(parts)
+
+    # 2) Названия остановок: пропускаем безымянные и дубли вида «вул. ...».
+    for stop in stops:
+        name = str(stop.get("name") or "").strip()
+        if not name or name.lower().startswith("вул"):
+            continue
+        if not _push(name):
+            break
+
+    return ", ".join(parts)
+
+
+def build_system_prompt(places_hint: str) -> str:
+    """Подставляет список мест в шаблон промпта."""
+    if not places_hint.strip():
+        places_hint = "(список порожній — використовуй назви, які є в запиті)"
+    return SYSTEM_PROMPT_TEMPLATE.format(places=places_hint)
+
+
+# Промпт по умолчанию — шаблон с пустым списком мест. Реальный собирается в
+# startup(), когда уже загружены stops.json и сленг из data/.
+SYSTEM_PROMPT = build_system_prompt("")
 
 
 # Небольшой кэш разбора фраз в памяти процесса: одна и та же фраза не должна
@@ -689,6 +769,17 @@ async def lifespan(app: FastAPI):
     app_state["locator"] = Locator(stops=stops, streets=streets)
     logger.info(
         "Locator готов: %d остановок (после правок сленга), %d улиц.", len(stops), len(streets)
+    )
+
+    # Промпт собираем после загрузки остановок и сленга: модель должна видеть
+    # реальные названия («соборка», «форик», «гравитон»), иначе выдумывает их.
+    global SYSTEM_PROMPT
+    places_hint = _collect_places_hint(stops)
+    SYSTEM_PROMPT = build_system_prompt(places_hint)
+    logger.info(
+        "Промпт LLM собран: %d символов, в подсказке мест ~%d.",
+        len(SYSTEM_PROMPT),
+        len(places_hint),
     )
 
     # Граф маршрутов и расписание — для роутера (/api/plan).
@@ -1208,7 +1299,97 @@ def get_plan(request: PlanRequest):
     plan["user_text"] = request.text
     plan["debug_info"] = debug
     plan["reask"] = False
+    # Голосова фраза для озвучки: «поїздка автобусом номер 9, приблизно 34
+    # хвилини, вартість 20 гривень». Фронт читає її, а если поля нет
+    # (старый кэш/старый сервер) — собирає короткий варіант из цифр плана.
+    speech_text = build_plan_speech(plan)
+    if speech_text:
+        plan["speech"] = {"text": speech_text, "lang": "uk-UA"}
     return plan
+
+
+def _uk_num(value: float) -> str:
+    """Число прописью по-украински — для голоса, который читает цифры."""
+    rounded = int(round(float(value)))
+    if rounded == rounded // 1:
+        return str(rounded)
+    return str(rounded)
+
+
+def _uk_plural(number: int, one: str, few: str, many: str) -> str:
+    """Украинское склонение: 1 хвилина, 2 хвилини, 5 хвилин."""
+    n = abs(int(number))
+    if n % 10 == 1 and n % 100 != 11:
+        return one
+    if 2 <= n % 10 <= 4 and not 12 <= n % 100 <= 14:
+        return few
+    return many
+
+
+def _speech_route_case(label: str, vehicle: str, case: str = "instr") -> str:
+    """
+    Название транспорта для озвучки в нужном падеже.
+
+    «поїздка автобусом номер 9» — творительный (instr);
+    «з пересадкою на автобус номер 3» — винительный (acc).
+    Без этого получалось «на тролейбусом номер 3».
+    """
+    is_trolley = str(vehicle).lower().startswith("trolley")
+    if case == "acc":
+        noun = "тролейбус" if is_trolley else "автобус"
+    else:
+        noun = "тролейбусом" if is_trolley else "автобусом"
+    label = str(label or "").strip()
+    if not label:
+        return noun
+    # Номера с буквой (9A) читаем «девять а» — цифра и литера отдельно.
+    digits = "".join(ch for ch in label if ch.isdigit())
+    letters = "".join(ch for ch in label if ch.isalpha())
+    parts = []
+    if digits:
+        parts.append(digits)
+    if letters:
+        uk_letter = {"a": "а", "b": "б", "c": "в", "d": "д", "e": "е"}.get(letters.lower(), letters.lower())
+        parts.append(uk_letter)
+    return f"{noun} номер {' '.join(parts)}"
+
+
+def build_plan_speech(plan: Dict[str, Any]) -> str:
+    """
+    Голосова фраза для плана: не «34 хвилини, 20 гривень», а «поїздка
+    автобусом номер 9, приблизно 34 хвилини, вартість 20 гривень».
+
+    Пересадки и ожидание в произносимый текст не берём намеренно: фраза должна
+    звучать быстро и по делу, детали остаются в карточке.
+    """
+    legs = [leg for leg in (plan.get("legs") or []) if leg.get("type") == "transit"]
+    if not legs:
+        return ""
+
+    parts: List[str] = []
+    if len(legs) == 1:
+        parts.append(
+            "Поїздка "
+            + _speech_route_case(legs[0].get("route"), legs[0].get("vehicle", "bus"))
+        )
+    else:
+        first = _speech_route_case(legs[0].get("route"), legs[0].get("vehicle", "bus"))
+        # «з пересадкою на ...» требует винительного падежа: «на тролейбус 3»,
+        # а не «на тролейбусом 3».
+        last = _speech_route_case(legs[-1].get("route"), legs[-1].get("vehicle", "bus"), case="acc")
+        parts.append(f"Поїздка {first} з пересадкою на {last}")
+
+    total_min = plan.get("total_min")
+    if isinstance(total_min, (int, float)):
+        value = int(round(total_min))
+        parts.append(f"приблизно {_uk_num(value)} {_uk_plural(value, 'хвилина', 'хвилини', 'хвилин')}")
+
+    price = plan.get("price_grn")
+    if isinstance(price, (int, float)) and price > 0:
+        value = int(round(price))
+        parts.append(f"вартість {_uk_num(value)} {_uk_plural(value, 'гривня', 'гривні', 'гривень')}")
+
+    return ", ".join(parts) + "."
 
 
 def _clarify_response(
