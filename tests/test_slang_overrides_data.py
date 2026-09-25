@@ -98,32 +98,56 @@ def test_locator_resolves_override_only_aliases():
         assert match_type == "stop", (query, match_type)
 
 
-def test_drizhzavod_alias_conflict_is_known():
-    """«дріжзавод» приписан двум остановкам, а третья так и называется.
+def test_drizhzavod_is_stop_81_only():
+    """Владелец подтвердил истину: «Дріжзавод» — это остановка **#81**.
 
-    Это открытый вопрос к владельцу данных (см. `docs/STATUS.md`, §5), а не
-    решённый случай, поэтому тест фиксирует **текущее** состояние явно: три
-    кандидата в пределах ~150 м и детерминированный ответ «первый при равном
-    скоре». Когда владелец скажет, какая остановка настоящая, тест меняется на
-    строгий инвариант «псевдоним принадлежит ровно одной остановке».
+    Псевдоним лежал на #79 «Меблева фабрика» (правка 2026-09-16) и #80 «Стадіон
+    «Мальва»» (2026-09-25) — они в 70 м друг от друга, похоже на промах мышью
+    на карте. Сверка с OSM: #81 в 11 м от узла «Дріжджзавод» (1007282335), #79 —
+    от «Меблева Фабрика», #80 — от «Стадіон «Мальва»».
     """
     entries = _overrides()["stops"]
     owners = sorted(
         stop_id for stop_id, entry in entries.items()
         if "дріжзавод" in {alias.lower() for alias in entry["aliases"]}
     )
-    named_natively = sorted(
-        str(stop["id"]) for stop in STOPS
-        if (stop.get("name") or "").strip().lower() == "дріжзавод"
-    )
-
-    assert owners == ["79", "80"], "конфликт разрешился — обновите тест и STATUS"
-    assert named_natively == ["81"], "остановка с родным именем «Дріжзавод»"
+    assert owners == ["81"], "псевдонім має бути рівно в однієї остановки"
+    assert "79" not in entries, "у #79 нічого не лишилося — запис прибрано"
 
     stops = apply_overrides(app_main.load_stops(REPO / "stops.json"))
     streets = app_main.load_streets_geojson(REPO / "streets.json")
     locator = app_main.Locator(stops=stops, streets=streets)
 
-    # Побеждает старейшая правка (79: «Меблева фабрика»), а не свежая (80).
-    assert locator.locate("дріжзавод")[0] == 79
+    assert locator.locate("дріжзавод")[0] == 81
+    # Соседи не потеряли свои собственные названия.
     assert locator.locate("Мальва")[0] == 80
+    assert locator.locate("Меблева фабрика")[0] == 79
+
+
+def test_no_alias_shadows_another_stop_native_name():
+    """Строгий инвариант, который и поймал «дріжзавод».
+
+    Псевдоним не имеет права совпадать с **родным именем другой** остановки:
+    иначе запрос уходит не туда (при равном скоре `process.extractOne` берёт
+    первый индекс). Именно так «дріжзавод» уезжал на #79 из-за записи в #80.
+
+    Обратное разрешено и нормально: один псевдоним на нескольких остановках
+    одного места — «соборка» ведёт на четыре платформы пл. Соборна, «калинка» —
+    на семь остановок рынка. Это городская система, а не ошибка данных.
+    """
+    stops = apply_overrides(app_main.load_stops(REPO / "stops.json"))
+
+    native: dict = {}
+    alias_owners: dict = {}
+    for stop in stops:
+        native.setdefault((stop.get("name") or "").strip().lower(), set()).add(str(stop["id"]))
+        for alias in stop.get("aliases") or []:
+            alias_owners.setdefault(alias.strip().lower(), set()).add(str(stop["id"]))
+
+    offenders = {
+        text: {"alias_of": sorted(ids), "native_of": sorted(native[text] - ids)}
+        for text, ids in alias_owners.items()
+        if native.get(text, set()) - ids
+    }
+    assert offenders == {}, "псевдонім перекриває чуже рідне ім'я: %s" % offenders
+
