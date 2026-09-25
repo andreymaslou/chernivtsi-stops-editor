@@ -1499,7 +1499,7 @@ function resetVoiceHint() {
   voiceWanted = false;
   voiceRec = null;
   if (voiceBtn) voiceBtn.classList.remove('recording');
-  if (voiceHint) voiceHint.textContent = '(AI-ЗАПИТАЙ МЕНЕ)';
+  if (voiceHint) voiceHint.innerHTML = '(AI-ЗАПИТАЙ МЕНЕ)';
 }
 
 /** Повідомлення про збій: toast редактора (showToast з app.js) або alert,
@@ -1554,7 +1554,7 @@ if (voicePanel && voiceHint) {
       // UI стан «слухаю»: текст підказки + червона пульсуюча іконка (.recording).
       voiceRec.onstart = () => {
         voiceBtn.classList.add('recording');
-        voiceHint.textContent = '(Слухаю...)';
+        voiceHint.innerHTML = '(Слухаю<span class="listen-dots"><span>.</span><span>.</span><span>.</span></span>)';
       };
 
       // Успіх: розпізнаний текст — у поле запиту, потім програмний клік по
