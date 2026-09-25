@@ -408,7 +408,8 @@ class Locator:
 # ---------------------------------------------------------------------------
 
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
-OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "qwen/qwen-2.5-72b-instruct")
+OPENROUTER_MODELS_RAW = os.getenv("OPENROUTER_MODEL", "qwen/qwen-2.5-72b-instruct:free,google/gemma-2-27b-it:free,openai/gpt-4o-mini")
+OPENROUTER_MODELS = [m.strip() for m in OPENROUTER_MODELS_RAW.split(",") if m.strip()]
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
 # Тестовый режим (для локальной обкатки; в проде переменные не задаём):
@@ -513,20 +514,28 @@ def call_llm_extract_locations(user_text: str) -> Dict[str, str]:
     if cached is not None:
         return dict(cached)
 
-    try:
-        response = llm_client.chat.completions.create(
-            model=OPENROUTER_MODEL,
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": user_text},
-            ],
-            temperature=0.0,  # детерминированный разбор, без "творчества"
-            max_tokens=120,   # хватит на {"from": "...", "to": "..."}
-        )
-        raw_content = response.choices[0].message.content or ""
-    except Exception as exc:  # сетевые ошибки, ошибки авторизации и т.п.
-        logger.error("Ошибка вызова LLM (OpenRouter): %s", exc)
-        raise HTTPException(status_code=502, detail=f"LLM request failed: {exc}") from exc
+    last_exc = None
+    raw_content = ""
+    for model_name in OPENROUTER_MODELS:
+        try:
+            response = llm_client.chat.completions.create(
+                model=model_name,
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": user_text},
+                ],
+                temperature=0.0,  # детерминированный разбор, без "творчества"
+                max_tokens=120,   # хватит на {"from": "...", "to": "..."}
+            )
+            raw_content = response.choices[0].message.content or ""
+            break  # Успешный вызов, прерываем цикл фоллбэка
+        except Exception as exc:  # сетевые ошибки, ошибки авторизации, платные модели и т.п.
+            logger.warning("Ошибка вызова LLM (OpenRouter) для модели %s: %s", model_name, exc)
+            last_exc = exc
+
+    if not raw_content and last_exc:
+        logger.error("Все модели из списка фоллбэка упали. Последняя ошибка: %s", last_exc)
+        raise HTTPException(status_code=502, detail=f"LLM requests failed. Last error: {last_exc}") from last_exc
 
     parsed = _parse_llm_json(raw_content)
     if parsed is None:
