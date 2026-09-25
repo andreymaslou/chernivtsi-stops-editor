@@ -149,7 +149,9 @@ async function ask() {
       endpoint = '/api/route';
     }
     if (!response.ok) {
-      setStatus('помилка ' + response.status + ': ' + (await response.text()), 'error');
+      const networkMessage = 'Сервіс маршрутів зараз недоступний. Спробуйте ще раз або напишіть початок і пункт призначення.';
+      state.last = { endpoint, text, data: { mode: 'manual_input', message: networkMessage }, at: new Date().toISOString() };
+      render(endpoint, state.last.data);
       return;
     }
 
@@ -158,7 +160,9 @@ async function ask() {
     render(endpoint, data);
     document.getElementById('report-btn').disabled = false;
   } catch (err) {
-    setStatus('помилка запиту: ' + err.message, 'error');
+    const networkMessage = 'Сервіс маршрутів зараз недоступний. Спробуйте ще раз або напишіть початок і пункт призначення.';
+    state.last = { endpoint: '/api/plan', text, data: { mode: 'manual_input', message: networkMessage }, at: new Date().toISOString() };
+    render(state.last.endpoint, state.last.data);
   } finally {
     askButton.disabled = false;
   }
@@ -524,7 +528,7 @@ function render(endpoint, data) {
   clearLayers();
   if (data.mode === 'off_topic') {
     renderOffTopic(data);
-  } else if (data.mode === 'clarify' || data.mode === 'no_route') {
+  } else if (data.mode === 'clarify' || data.mode === 'no_route' || data.mode === 'manual_input') {
     renderInfo(data);
   } else if (Array.isArray(data.legs)) {
     renderPlan(data);
@@ -542,13 +546,21 @@ function render(endpoint, data) {
 function renderInfo(data) {
   const info = data.debug_info || {};
   const parts = [];
-  parts.push('<span class="badge plan">' + (data.mode === 'clarify' ? 'уточнення' : 'немає маршруту') + '</span>');
-  parts.push(data.note || (data.mode === 'clarify' ? 'переформулюйте, будь ласка, фразу' : 'спробуйте пізніше'));
+  const isManual = data.mode === 'manual_input';
+  parts.push('<span class="badge plan">' + (isManual ? 'введіть маршрут' : (data.mode === 'clarify' ? 'уточнення' : 'немає маршруту')) + '</span>');
+  parts.push(data.message || data.note || (data.mode === 'clarify' ? 'переформулюйте, будь ласка, фразу' : 'спробуйте пізніше'));
+  if (isManual) parts.push('Напишіть, будь ласка, звідки і куди потрібно доїхати.');
   if (data.from_name) parts.push('звідки: «' + data.from_name + '» (' + (info.from_type || '?') + ')');
   if (data.to_name) parts.push('куди: «' + data.to_name + '» (' + (info.to_type || '?') + ')');
   if (data.reask) parts.push('підказка: назвіть зупинку або вулицю, наприклад «Соборка», «Гравітон»');
   document.getElementById('answer').innerHTML = parts.join('\n');
-  setStatus(data.reask ? 'переформулюйте фразу' : 'маршрут не знайдено', 'error');
+  setStatus(data.mode === 'manual_input' ? 'введіть початок і пункт призначення' : (data.reask ? 'переформулюйте фразу' : 'маршрут не знайдено'), 'error');
+  if (data.mode === 'manual_input' && data.message && typeof window.speechSynthesis !== 'undefined') {
+    stopVoice();
+    const utterance = new SpeechSynthesisUtterance(data.message);
+    utterance.lang = 'uk-UA';
+    window.speechSynthesis.speak(utterance);
+  }
 }
 
 /** Запит поза темою: користувач питає не про маршрути. */

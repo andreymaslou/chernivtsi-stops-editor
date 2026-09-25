@@ -408,7 +408,11 @@ class Locator:
 # ---------------------------------------------------------------------------
 
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
-OPENROUTER_MODELS_RAW = os.getenv("OPENROUTER_MODEL", "qwen/qwen-2.5-72b-instruct:free,google/gemma-2-27b-it:free,openai/gpt-4o-mini")
+OPENROUTER_MODELS_RAW = os.getenv(
+    "OPENROUTER_MODEL",
+    "qwen/qwen3.8-flash,openai/gpt-4o-mini,"
+    "google/gemma-4-26b-a4b-it:free,qwen/qwen3.8-27b:free",
+)
 OPENROUTER_MODELS = [m.strip() for m in OPENROUTER_MODELS_RAW.split(",") if m.strip()]
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
@@ -460,8 +464,8 @@ if not OPENROUTER_API_KEY:
 llm_client = OpenAI(
     base_url=OPENROUTER_BASE_URL,
     api_key=OPENROUTER_API_KEY or "not-set",
-    timeout=30.0,
-    max_retries=1,
+    timeout=10.0,
+    max_retries=0,
 )
 
 # Системный промпт для LLM. Жёстко требуем ТОЛЬКО JSON без каких-либо
@@ -498,6 +502,85 @@ def _normalize_cache_key(user_text: str) -> str:
     return " ".join(user_text.lower().split())
 
 
+def emergency_extract_locations(user_text: str) -> Dict[str, str]:
+    """Последний локальный слой без LLM: разобрать типовую фразу маршрута."""
+    text = " ".join(str(user_text or "").split()).strip(" ?.!,;:")
+    if not text:
+        return {"from": "", "to": ""}
+
+    patterns = (
+        re.compile(r"\b(?:з|від)\s+(.+?)\s+(?:до|на)\s+(.+)", re.IGNORECASE),
+        re.compile(r"\bдоїхати\s+(?:з|від)\s+(.+?)\s+(?:до|на)\s+(.+)", re.IGNORECASE),
+        re.compile(r"\bпоїхати\s+(?:з|від)\s+(.+?)\s+(?:до|на)\s+(.+)", re.IGNORECASE),
+        re.compile(
+            r"\bя\s+на\s+(.+?),\s*(?:а\s+)?(?:мені\s+)?(?:треба|їду)\s+(?:на|до)\s+(.+)",
+            re.IGNORECASE,
+        ),
+        re.compile(r"\bмені\s+треба\s+(?:з|від)\s+(.+?)\s+(?:до|на)\s+(.+)", re.IGNORECASE),
+    )
+    for pattern in patterns:
+        match = pattern.search(text)
+        if match:
+            origin = match.group(1).strip(" ?.!,;:")
+            destination = match.group(2).strip(" ?.!,;:")
+            if origin and destination:
+                return {"from": origin, "to": destination}
+
+    arrow_match = re.search(r"\s+(?:->|→|—|–)\s+", text)
+    if arrow_match:
+        origin = text[:arrow_match.start()].strip(" ?.!,;:")
+        destination = text[arrow_match.end():].strip(" ?.!,;:")
+        if origin and destination:
+            return {"from": origin, "to": destination}
+    return {"from": "", "to": ""}
+
+
+FALLBACK_INPUT_MESSAGE_UA = (
+    "Я не зміг автоматично зрозуміти фразу. "
+    "Напишіть або скажіть: «з Соборки до Гравітону»."
+)
+FALLBACK_SERVICE_MESSAGE_UA = (
+    "Сервіс розпізнавання зараз відповідає нестабільно. "
+    "Напишіть початок і пункт призначення — я спробую побудувати маршрут."
+)
+
+
+def _fallback_message(locations: Dict[str, str]) -> str:
+    origin = str(locations.get("from") or "").strip()
+    destination = str(locations.get("to") or "").strip()
+    if origin and not destination:
+        return f"Я почув «{origin}», але не зрозумів, куди потрібно доїхати. Назвіть пункт призначення."
+    if destination and not origin:
+        return f"Куди ви їдете — «{destination}». А звідки потрібно виїхати?"
+    return FALLBACK_INPUT_MESSAGE_UA
+
+
+def extract_locations_with_fallback(user_text: str) -> Dict[str, str]:
+    """Получить locations через LLM, затем через локальный аварийный слой."""
+    locations = call_llm_extract_locations(user_text)
+    intent = str(locations.get("type") or "route").strip().lower()
+    if intent == "off_topic":
+        return locations
+    if intent == "route" and (locations.get("from") or locations.get("to")):
+        return locations
+
+    emergency = emergency_extract_locations(user_text)
+    if emergency["from"] or emergency["to"]:
+        return {
+            "type": "fallback",
+            "from": emergency["from"],
+            "to": emergency["to"],
+            "message": _fallback_message(emergency),
+        }
+    return {
+        "type": "error",
+        "from": "",
+        "to": "",
+        "message": FALLBACK_SERVICE_MESSAGE_UA,
+    }
+
+
+
 def call_llm_extract_locations(user_text: str) -> Dict[str, str]:
     """
     Отправляет текст пользователя в LLM (через OpenRouter) и возвращает
@@ -514,7 +597,6 @@ def call_llm_extract_locations(user_text: str) -> Dict[str, str]:
         return dict(cached)
 
     last_exc = None
-    raw_content = ""
     for model_name in OPENROUTER_MODELS:
         try:
             response = llm_client.chat.completions.create(
@@ -523,34 +605,35 @@ def call_llm_extract_locations(user_text: str) -> Dict[str, str]:
                     {"role": "system", "content": SYSTEM_PROMPT},
                     {"role": "user", "content": user_text},
                 ],
-                temperature=0.0,  # детерминированный разбор, без "творчества"
-                max_tokens=250,   # хватит на {"type": "off_topic", "message": "..."}
+                temperature=0.0,
+                max_tokens=250,
             )
             raw_content = response.choices[0].message.content or ""
-            break  # Успешный вызов, прерываем цикл фоллбэка
-        except Exception as exc:  # сетевые ошибки, ошибки авторизации, платные модели и т.п.
-            logger.warning("Ошибка вызова LLM (OpenRouter) для модели %s: %s", model_name, exc)
+            parsed = _parse_llm_json(raw_content)
+            if parsed is None:
+                raise ValueError(f"Модель {model_name} вернула не-JSON")
+            result = {
+                "type": str(parsed.get("type", "route")).strip().lower(),
+                "from": str(parsed.get("from") or "").strip(),
+                "to": str(parsed.get("to") or "").strip(),
+            }
+            if result["type"] not in ("route", "off_topic"):
+                raise ValueError(f"Модель {model_name} вернула неизвестный intent")
+            if cache_key not in _llm_cache and len(_llm_cache) >= LLM_CACHE_MAX:
+                _llm_cache.pop(next(iter(_llm_cache)))
+            _llm_cache[cache_key] = result
+            logger.info(
+                "Модель OpenRouter %s ответила успешно (intent=%s)",
+                model_name,
+                result["type"],
+            )
+            return dict(result)
+        except Exception as exc:
             last_exc = exc
+            logger.warning("Модель OpenRouter %s не сработала: %s", model_name, exc)
 
-    if not raw_content and last_exc:
-        logger.error("Все модели из списка фоллбэка упали. Последняя ошибка: %s", last_exc)
-        return {"type": "error"}
-
-    parsed = _parse_llm_json(raw_content)
-    if parsed is None:
-        logger.error("LLM вернула не-JSON ответ: %r", raw_content)
-        return {"type": "error"}
-
-    result = {
-        "type": str(parsed.get("type", "route")).strip(),
-        "from": str(parsed.get("from") or "").strip(),
-        "to": str(parsed.get("to") or "").strip(),
-    }
-    # Простейший LRU-подобный сброс при переполнении.
-    if cache_key not in _llm_cache and len(_llm_cache) >= LLM_CACHE_MAX:
-        _llm_cache.pop(next(iter(_llm_cache)))
-    _llm_cache[cache_key] = result
-    return dict(result)
+    logger.error("Все модели OpenRouter недоступны. Последняя ошибка: %s", last_exc)
+    return {"type": "error", "from": "", "to": ""}
 
 
 def _parse_llm_json(raw_content: str) -> Optional[Dict]:
@@ -761,23 +844,29 @@ def get_route(request: RouteRequest):
     if not request.text or not request.text.strip():
         raise HTTPException(status_code=400, detail="Field 'text' must not be empty")
 
-    # Шаг 1: LLM извлекает названия точек "откуда" и "куда" из свободного текста.
-    locations = call_llm_extract_locations(request.text)
+    # Шаг 1: LLM извлекает названия точек, а локальный слой страхует его отказ.
+    locations = extract_locations_with_fallback(request.text)
     
     if locations.get("type") == "error":
         return RouteResponse(
-            mode="clarify",
-            note="Не вдалося зрозуміти запит. Спробуйте назвати звідки і куди потрібно доїхати."
+            mode="manual_input",
+            message=locations.get("message") or FALLBACK_INPUT_MESSAGE_UA,
         )
 
     if locations.get("type") == "off_topic":
         return RouteResponse(
             mode="off_topic",
-            message="Я можу допомогти з поїздками по напрямкам, вартості та часу. Скажіть або напишіть звідки і куди Вам потрібно проїхати!"
+            message="Я можу допомогти з пошуком оптимального маршруту, пересадками, часом у дорозі та вартістю поїздки. Звідки і куди потрібно доїхати?"
         )
-        
-    from_query = locations["from"]
-    to_query = locations["to"]
+
+    if locations.get("type") == "fallback" and not (locations.get("from") and locations.get("to")):
+        return RouteResponse(
+            mode="manual_input",
+            message=locations.get("message") or FALLBACK_INPUT_MESSAGE_UA,
+        )
+
+    from_query = locations.get("from", "")
+    to_query = locations.get("to", "")
 
     # Шаг 2: многоуровневый геопоиск для каждой точки.
     from_stop_id, from_type = locator.locate(from_query)
@@ -1001,25 +1090,32 @@ def get_plan(request: PlanRequest):
     if not request.text or not request.text.strip():
         raise HTTPException(status_code=400, detail="Field 'text' must not be empty")
 
-    # Шаг 1 и 2 — ровно как в /api/route: LLM вытаскивает точки, Locator
-    # превращает их в stop_id.
-    locations = call_llm_extract_locations(request.text)
-    
+    # Шаг 1 и 2 — LLM + аварийный локальный разбор → Locator.
+    locations = extract_locations_with_fallback(request.text)
+
     if locations.get("type") == "error":
         return {
-            "mode": "clarify",
-            "note": "Не вдалося зрозуміти запит. Спробуйте назвати звідки і куди потрібно доїхати.",
-            "user_text": request.text
+            "mode": "manual_input",
+            "message": locations.get("message") or FALLBACK_INPUT_MESSAGE_UA,
+            "user_text": request.text,
         }
-        
+
     if locations.get("type") == "off_topic":
         return {
             "mode": "off_topic",
-            "message": "Я можу допомогти з поїздками по напрямкам, вартості та часу. Скажіть або напишіть звідки і куди Вам потрібно проїхати!",
-            "user_text": request.text
+            "message": "Я можу допомогти з пошуком оптимального маршруту, пересадками, часом у дорозі та вартістю поїздки. Звідки і куди потрібно доїхати?",
+            "user_text": request.text,
         }
-        
-    from_query, to_query = locations["from"], locations["to"]
+
+    if locations.get("type") == "fallback" and not (locations.get("from") and locations.get("to")):
+        return {
+            "mode": "manual_input",
+            "message": locations.get("message") or FALLBACK_INPUT_MESSAGE_UA,
+            "user_text": request.text,
+        }
+
+    from_query, to_query = locations.get("from", ""), locations.get("to", "")
+
     from_stop_id, from_type = locator.locate(from_query)
     to_stop_id, to_type = locator.locate(to_query)
 
