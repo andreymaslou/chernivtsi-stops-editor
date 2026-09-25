@@ -1400,7 +1400,8 @@ if (modelTime) {
 
 const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
 const voiceBtn = document.getElementById('ai-voice-btn');
-const voiceHint = document.querySelector('#ai-voice-hint span');
+const voicePanel = document.getElementById('ai-voice-hint');
+const voiceHint = document.getElementById('ai-voice-text');
 let voiceRec = null;      // поточний екземпляр розпізнавання (null = не слухаємо)
 let voiceWanted = false;  // юзер хоче слухати (другий клік = стоп)
 
@@ -1508,13 +1509,13 @@ function voiceNotify(msg) {
   else alert(msg);
 }
 
-if (voiceBtn && voiceHint) {
+if (voicePanel && voiceHint) {
   if (!SpeechRec) {
     // Браузер без Web Speech (Firefox без прапорців) — ховаємо кнопку, щоб
     // не обіцяти голос, якого тут не буває.
-    voiceBtn.style.display = 'none';
+    if (voiceBtn) voiceBtn.style.display = 'none';
   } else {
-    voiceBtn.addEventListener('click', async () => {
+    voicePanel.addEventListener('click', async () => {
       // Другий клік під час запису — явна зупинка.
       if (voiceWanted && voiceRec) {
         voiceRec.stop();
