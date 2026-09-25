@@ -86,6 +86,13 @@ def test_letter_suffix_spoken_separately():
     assert "номер 5 а" in text
 
 
+def test_latin_k_in_route_label_is_spoken_in_ukrainian():
+    """«15K» звучить як «номер 15 к», а не «номер 15 k» (TTS читав по-англійськи)."""
+    text = main.build_plan_speech(_plan([_bus("15K")]))
+    assert "номер 15 к" in text
+    assert "номер 15 k" not in text
+
+
 def test_free_ticket_has_no_price():
     text = main.build_plan_speech(_plan([_bus("9")], price_grn=0))
     assert "гривень" not in text
@@ -123,3 +130,65 @@ def test_system_prompt_contains_places():
     assert "{places}" not in prompt
     # Без списка мест промпт всё равно валиден.
     assert "список" in main.build_system_prompt("").lower()
+
+
+# --- Варіанти плану: картка самодостатня (фраза живе у самому варіанті) --------
+
+
+def _legs_not_spoken(plan):
+    """Ноги-поездки, подпись которых НЕ звучит в `speech.text`.
+
+    Ожидаемую подпись строит САМ серверный хелпер `_speech_route_case` («8A» →
+    «8 а», «15K» → «15 к»), поэтому проверка не разойдётся с кодом, когда в
+    маппинг литер добавят новую букву.
+    """
+    speech = ((plan.get("speech") or {}).get("text") or "").replace(" ", "").lower()
+    missing = []
+    for leg in plan.get("legs") or []:
+        if leg.get("type") != "transit":
+            continue
+        route = leg.get("route")
+        spoken = main._speech_route_case(route, leg.get("vehicle", "bus"), case="acc")
+        spoken = spoken.split("номер ", 1)[-1].replace(" ", "").lower()
+        if spoken and spoken not in speech:
+            missing.append("%s:%s" % (leg.get("vehicle"), route))
+    return missing
+
+
+def test_variants_carry_their_own_speech(monkeypatch):
+    """Кожен варіант везе свою фразу зі ВСІМА ногами (картка + голос).
+
+    Раніше `speech` був лише в корені відповіді: вибір «Дешевий» озвучувався б
+    коротким «План: 36 хвилин, 36 гривень» без номерів маршрутів, а RN-клієнту
+    довелося б дозбирати фразу з кореня.
+    """
+    monkeypatch.setattr(
+        main,
+        "call_llm_extract_locations",
+        lambda _text: {"type": "route", "from": "Соборка", "to": "Гравітон"},
+    )
+    main._llm_cache.clear()
+
+    from fastapi.testclient import TestClient
+
+    with TestClient(main.app) as client:
+        response = client.post(
+            "/api/plan",
+            json={"text": "з Соборки до Гравітону", "now": "2026-09-17T12:00:00"},
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["mode"] == "plan", body
+    # Корінь теж озвучується повністю (окремі тести — вище).
+    assert _legs_not_spoken(body) == []
+    # Перший варіант — завжди кореневий план, тож список непорожній навіть
+    # коли другого прогону немає.
+    assert body["variants"], "варіанти мусять бути завжди (перший — дефолт)"
+    for variant in body["variants"]:
+        assert (variant.get("speech") or {}).get("text"), (
+            "варіант без speech: %r" % variant.get("id")
+        )
+        assert _legs_not_spoken(variant) == [], (
+            "в озвучці варіанта загублені ноги: %r" % variant
+        )

@@ -1305,6 +1305,14 @@ def get_plan(request: PlanRequest):
     speech_text = build_plan_speech(plan)
     if speech_text:
         plan["speech"] = {"text": speech_text, "lang": "uk-UA"}
+    # Варіанти — такі самі плани для клієнта (картка + голос), тому фраза
+    # собирается і для них: без неї вибір «Дешевий» озвучувався б коротким
+    # «План: 36 хвилин, 36 гривень» без номерів маршрутів, а RN-клієнт мав би
+    # дозбирати фразу з кореня відповіді.
+    for variant in plan["variants"]:
+        variant_speech = build_plan_speech(variant)
+        if variant_speech:
+            variant["speech"] = {"text": variant_speech, "lang": "uk-UA"}
     return plan
 
 
@@ -1343,13 +1351,17 @@ def _speech_route_case(label: str, vehicle: str, case: str = "instr") -> str:
     if not label:
         return noun
     # Номера с буквой (9A) читаем «девять а» — цифра и литера отдельно.
+    # Латиниця в підписі маршруту: A (8A, 9A, 10A, 6A) і K (15K) — обидві
+    # мають звучати українською, інакше TTS читає «номер 15 k» по-англійськи.
     digits = "".join(ch for ch in label if ch.isdigit())
     letters = "".join(ch for ch in label if ch.isalpha())
     parts = []
     if digits:
         parts.append(digits)
     if letters:
-        uk_letter = {"a": "а", "b": "б", "c": "в", "d": "д", "e": "е"}.get(letters.lower(), letters.lower())
+        uk_letter = {
+            "a": "а", "b": "б", "c": "в", "d": "д", "e": "е", "k": "к",
+        }.get(letters.lower(), letters.lower())
         parts.append(uk_letter)
     return f"{noun} номер {' '.join(parts)}"
 
