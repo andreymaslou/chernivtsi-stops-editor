@@ -41,6 +41,36 @@ def test_transfer_uses_accusative_after_na():
     assert "тролейбусом номер 3" not in text
 
 
+def test_all_legs_are_spoken_with_two_transfers():
+    """Дві пересадки — три ноги, і голос мусить назвати кожну.
+
+    Було: «перша + остання», тому середня нога зникала мовчки (план
+    bus:8A + bus:5 + trolley:2 звучав як «8 а … на номер 2»).
+    """
+    legs = [
+        _bus("10A"),
+        {"type": "transfer", "kind": "walk", "walk_min": 4},
+        _bus("5"),
+        {"type": "transfer", "kind": "walk", "walk_min": 6},
+        _bus("3", vehicle="trolley"),
+    ]
+    text = main.build_plan_speech(_plan(legs, total_min=60, price_grn=36))
+    assert "автобусом номер 10 а" in text
+    assert "автобусом номер 5" in text  # середня нога більше не губиться
+    assert "з пересадкою на тролейбус номер 3" in text
+    # Ноги зв'язує «потім», а падеж останньої лишається знахідним.
+    assert ", потім " in text
+    assert "тролейбусом номер 3" not in text
+
+
+def test_middle_leg_keeps_instrumental_case():
+    """Середня нога — орудний відмінок: «тролейбусом номер 39»."""
+    legs = [_bus("13"), _bus("39", vehicle="trolley"), _bus("2")]
+    text = main.build_plan_speech(_plan(legs))
+    assert "Поїздка автобусом номер 13, потім тролейбусом номер 39" in text
+    assert "з пересадкою на автобус номер 2" in text
+
+
 def test_ukrainian_plural_forms():
     assert main._uk_plural(1, "хвилина", "хвилини", "хвилин") == "хвилина"
     assert main._uk_plural(2, "хвилина", "хвилини", "хвилин") == "хвилини"

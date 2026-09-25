@@ -70,9 +70,6 @@ def test_api_returns_ukrainian_manual_input_when_everything_is_unavailable(monke
         lambda text: {"type": "error", "from": "", "to": ""},
     )
 
-    with app_main.app_state.get("locator", None) or __import__("contextlib").nullcontext():
-        pass
-
     # TestClient поднимает lifespan с текущими данными проекта.
     from fastapi.testclient import TestClient
 

@@ -1359,8 +1359,11 @@ def build_plan_speech(plan: Dict[str, Any]) -> str:
     Голосова фраза для плана: не «34 хвилини, 20 гривень», а «поїздка
     автобусом номер 9, приблизно 34 хвилини, вартість 20 гривень».
 
-    Пересадки и ожидание в произносимый текст не берём намеренно: фраза должна
-    звучать быстро и по делу, детали остаются в карточке.
+    Ожидание в произносимый текст не берём намеренно: фраза должна звучать
+    быстро и по делу, детали остаются в карточке. А вот ВСЕ ноги-поездки
+    обязаны звучать: план с двумя пересадками содержит три ноги, и «первая +
+    последняя» молча теряла средний маршрут (на стенде «Соборка → Гравітон» —
+    bus:8A + bus:5 + trolley:2, а голос говорил «8 а … на номер 2»).
     """
     legs = [leg for leg in (plan.get("legs") or []) if leg.get("type") == "transit"]
     if not legs:
@@ -1373,11 +1376,17 @@ def build_plan_speech(plan: Dict[str, Any]) -> str:
             + _speech_route_case(legs[0].get("route"), legs[0].get("vehicle", "bus"))
         )
     else:
-        first = _speech_route_case(legs[0].get("route"), legs[0].get("vehicle", "bus"))
-        # «з пересадкою на ...» требует винительного падежа: «на тролейбус 3»,
-        # а не «на тролейбусом 3».
-        last = _speech_route_case(legs[-1].get("route"), legs[-1].get("vehicle", "bus"), case="acc")
-        parts.append(f"Поїздка {first} з пересадкою на {last}")
+        # Все ноги кроме последней — «автобусом номер 8 а, потім автобусом
+        # номер 5»; последняя идёт после «з пересадкою на», то есть в
+        # винительном падеже: «на тролейбус 3», а не «на тролейбусом 3».
+        earlier = ", потім ".join(
+            _speech_route_case(leg.get("route"), leg.get("vehicle", "bus"))
+            for leg in legs[:-1]
+        )
+        last = _speech_route_case(
+            legs[-1].get("route"), legs[-1].get("vehicle", "bus"), case="acc"
+        )
+        parts.append(f"Поїздка {earlier}, з пересадкою на {last}")
 
     total_min = plan.get("total_min")
     if isinstance(total_min, (int, float)):
@@ -1403,14 +1412,34 @@ def _clarify_response(
 
     Неуверенность Locator кодирует в match_type "low_confidence" — в этом
     случае stop_id по-прежнему может быть заполнен, но доверять ему нельзя.
+
+    Отдельный случай — половину просто НЕ НАЗВАЛИ («до ринку»): Locator
+    отвечает "not_specified" на пустой запрос, и тогда в тексте переспроса
+    должно быть видно, что вторая половина уже понята.
     """
     locator: Locator = app_state["locator"]
     stop_by_id = {str(stop["id"]): stop for stop in locator.stops}
     from_name = stop_by_id.get(str(from_stop_id), {}).get("name") if from_stop_id else None
     to_name = stop_by_id.get(str(to_stop_id), {}).get("name") if to_stop_id else None
     low_confidence = debug.get("from_type") == "low_confidence" or debug.get("to_type") == "low_confidence"
+    # «Не назвали» и «не разобрал название» — разные подсказки: старая фраза
+    # «звідки і куди» звинувачувала обидві половини там, де одну уже поняли.
+    missing_from = from_stop_id is None or debug.get("from_type") in ("not_specified", "not_found")
+    missing_to = to_stop_id is None or debug.get("to_type") in ("not_specified", "not_found")
 
-    if low_confidence:
+    if missing_from and to_name:
+        note = (
+            f"Здається, вам до «{to_name}». А звідки потрібно виїхати?"
+            if debug.get("to_type") == "low_confidence"
+            else f"Куди ви їдете — «{to_name}». А звідки потрібно виїхати?"
+        )
+    elif missing_to and from_name:
+        note = (
+            f"Здається, ви виїжджаєте з «{from_name}». А куди потрібно доїхати?"
+            if debug.get("from_type") == "low_confidence"
+            else f"Я почув «{from_name}», але не зрозумів, куди потрібно доїхати. Назвіть пункт призначення."
+        )
+    elif low_confidence:
         note = "Уточніть, будь ласка, звідки і куди ви їдете — я не до кінця зрозумів назви."
     else:
         note = "Я не зрозумів, звідки/куди ви їдете. Назвіть зупинку чи вулицю."
@@ -1422,7 +1451,10 @@ def _clarify_response(
         "to_stop_id": to_stop_id,
         "from_name": from_name,
         "to_name": to_name,
-        "reask": low_confidence,
+        # reask — «сервер чекає уточнення»: і непевна назва, і неназвана
+        # половина фрази. Без цього UI писав «маршрут не знайдено» там, де
+        # насправді питали «а звідки?».
+        "reask": low_confidence or missing_from or missing_to,
         "note": note,
     }
 

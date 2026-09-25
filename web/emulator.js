@@ -542,6 +542,15 @@ function render(endpoint, data) {
   if (Array.isArray(data.legs)) speakPlanSummary(data);
 }
 
+/** Пометка к названию из ответа сервера. `match_type` — внутреннее имя
+ *  («low_confidence», «street_fallback»), пользователю его показывать нельзя:
+ *  переводим в слова, а уверенное совпадение вообще не комментируем. */
+function matchNote(type) {
+  if (type === 'low_confidence') return ' — не впевнений';
+  if (type === 'street_fallback') return ' — підібрано по вулиці';
+  return '';
+}
+
 /** Сервер просить уточнити фразу (не впевнений у точках) або маршруту немає. */
 function renderInfo(data) {
   const info = data.debug_info || {};
@@ -550,8 +559,8 @@ function renderInfo(data) {
   parts.push('<span class="badge plan">' + (isManual ? 'введіть маршрут' : (data.mode === 'clarify' ? 'уточнення' : 'немає маршруту')) + '</span>');
   parts.push(data.message || data.note || (data.mode === 'clarify' ? 'переформулюйте, будь ласка, фразу' : 'спробуйте пізніше'));
   if (isManual) parts.push('Напишіть, будь ласка, звідки і куди потрібно доїхати.');
-  if (data.from_name) parts.push('звідки: «' + data.from_name + '» (' + (info.from_type || '?') + ')');
-  if (data.to_name) parts.push('куди: «' + data.to_name + '» (' + (info.to_type || '?') + ')');
+  if (data.from_name) parts.push('звідки: «' + esc(data.from_name) + '»' + matchNote(info.from_type));
+  if (data.to_name) parts.push('куди: «' + esc(data.to_name) + '»' + matchNote(info.to_type));
   if (data.reask) parts.push('підказка: назвіть зупинку або вулицю, наприклад «Соборка», «Гравітон»');
   document.getElementById('answer').innerHTML = parts.join('\n');
   setStatus(data.mode === 'manual_input' ? 'введіть початок і пункт призначення' : (data.reask ? 'переформулюйте фразу' : 'маршрут не знайдено'), 'error');
