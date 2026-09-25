@@ -96,7 +96,15 @@ def upsert_stop(
         entry["aliases"] = cleaned
 
     if name is not None:
-        entry["name"] = str(name).strip()
+        cleaned_name = str(name).strip()
+        if cleaned_name:
+            entry["name"] = cleaned_name
+        else:
+            # Пустая строка — это «не переименовываем»: apply_overrides трактует её
+            # как отсутствие значения. Держим в файле именно отсутствие ключа,
+            # иначе в data/slang_overrides.json копятся строки `"name": ""`
+            # (так и было: 6 остановок), и файл становится труднее читать.
+            entry.pop("name", None)
 
     if generic is not None:
         entry["generic"] = bool(generic)
