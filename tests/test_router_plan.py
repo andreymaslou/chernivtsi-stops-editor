@@ -664,10 +664,15 @@ def test_direct_bus_20_reachable_from_uchylische(data):
 def test_variants_offer_fewer_transfers(router, now):
     """Второй прогон «≤1 пересадка» даёт дешёвый вариант карточкой (§13 брифа).
 
-    Пара — «Поліклініка профоглядів → вул. Сагайдачного»: дефолт 2 пересадки,
-    второй прогон даёт 1 пересадку и меньше денег (замер 2026-09-21).
+    Пара — «Кінотеатр Жовтень → Юність» (61→105): дефолт 2 пересадки,
+    второй прогон даёт 1 пересадку и меньше денег.
+
+    Примітка: попередня пара (169, 68) тримала transfers=2 лише завдяки
+    ghost-нозі (travel_min=0, фікс P0, 2026-09-26). Після фіксу той маршрут
+    коректно будується за 1 пересадку — пара більше не підходить як еталон
+    для перевірки «дефолт ≥2 пересадки».
     """
-    pair = (169, 68)
+    pair = (61, 105)
     default = router.plan(*pair, now=now)
     assert default is not None and default["transfers"] >= 2
 
@@ -690,16 +695,45 @@ def test_variants_offer_fewer_transfers(router, now):
     assert second["legs"], "у варианта должны быть ноги — их рисует карта"
 
 
+def test_ghost_leg_169_68_is_fixed(router, now):
+    """Регресія P0: пара (169, 68) раніше мала ghost-ногу (travel_min=0).
+
+    До фіксу: transit '39' «вул. Турецька»→«вул. Турецька», travel_min=0,
+    transfers=2, price=52. Після фіксу — transfers=1, price=32, жодної
+    transit-ноги з travel_min < 0.5.
+    """
+    plan = router.plan(169, 68, now=now)
+    assert plan is not None
+    assert plan["transfers"] == 1, (
+        f"ghost-нога повернулась: transfers={plan['transfers']}, price={plan['price_grn']}")
+    assert plan["price_grn"] <= 36, (
+        f"ціна завищена (ghost-нога?): {plan['price_grn']} грн")
+    for leg in plan["legs"]:
+        if leg["type"] == "transit":
+            assert leg["travel_min"] >= 0.5, (
+                f"ghost-нога в плані: маршрут {leg['route']}, travel_min={leg['travel_min']}")
+
+
 def test_variants_are_honest_when_there_is_no_second(router, now):
-    """Когда варианта нет, API говорит об этом текстом, а не пустым списком."""
-    pair = (107, 166)  # дефолт уже с ≤1 пересадкой — второй карточке взяться неоткуда
+    """Когда fewer_transfers варианта нет, API говорит об этом текстом.
+
+    Пара (107, 166): дефолт вже з ≤1 пересадкою — картки «Дешевий»
+    (fewer_transfers) взятись нема звідки. Після Q1 може з'явитись «Прямий»
+    (direct) — це нормально, «другий варіант» у сенсі §13 = fewer_transfers.
+    """
+    pair = (107, 166)
     default = router.plan(*pair, now=now)
     assert default is not None
 
     variants, note = router.build_variants(*pair, now=now, default_plan=default)
 
-    assert len(variants) == 1
-    assert note and "немає" in note, note
+    ids = [v["id"] for v in variants]
+    assert "fewer_transfers" not in ids, f"fewer_transfers з'явився: {ids}"
+    # note == None — коректно коли вже є 'direct' + 'default' (2 карточки показані,
+    # пояснення «немає варіанту» не потрібне). Якщо direct відсутній — пасажир
+    # бачить лише 1 карточку, note зобов'язаний пояснити чому другої немає.
+    if "direct" not in ids:
+        assert note and "немає" in note, f"note мав описати відсутність: {note!r}"
 
 
 def test_max_transfers_is_a_parameter_not_a_global(router, now):
@@ -708,8 +742,12 @@ def test_max_transfers_is_a_parameter_not_a_global(router, now):
     Иначе второй прогон («≤1 пересадка») правил бы общую константу, а один
     `TransitRouter` обслуживает несколько потоков FastAPI — это гонка между
     запросами (docs/BRIEF-plan-variants.md §13, F3).
+
+    Пара (169,68) замінена на (61,105): (169,68) після фіксу P0 (ghost-нога
+    travel_min=0) коректно будується за 1 пересадку, тому two["transfers"]
+    дорівнює 1 і умова 1 < two["transfers"] не виконується.
     """
-    pair = (169, 68)
+    pair = (61, 105)
     before = router_layer.MAX_TRANSFERS
 
     two = router.plan(*pair, now=now)
@@ -719,3 +757,80 @@ def test_max_transfers_is_a_parameter_not_a_global(router, now):
         "прогон изменил глобальную MAX_TRANSFERS — это гонка между запросами")
     assert two is not None and one is not None
     assert one["transfers"] <= 1 < two["transfers"]
+
+
+def test_no_transit_leg_with_zero_travel(router, now):
+    """Жодна transit-нога не повинна мати travel_min < 0.5 хв.
+
+    Баг: Дейкстра будувала план де пасажир сідав і одразу виходив
+    на тій самій зупинці (travel_min = 0). Така нога — сміття в плані.
+    """
+    for from_stop, to_stop in [
+        (107, 166),   # Соборна -> Гравітон
+        (181, 166),   # Калинівка -> Гравітон
+        (65, 166),    # ринок -> Гравітон
+    ]:
+        plan = router.plan(from_stop, to_stop, now=now)
+        if plan is None:
+            continue
+        for leg in plan["legs"]:
+            if leg["type"] == "transit":
+                assert leg["travel_min"] >= 0.5, (
+                    f"Маршрут {leg['route']}: travel_min={leg['travel_min']} < 0.5 "
+                    f"(from={from_stop}, to={to_stop})"
+                )
+
+
+def test_direct_variant_appears_when_direct_route_exists(router, now):
+    """Якщо є прямий маршрут (0 пересадок) — перша карточка «Прямий».
+
+    Перевіряємо що build_variants повертає варіант з id='direct' і тегом
+    'Прямий' коли дефолтний план має пересадки, але є прямий маршрут.
+    Пара підбирається динамічно: шукаємо будь-яку пару де
+    plan(max_transfers=0) is not None AND plan(max_transfers=2)["transfers"]>0.
+    """
+    # Знаходимо пару де є прямий маршрут але дефолт обирає з пересадкою
+    found = None
+    for from_s, to_s in [(107, 166), (181, 166), (61, 105), (65, 166)]:
+        direct = router.plan(from_s, to_s, now=now, max_transfers=0)
+        default = router.plan(from_s, to_s, now=now)
+        if direct is not None and default is not None and default["transfers"] > 0:
+            slowdown = direct["total_min"] - default["total_min"]
+            if slowdown <= 20:
+                found = (from_s, to_s, direct, default)
+                break
+
+    if found is None:
+        pytest.skip("не знайдено пари з прямим маршрутом повільнішим за дефолт")
+
+    from_s, to_s, direct_plan, default_plan = found
+    variants, note = router.build_variants(from_s, to_s, now=now, default_plan=default_plan)
+
+    ids = [v["id"] for v in variants]
+    assert "direct" in ids, f"варіант 'direct' відсутній: {ids}, note={note}"
+
+    direct_card = next(v for v in variants if v["id"] == "direct")
+    assert "Прямий" in direct_card["tags"]
+    assert direct_card["transfers"] == 0
+    assert variants[0]["id"] == "direct", "карточка 'Прямий' має бути першою"
+
+
+def test_no_direct_variant_when_default_is_already_direct(router, now):
+    """Якщо дефолтний план вже прямий — окремої карточки 'direct' не виникає.
+
+    Тег 'Прямий' може бути у дефолтній карточці, але дублювати не потрібно.
+
+    Пара (68, 73) — ланцюжок bus:10:A: дефолт уже прямий (transfers=0), тобто
+    прямий маршрут і є оптимумом за часом, і карточка 'direct' була б дублем.
+    (107, 166) для цієї перевірки не годиться: там дефолт іде з пересадкою, і
+    після Q1 карточка «Прямий» з'являється ЗАКОННО.
+    """
+    pair = (68, 73)
+    default = router.plan(*pair, now=now)
+    if default is None or default["transfers"] != 0:
+        pytest.skip("дефолт не є прямим для цієї пари")
+
+    variants, _ = router.build_variants(*pair, now=now, default_plan=default)
+    ids = [v["id"] for v in variants]
+    assert ids.count("direct") == 0, "дублювати 'direct' не потрібно коли дефолт вже прямий"
+    assert ids[0] == "default"

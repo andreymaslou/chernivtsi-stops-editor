@@ -439,11 +439,15 @@ class TransitRouter:
         result = self._dijkstra(from_nodes, to_nodes, now, wait_cache, max_transfers=max_transfers)
         return result
 
-    # Максимальное «удорожание временем» второго варианта: если он медленнее
-    # дефолта больше, чем на столько минут, карточку не показываем — такой размен
-    # человеку уже не интересен, а честнее сказать «другого варианта нет».
-    # Замеры §12.6: медиана размена «≤1 пересадка» — +7.5 мин по 44 парам.
-    VARIANT_MAX_SLOWDOWN_MIN = 20.0
+    # Максимальне «уповільнення» другого варіанту: якщо він повільніший за дефолт
+    # більш ніж на стільки хвилин — карточку не показуємо. Значення АДАПТИВНЕ:
+    # max(VARIANT_MAX_SLOWDOWN_MIN, default_total * VARIANT_MAX_SLOWDOWN_PCT).
+    # Фіксований поріг 20 хв давав збій на коротких маршрутах: для 20-хвилинної
+    # поїздки +20 хв = +100% — пасажир не сяде; для 60-хвилинної +20 хв = +33%
+    # — ще прийнятно. Замери §12.6: медіана розміну «≤1 пересадка» — +7.5 хв по
+    # 44 парах; поточний поріг дає ~35% від часу поїздки як верхню межу.
+    VARIANT_MAX_SLOWDOWN_MIN = 10.0   # абсолютний мінімум (floor)
+    VARIANT_MAX_SLOWDOWN_PCT = 0.35   # 35% від тривалості дефолту
 
     def build_variants(
         self,
@@ -470,8 +474,15 @@ class TransitRouter:
         `variants`, а выбранный по умолчанию остаётся в корне (совместимость с UI
         и pytest).
 
-        Возвращает `(variants, note)`: список вариантов (первый — всегда дефолт) и
-        человеческую пометку, когда второго варианта сейчас нет.
+        Третий прогон — прямой маршрут без пересадок (`max_transfers=0`). Раньше
+        он терялся: если прямой на 3–5 мин медленнее, оптимум по времени всегда
+        выигрывал, и пользователь видел «5+3+34» вместо простого «34». Карточка
+        «Прямий» идёт ПЕРВОЙ и только когда дефолт идёт с пересадками; если
+        дефолт уже прямой, дублировать нечего (тег «Прямий» у него уже есть).
+
+        Возвращает `(variants, note)`: список вариантов (первый — «Прямий», если
+        он есть, иначе дефолт) и человеческую пометку, когда второго варианта
+        сейчас нет.
         """
         now = as_kyiv(now) if now is not None else now_kyiv()
         default = default_plan if default_plan is not None else self.plan(
@@ -479,7 +490,40 @@ class TransitRouter:
         )
         if default is None:
             return [], "маршрут не знайдено"
-        variants = [self._variant_entry(default, "default")]
+
+        variants: List[Dict[str, Any]] = []
+
+        # Адаптивний поріг «удорожчання часом»: хоча б VARIANT_MAX_SLOWDOWN_MIN,
+        # але не більше VARIANT_MAX_SLOWDOWN_PCT від тривалості дефолту — щоб на
+        # коротких маршрутах не показувати варіанти, що вдвічі довші.
+        # Порог ОДИН на всі карточки: і «Прямий», і «Дешевий» — це той самий
+        # розмін «час на простоту маршруту», тому правило мусить бути спільним.
+        max_slowdown = max(
+            self.VARIANT_MAX_SLOWDOWN_MIN,
+            (default.get("total_min") or 0) * self.VARIANT_MAX_SLOWDOWN_PCT,
+        )
+
+        # Прямой маршрут считаем ТОЛЬКО когда дефолт идёт с пересадками: если
+        # дефолт уже прямой, карточка была бы дублем, а лишний прогон Дейкстры
+        # стоит времени (эндпоинт обслуживает несколько запросов параллельно).
+        if default.get("transfers", 0) > 0:
+            direct = self.plan(from_stop_id, to_stop_id, now=now, max_transfers=0)
+            if direct is not None and direct.get("transfers", 0) == 0:
+                same_as_default = (
+                    direct["total_min"], direct["price_grn"], direct["transfers"]
+                ) == (
+                    default["total_min"], default["price_grn"], default["transfers"]
+                )
+                # Порог размена тот же, что у «дешевого» (общий max_slowdown):
+                # если прямой заметно медленнее, карточка врёт про выгоду.
+                if not same_as_default and (
+                    direct["total_min"] - default["total_min"] <= max_slowdown
+                ):
+                    variants.append(self._variant_entry(direct, "direct"))
+
+        variants.append(self._variant_entry(default, "default"))
+        # note описує відсутність саме fewer_transfers (§13): карточка «Прямий»
+        # може бути присутньою — це не робить текст пометки брехнею.
         if default.get("transfers", 0) <= second_max_transfers:
             return variants, (
                 "другого варіанта зараз немає: маршрут уже з ≤%d пересадками"
@@ -499,7 +543,7 @@ class TransitRouter:
         ):
             return variants, "другого варіанта зараз немає: обидва прогони дали той самий план"
         slowdown = second["total_min"] - default["total_min"]
-        if slowdown > self.VARIANT_MAX_SLOWDOWN_MIN:
+        if slowdown > max_slowdown:
             return variants, "другого варіанта зараз немає: він на %d хв довший" % slowdown
         variants.append(self._variant_entry(second, "fewer_transfers"))
         return variants, None
@@ -510,13 +554,19 @@ class TransitRouter:
         Один вариант для карточки: цифры `(грн, хв)`, теги и ноги (для карты).
 
         Теги — короткий смысловой ярлык вместо чтения цифр (§11): «Прямий» при
-        0 пересадок, «Швидкий» у дефолта (он оптимум по времени по построению),
-        «Дешевий» у второго варианта.
+        0 пересадок (включая третью карточку `direct`), «Швидкий» у дефолта (он
+        оптимум по времени по построению), «Дешевий» у второго варианта. У
+        карточки `direct` других ярлыков нет: «Швидкий» на ней был бы неправдой —
+        по времени дефолт быстрее по построению, карточка существует ради
+        простоты маршрута, а не ради минут.
         """
         tags: List[str] = []
         if plan.get("transfers") == 0:
             tags.append("Прямий")
-        tags.append("Швидкий" if variant_id == "default" else "Дешевий")
+        if variant_id == "default":
+            tags.append("Швидкий")
+        elif variant_id == "fewer_transfers":
+            tags.append("Дешевий")
         return {
             "id": variant_id,
             "tags": tags,
@@ -834,6 +884,12 @@ class TransitRouter:
                 ride_nodes.append(sequence[index][1])
             board_time = now + timedelta(minutes=elapsed_min)
             leg = self._transit_leg(route_key, ride_nodes, board_time, wait_cache)
+            if leg.get("travel_min", 0.0) < 0.5:
+                # Нога з нульовим пробігом: пасажир сів і одразу вийшов.
+                # Такий стан виникає коли board_node == alight_node у Дейкстрі.
+                # Відкидаємо ногу повністю, індекс вже посунуто вище.
+                index += 1
+                continue
             legs.append(leg)
             price_grn += leg.get("price_grn", 0)
             elapsed_min += (leg.get("wait_min") or 0.0) + (leg.get("travel_min") or 0.0)
