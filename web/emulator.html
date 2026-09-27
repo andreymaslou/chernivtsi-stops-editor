@@ -238,7 +238,14 @@
       font-size: 12px;
       cursor: pointer;
     }
-    .route-chip i { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+    /* Светлое кольцо обязательно: цвет маршрута приходит от перевозчика и может
+       быть почти чёрным (напр. «black»), а панель тёмная — без кольца точка
+       сливалась с фоном. Тот же приём, что у маркеров на карте. */
+    .route-chip i {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 0 1px rgba(255, 255, 255, .45);
+    }
     /* Скрытый маршрут: пунктир + приглушение — сразу видно, что это фильтр. */
     .route-chip[aria-pressed="false"] { opacity: .4; border-style: dashed; }
 
