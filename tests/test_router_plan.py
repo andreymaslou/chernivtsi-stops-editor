@@ -667,6 +667,11 @@ def test_variants_offer_fewer_transfers(router, now):
     Пара — «Кінотеатр Жовтень → Юність» (61→105): дефолт 2 пересадки,
     второй прогон даёт 1 пересадку и меньше денег.
 
+    Ціновий пріоритет (PRICE_PREFER_*): коли другий варіант дешевший хоча б
+    на 20 грн і повільніший не більше ніж на 12 хв — він іде ПЕРШИМ («Дешевий»
+    перед «Швидким»); інакше — колишній порядок [Швидкий, Дешевий]. Поріг тест
+    читає з констант роутера, щоб тест не розійшовся з кодом.
+
     Примітка: попередня пара (169, 68) тримала transfers=2 лише завдяки
     ghost-нозі (travel_min=0, фікс P0, 2026-09-26). Після фіксу той маршрут
     коректно будується за 1 пересадку — пара більше не підходить як еталон
@@ -680,19 +685,39 @@ def test_variants_offer_fewer_transfers(router, now):
 
     assert note is None, "для этой пары вариант должен быть доступен: %r" % note
     assert len(variants) == 2
-    first, second = variants
 
-    # Корневой ответ не подменяется: первый вариант повторяет дефолт.
-    assert (first["total_min"], first["price_grn"], first["transfers"]) == (
+    by_id = {entry["id"]: entry for entry in variants}
+    assert set(by_id) == {"default", "fewer_transfers"}, [v["id"] for v in variants]
+    fast, cheap = by_id["default"], by_id["fewer_transfers"]
+
+    # Корневой ответ не подменяется: карточка «Швидкий» несёт цифры дефолта.
+    assert (fast["total_min"], fast["price_grn"], fast["transfers"]) == (
         default["total_min"], default["price_grn"], default["transfers"])
-    assert first["id"] == "default" and "Швидкий" in first["tags"]
+    assert "Швидкий" in fast["tags"]
 
     # Второй вариант — честное «дешевле»: меньше посадок и меньше денег.
-    assert second["id"] == "fewer_transfers" and "Дешевий" in second["tags"]
-    assert second["transfers"] < default["transfers"]
-    assert second["price_grn"] < default["price_grn"]
-    assert second["total_min"] >= default["total_min"]
-    assert second["legs"], "у варианта должны быть ноги — их рисует карта"
+    assert "Дешевий" in cheap["tags"]
+    assert cheap["transfers"] < default["transfers"]
+    assert cheap["price_grn"] < default["price_grn"]
+    assert cheap["total_min"] >= default["total_min"]
+    assert cheap["legs"], "у варианта должны быть ноги — их рисует карта"
+
+    # Порядок карточок зависит от цінового пріоритету: дешевший виграє, коли
+    # економія ≥ порога й повільність ≤ порога — тоді «Дешевий» ПЕРШИМ.
+    price_saved = default["price_grn"] - cheap["price_grn"]
+    slowdown = cheap["total_min"] - default["total_min"]
+    cheaper_first = (
+        price_saved >= router.PRICE_PREFER_CHEAPER_GRN
+        and slowdown <= router.PRICE_PREFER_TIME_LIMIT_MIN
+    )
+    ids = [entry["id"] for entry in variants]
+    if cheaper_first:
+        assert ids == ["fewer_transfers", "default"], (
+            "ціновий пріоритет: дешевший має бути першим, отримано %s" % ids)
+        assert variants[0]["tags"] and "Дешевий" in variants[0]["tags"]
+    else:
+        assert ids == ["default", "fewer_transfers"], (
+            "без цінового пріоритету — швидкий першим, отримано %s" % ids)
 
 
 def test_ghost_leg_169_68_is_fixed(router, now):

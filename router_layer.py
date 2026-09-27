@@ -449,6 +449,14 @@ class TransitRouter:
     VARIANT_MAX_SLOWDOWN_MIN = 10.0   # абсолютний мінімум (floor)
     VARIANT_MAX_SLOWDOWN_PCT = 0.35   # 35% від тривалості дефолту
 
+    # Ціновий пріоритет: коли «Дешевий» (другий прогон, ≤1 пересадка) дешевший
+    # хоча б на PRICE_PREFER_CHEAPER_GRN і повільніший НЕ БІЛЬШ ніж на
+    # PRICE_PREFER_TIME_LIMIT_MIN хв — він стає ПЕРШИМ варіантом замість
+    # «Швидкого». Приклад: Швидкий 56 грн / 53 хв проти Дешевий 36 грн / 55 хв —
+    # різниця 20 грн і лише 2 хв, пасажир очевидно хоче бачити «Дешевий» першим.
+    PRICE_PREFER_CHEAPER_GRN = 20.0      # мінімальна економія, грн
+    PRICE_PREFER_TIME_LIMIT_MIN = 12.0   # максимум «повільності», хв
+
     def build_variants(
         self,
         from_stop_id: int,
@@ -474,15 +482,20 @@ class TransitRouter:
         `variants`, а выбранный по умолчанию остаётся в корне (совместимость с UI
         и pytest).
 
-        Третий прогон — прямой маршрут без пересадок (`max_transfers=0`). Раньше
-        он терялся: если прямой на 3–5 мин медленнее, оптимум по времени всегда
-        выигрывал, и пользователь видел «5+3+34» вместо простого «34». Карточка
-        «Прямий» идёт ПЕРВОЙ и только когда дефолт идёт с пересадками; если
-        дефолт уже прямой, дублировать нечего (тег «Прямий» у него уже есть).
+        Третій прогон — прямий маршрут без пересадок (`max_transfers=0`). Раніше
+        він втрачався: якщо прямий на 3–5 хв повільніший, оптимум за часом завжди
+        вигравав, і користувач бачив «5+3+34» замість простого «34». Картка
+        «Прямий» іде ПЕРШОЮ і лише коли дефолт іде з пересадками; якщо
+        дефолт уже прямий — дублювати нічого (тег «Прямий» у нього вже є).
+
+        Ціновий пріоритет (PRICE_PREFER_*): якщо другий варіант дешевший хоча б
+        на 20 грн і повільніший не більше ніж на 12 хв — він стає ПЕРШИМ серед
+        «швидкий/дешевий» (іде одразу після «Прямий», якщо той є). Теги прив'язані
+        до `variant_id`, тому перестановка — це чистий swap карточок у списку.
 
         Возвращает `(variants, note)`: список вариантов (первый — «Прямий», если
-        он есть, иначе дефолт) и человеческую пометку, когда второго варианта
-        сейчас нет.
+        он есть; иначе дефолт, либо «Дешевий» когда сработал ціновий пріоритет)
+        и человеческую пометку, когда второго варианта сейчас нет.
         """
         now = as_kyiv(now) if now is not None else now_kyiv()
         default = default_plan if default_plan is not None else self.plan(
@@ -545,7 +558,19 @@ class TransitRouter:
         slowdown = second["total_min"] - default["total_min"]
         if slowdown > max_slowdown:
             return variants, "другого варіанта зараз немає: він на %d хв довший" % slowdown
-        variants.append(self._variant_entry(second, "fewer_transfers"))
+        # Ціновий пріоритет: дешевший на ≥20 грн і повільніший ≤12 хв — він іде
+        # першим. Порядок у variants: [«Прямий» якщо є, default, ...]; замінюємо
+        # останній default-запис і додаємо дорогий після нього. Теги прив'язані
+        # до variant_id в _variant_entry, тому просто переставляємо карточки місцями.
+        price_saved = (default.get("price_grn") or 0) - (second.get("price_grn") or 0)
+        if (price_saved >= self.PRICE_PREFER_CHEAPER_GRN
+                and slowdown <= self.PRICE_PREFER_TIME_LIMIT_MIN):
+            cheap_entry = self._variant_entry(second, "fewer_transfers")  # тег «Дешевий»
+            fast_entry = dict(variants[-1])  # копія default-entry, тег «Швидкий»
+            variants[-1] = cheap_entry
+            variants.append(fast_entry)
+        else:
+            variants.append(self._variant_entry(second, "fewer_transfers"))
         return variants, None
 
     @staticmethod
