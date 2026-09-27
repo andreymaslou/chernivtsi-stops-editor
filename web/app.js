@@ -388,7 +388,7 @@ window.toggleOsmStops = function () {
             state.pendingMarker.setLatLng([s.lat, s.lon]);
           } else {
             state.pendingMarker = L.circleMarker([s.lat, s.lon], {
-              radius: 11, color: '#ffffff', fillColor: '#8b85ff',
+              radius: 11, color: '#ffffff', fillColor: '#a21caf',
               fillOpacity: 1, weight: 2.5,
             }).addTo(map);
             state.pendingMarker.bindTooltip('Нова зупинка', {
@@ -464,7 +464,9 @@ map.on('click', function (e) {
     state.pendingMarker = L.circleMarker([lat, lng], {
       radius: 11,
       color: '#ffffff',
-      fillColor: '#8b85ff',
+      // Маркер нової зупинки: бледно-лавандовый #8b85ff на светлой карте
+      // выглядел «выцветшим» — заменён насыщенным фукситом.
+      fillColor: '#a21caf',
       fillOpacity: 1,
       weight: 2.5,
     }).addTo(map);
@@ -579,7 +581,7 @@ async function doSearch() {
           state.pendingMarker.setLatLng([lat, lng]);
         } else {
           state.pendingMarker = L.circleMarker([lat, lng], {
-            radius: 11, color: '#ffffff', fillColor: '#8b85ff',
+            radius: 11, color: '#ffffff', fillColor: '#a21caf',
             fillOpacity: 1, weight: 2.5,
           }).addTo(map);
           state.pendingMarker.bindTooltip('Нова зупинка', {
