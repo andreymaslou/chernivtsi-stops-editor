@@ -4,7 +4,9 @@
   "description": "",
   "main": "app.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "npm run check:ui",
+    "check:ui": "node tools/ui/check_fleet.js && node tools/ui/check_slang_panel.js",
+    "check:llm": "node tools/ui/check_voice.js && node tools/ui/check_emulator.js"
   },
   "keywords": [],
   "author": "",
