@@ -141,6 +141,47 @@ curl -s -u admin:<пароль> -N --max-time 5 \
 location другой конфиг: `sudo nginx -T | grep -n 'fleet/stream'` (файлы из
 `sites-enabled/` и `conf.d/`).
 
+#### Пароля под рукой нет: временный юзер для замера
+
+Поток за Basic Auth меряется и без пароля владельца — временной записью в тот же
+файл, с бэкапом и откатом (проверено на стенде: `5` кадров за 5 с через nginx):
+
+```bash
+sudo cp /etc/nginx/.htpasswd_transgps /root/htpasswd.bak
+# -b: пароль аргументом, без TTY; -B: bcrypt (как остальные записи файла)
+sudo htpasswd -bB /etc/nginx/.htpasswd_transgps _sse_probe 'SseProbe-9f2c'
+curl -s -N --max-time 5 -u '_sse_probe:SseProbe-9f2c' \
+  "https://<домен>/api/fleet/stream?interval=1" | grep -c '^event: snapshot'   # ждём >= 3
+sudo cp /root/htpasswd.bak /etc/nginx/.htpasswd_transgps                       # ВЕРНУТЬ обязательно
+wc -l < /etc/nginx/.htpasswd_transgps                       # 1 — как было
+grep -c _sse_probe /etc/nginx/.htpasswd_transgps            # 0 — временного нет
+```
+
+Перезагрузка nginx после правки файла паролей не нужна: он читается на каждый
+запрос. Откат — именно `cp` бэкапа, а не `htpasswd -D`: так файл побитово
+прежний, и пароль владельца не задевается.
+
+#### Грабли: живой конфиг на сервере может быть старой ревизии
+
+`location = /api/fleet/stream` есть только в `deploy/nginx-emulator.conf`
+(шаблон) — на стенде его ставит отдельный шаг из §3. Если на VPS обновляли
+только образ (`docker compose up -d --build`), nginx остаётся **доревизионным**,
+и SSE идёт на одном `X-Accel-Buffering: no` от приложения, без страховки.
+Признак: `sudo nginx -T | grep -c 'proxy_buffering off'` → `0` (в свежем файле
+счётчик `2`: директива + упоминание в комментарии). Смотреть надо файл, а не
+только вывод `-T`:
+
+```bash
+grep -n 'fleet/stream' /etc/nginx/sites-available/transgps      # пусто = блока нет
+diff <(sed 's|/etc/letsencrypt/live/[^/]*|LIVE|g' /etc/nginx/sites-available/transgps) \
+     <(sed 's|/etc/letsencrypt/live/[^/]*|LIVE|g; s/server_name .*;/server_name D;/' deploy/nginx-emulator.conf)
+# ожидаемые отличия: комментарии + сам блок location = /api/fleet/stream
+```
+
+Обновлять — подстановкой домена (§3, шаг «обновите конфиг nginx»), не `cp`
+шаблона: иначе затрутся `server_name`/`ssl_certificate`. Перед `cp` бэкап
+живого файла, после — `nginx -t` и `systemctl reload nginx` (без простоя).
+
 ### Грабли ввода пароля (тут легко потерять полчаса)
 
 * `<пароль>` в примерах — **заполнитель**, а не пароль. Скопированная команда
