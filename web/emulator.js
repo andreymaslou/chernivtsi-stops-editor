@@ -759,6 +759,17 @@ function syncRouteChips() {
   if (!box) return;
   box.querySelectorAll('.route-chip').forEach((chip) => {
     chip.setAttribute('aria-pressed', String(!routeHidden(chip.dataset.key)));
+    // Колір точки: кнопки будуються ДО першого среза (з /api/manifest, де
+    // кольору немає) і список перебудовується лише при зміні кількості
+    // маршрутів — тому справжній колір лінії інакше не доходив до чипа, і всі
+    // 38 кнопок лишались синіми за замовчуванням. Оновлюємо фон на кожному
+    // кадрі, а пишемо в DOM лише при зміні (щоб не смикати layout дарма).
+    const meta = state.routeMeta.get(chip.dataset.key);
+    const dot = chip.querySelector('i');
+    if (meta && dot && dot.dataset.colour !== meta.colour) {
+      dot.style.background = meta.colour;
+      dot.dataset.colour = meta.colour;
+    }
   });
   syncRouteBulkButtons();
   syncRouteSourceMarks();
@@ -885,9 +896,12 @@ function applyRouteFilter() {
     if (!hidden) visible += 1;
   });
   updateFilterStatus(visible);
-  // Метки джерела живуть на тих самих чипах, що й фільтр: сріз прийшов —
-  // маршрут міг перейти від симулятора до трекера і навпаки.
-  syncRouteSourceMarks();
+  // Метки джерела, колір точки й крайні кнопки живуть на тих самих чипах, що й
+  // фільтр: сріз прийшов — маршрут міг перейти від симулятора до трекера і
+  // навпаки, і саме тут до чипа доходить справжній колір лінії. Викликаємо
+  // syncRouteChips (а не лише syncRouteSourceMarks) — всередині він робить і
+  // те, і те; запис у DOM відбувається лише при зміні значень.
+  syncRouteChips();
   return visible;
 }
 
