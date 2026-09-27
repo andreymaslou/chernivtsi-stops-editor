@@ -552,6 +552,20 @@ body.zoom-out .veh-sim-badge { display: none; }
 /* Схований маршрут: пунктир і приглушення — це фільтр, а не «маршруту немає». */
 #emu-panel .route-chip[aria-pressed="false"] { opacity: .4; border-style: dashed; }
 
+/* Джерело маршруту прямо на кнопці: зелена метка GPS — маршрут іде від живого
+   трекера перевізника, сіра — трекер є, але дані старші за 5 хв («за
+   розкладом»). Порожньо — віртуальні ТС (на карті вони з бейджем SIM).
+   Власник звіряє карту з живим сайтом перевізника одним поглядом. */
+#emu-panel .route-chip-src { font-size: 9px; font-weight: 700; letter-spacing: .4px; }
+#emu-panel .route-chip-src:empty { display: none; }
+#emu-panel .route-chip.is-gps { border-color: #2f7d4f; }
+#emu-panel .route-chip.is-gps .route-chip-src { color: #4ade80; }
+#emu-panel .route-chip.is-stale { border-color: #4a5058; }
+#emu-panel .route-chip.is-stale .route-chip-src { color: #9aa4b2; }
+
+/* Легенда метки — під списком маршрутів (там же, де счётчик фільтра). */
+#emu-panel #fleet-routes-legend { display: block; margin-top: 4px; }
+
 /* Крайні режими фільтра («усі» / «жодного») несуть стан у aria-pressed: чипи
    показують деталі, а ці дві кнопки — сам режим. Ободок + акцент, бо
    приглушення двох кнопок одразу читалося б як «обидві вимкнені». */

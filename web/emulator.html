@@ -242,6 +242,17 @@
     /* Скрытый маршрут: пунктир + приглушение — сразу видно, что это фильтр. */
     .route-chip[aria-pressed="false"] { opacity: .4; border-style: dashed; }
 
+    /* Джерело маршруту прямо на кнопці: зелена метка GPS — маршрут іде від
+       живого трекера перевізника, сіра — трекер є, але дані старші за 5 хв
+       («за розкладом»). Порожньо — віртуальні ТС (на карті вони з бейджем SIM). */
+    .route-chip-src { font-size: 9px; font-weight: 700; letter-spacing: .4px; }
+    .route-chip-src:empty { display: none; }
+    .route-chip.is-gps { border-color: #2f7d4f; }
+    .route-chip.is-gps .route-chip-src { color: #4ade80; }
+    .route-chip.is-stale { border-color: #4a5058; }
+    .route-chip.is-stale .route-chip-src { color: #9aa4b2; }
+    #fleet-routes-legend { display: block; margin-top: 4px; }
+
     /* Крайні режими фільтра видно на самій кнопці: інакше на мобільному
        не зрозуміти, чому «ТС не їдуть» — фільтр це чи поломка парку. */
     #fleet-route-all[aria-pressed="true"],
@@ -527,6 +538,9 @@
       <span id="fleet-filter-status" class="fleet-kicker"></span>
     </div>
     <div id="fleet-routes" class="fleet-routes" aria-label="Фільтр маршрутів"></div>
+    <!-- Легенда метки джерела (текст підставляє emulator.js): на яких маршрутах
+         зараз реальні ТС перевізника, а де симулятор. -->
+    <span id="fleet-routes-legend" class="fleet-kicker">метка GPS — маршрут на даних перевізника</span>
 
     <div id="fleet-status" class="status"></div>
 
@@ -556,7 +570,7 @@
   <div id="map" class="map"></div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script src="emulator.js?v=2026-09-27e"></script>
+  <script src="emulator.js?v=2026-09-27f"></script>
 </body>
 
 </html>

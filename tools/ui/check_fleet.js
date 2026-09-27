@@ -1,6 +1,6 @@
 /*
  * Дешёвая проверка живого парка в браузере: поток (SSE), кнопки маршрутов,
- * источник «симулятор», режим «рух».
+ * метки джерела на них (GPS/sim), источник «симулятор», режим «рух».
  *
  * Зачем отдельно от tools/ui/check_emulator.js: тот прогоняет ВЕСЬ сценарий
  * эмулятора, включая /api/plan, — то есть тратит ключ OpenRouter. Здесь только
@@ -164,6 +164,48 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     feed: (document.getElementById('fleet-feed') || {}).textContent || '',
   }));
   console.log('«рух»:', play.label.trim(), '|', play.status.trim(), '| канал:', play.feed.trim());
+
+  // Метки джерела на чипах маршрутів: локально трекера немає, тому всі
+  // маршрути з машинами — «sim», решта — «none». Сума мусить дати 38 кнопок.
+  const marksSim = await page.evaluate(() => ({
+    gps: document.querySelectorAll('.route-chip[data-source="gps"]').length,
+    sim: document.querySelectorAll('.route-chip[data-source="sim"]').length,
+    none: document.querySelectorAll('.route-chip[data-source="none"]').length,
+    legend: (document.getElementById('fleet-routes-legend') || {}).textContent || '',
+  }));
+  console.log('метки без трекера: GPS', marksSim.gps, '| sim', marksSim.sim,
+    '| none', marksSim.none, '| легенда:', marksSim.legend.trim());
+
+  // GPS-стан метки: трекера локально немає, тому підмішуємо змішаний сріз
+  // через публічний міні-API (той самий applySnapshot, що й кадр потоку).
+  const marksGps = await page.evaluate(() => {
+    const chip = document.querySelector('.route-chip[data-source="sim"]');
+    if (!chip) return null;
+    const key = chip.dataset.key;
+    const type = key.slice(0, key.indexOf('|'));
+    const label = key.slice(key.indexOf('|') + 1);
+    window.Emulator.applySnapshot({
+      source: 'mixed',
+      vehicles: [{
+        vehicle_type: type, route_label: label, board_number: 'TEST-001',
+        lat: 48.2921, lon: 25.9358, is_live: true, speed_kmh: 18.4,
+        heading_deg: 100, source: 'real',
+      }],
+    });
+    const after = document.querySelector('.route-chip[data-key="' + key + '"]');
+    return {
+      key: key,
+      source: after ? after.dataset.source : '',
+      badge: after ? (after.querySelector('.route-chip-src') || {}).textContent : '',
+      gpsChecked: after ? after.classList.contains('is-gps') : false,
+      gps: document.querySelectorAll('.route-chip[data-source="gps"]').length,
+      sim: document.querySelectorAll('.route-chip[data-source="sim"]').length,
+      legend: (document.getElementById('fleet-routes-legend') || {}).textContent || '',
+    };
+  });
+  console.log('підмішаний real:', marksGps && marksGps.key, '-> метка', marksGps && marksGps.badge,
+    '| data-source', marksGps && marksGps.source, '| GPS-кнопок', marksGps && marksGps.gps,
+    '| легенда:', marksGps ? marksGps.legend.trim() : '(нема)');
   await page.screenshot({ path: path.join(__dirname, 'out', 'fleet_filter.png') });
 
   console.log('помилок консолі:', errors.length, errors.join(' | '));
@@ -178,6 +220,12 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     none.pressed === 'true' && all.pressed === 'true' && hintOff.length > 0 && hintOn === '' &&
     // ровно 38 кнопок: алиасы перевозчика («3/3a») не должны давать вторую кнопку
     grid.count === 38 && grid.first === 'bus|1' && grid.last === 'trolley|8' &&
+    // метки джерела: без трекера чипи з машинами — sim, у легенді «жодного»;
+    // GPS-метка з'являється, коли підмішали real-сріз (window.Emulator)
+    marksSim.gps === 0 && marksSim.sim > 0 &&
+    marksSim.gps + marksSim.sim + marksSim.none === 38 && /жодного/.test(marksSim.legend) &&
+    marksGps && marksGps.source === 'gps' && marksGps.badge === 'GPS' && marksGps.gpsChecked &&
+    marksGps.gps === 1 && /1 із 38/.test(marksGps.legend) &&
     /пауза/.test(play.label) && errors.length === 0;
   console.log(ok ? 'OK: потік і фільтр працюють у браузері.' : 'FAIL');
   process.exit(ok ? 0 : 1);

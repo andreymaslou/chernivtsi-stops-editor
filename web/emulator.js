@@ -717,6 +717,14 @@ function renderRouteChips() {
       dot.style.background = meta.colour;
       chip.appendChild(dot);
       chip.appendChild(document.createTextNode(meta.label));
+      // Метка джерела (GPS / порожньо): вміст і клас ставить
+      // syncRouteSourceMarks() — список не перебудовуємо на кожен кадр потоку.
+      const mark = document.createElement('span');
+      mark.className = 'route-chip-src';
+      chip.appendChild(mark);
+      // Базовий підпис зберігаємо: sync дописує до нього джерело, і без
+      // data-атрибута title роздувався б на кожному кадрі.
+      chip.dataset.baseTitle = chip.title;
       chips.appendChild(chip);
     });
     group.appendChild(head);
@@ -753,6 +761,94 @@ function syncRouteChips() {
     chip.setAttribute('aria-pressed', String(!routeHidden(chip.dataset.key)));
   });
   syncRouteBulkButtons();
+  syncRouteSourceMarks();
+}
+
+/**
+ * Метка джерела на кнопці маршруту: чи йде він від живого трекера.
+ *
+ * Правило злиття — серверне (`merge_fleet`, `main.py`): якщо на маршруті є
+ * свіжа реальна машина, весь маршрут береться з трекера; інакше його заповнює
+ * симулятор. Тому для метки досить однієї машини зі `source: "real"`, але
+ * «живість» беремо з `is_live`: трекер віддає й застарілий трек («за
+ * розкладом»), і це окремий стан — сіра метка, а не зелена.
+ */
+const ROUTE_MARKS = {
+  gps: { text: 'GPS', note: 'маршрут із живим трекером перевізника' },
+  stale: { text: 'GPS', note: 'трекер є, але дані старші за 5 хв («за розкладом»)' },
+  sim: { text: '', note: 'віртуальні ТС: реального GPS на маршруті немає' },
+  none: { text: '', note: 'на маршруті зараз немає ТС' },
+};
+
+/**
+ * Джерело по кожному маршруту: скільки машин якого джерела і чи є жива.
+ * Рахуємо ЗАВЖДИ по всьому срізу (навіть приховані фільтром) — метка описує
+ * маршрут, а не те, що зараз видно на карті.
+ */
+function routeSourceStates() {
+  const states = new Map();
+  state.vehicles.forEach((entry) => {
+    const key = routeKey(entry.vehicle);
+    const stat = states.get(key) || { real: 0, liveReal: 0, sim: 0 };
+    if (vehicleSource(entry.vehicle) === 'sim') stat.sim += 1;
+    else {
+      stat.real += 1;
+      if (entry.vehicle.is_live) stat.liveReal += 1;
+    }
+    states.set(key, stat);
+  });
+  return states;
+}
+
+/**
+ * Метки на кнопках + легенда. Зветься з кожним срізом парка (не лише при
+ * перемальовуванні списку): власник звіряє карту з живим сайтом перевізника, і
+ * «на яких маршрутах є реальні ТС» має читатися одним поглядом.
+ */
+function syncRouteSourceMarks() {
+  const box = document.getElementById('fleet-routes');
+  if (!box) return;
+  const states = routeSourceStates();
+  let gps = 0;
+  let stale = 0;
+  box.querySelectorAll('.route-chip').forEach((chip) => {
+    const stat = states.get(chip.dataset.key);
+    let mark = 'none';
+    if (stat) {
+      if (stat.liveReal) { mark = 'gps'; gps += 1; }
+      else if (stat.real) { mark = 'stale'; stale += 1; }
+      else mark = 'sim';
+    }
+    const info = ROUTE_MARKS[mark];
+    chip.dataset.source = mark;
+    ['gps', 'stale', 'sim'].forEach((name) => {
+      chip.classList.toggle('is-' + name, name === mark);
+    });
+    const badge = chip.querySelector('.route-chip-src');
+    if (badge) {
+      badge.textContent = info.text;
+      badge.title = info.note;
+    }
+    chip.title = (chip.dataset.baseTitle || '') + ' · ' + info.note;
+  });
+  syncRoutesLegend(gps, stale);
+}
+
+/** Легенда під списком: скільком маршрутам реальний GPS віддав машини. */
+function syncRoutesLegend(gps, stale) {
+  const el = document.getElementById('fleet-routes-legend');
+  if (!el) return;
+  const total = state.routeMeta.size;
+  const staleNote = stale ? ' (+' + stale + ' «за розкладом»)' : '';
+  if (gps) {
+    el.textContent = 'метка GPS — маршрут на даних перевізника: ' +
+      gps + ' із ' + total + staleNote;
+  } else if (total && state.vehicles.size) {
+    el.textContent = 'метка GPS — маршрут на даних перевізника: зараз жодного, ' +
+      'увесь парк віртуальний' + staleNote;
+  } else {
+    el.textContent = 'метка GPS — маршрут на даних перевізника';
+  }
 }
 
 function modelDate() {
@@ -789,6 +885,9 @@ function applyRouteFilter() {
     if (!hidden) visible += 1;
   });
   updateFilterStatus(visible);
+  // Метки джерела живуть на тих самих чипах, що й фільтр: сріз прийшов —
+  // маршрут міг перейти від симулятора до трекера і навпаки.
+  syncRouteSourceMarks();
   return visible;
 }
 
@@ -2171,6 +2270,10 @@ window.Emulator = {
   // сверяет оффер и активный вариант, не роясь в приватном состоянии.
   variantOffer: () => state.variantOffer,
   activeVariantId: () => state.activeVariantId,
+  // applySnapshot — той самий шлях, що кадр потоку. UI-проверка підмішує
+  // змішаний сріз (real + sim) і перевіряє метку GPS на чипах маршрутів: на
+  // локальному стенді трекера немає, і GPS-стан інакше не відтворити.
+  applySnapshot,
 };
 
 })(); // конец IIFE: внутренние имена не текут в глобальную область редактора
