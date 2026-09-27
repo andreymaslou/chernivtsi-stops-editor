@@ -478,3 +478,73 @@ body.zoom-out .veh-sim-badge { display: none; }
   0%, 60%, 100% { transform: translateY(0); }
   30% { transform: translateY(-3px); }
 }
+
+/* --- Фільтр парку: джерело (сегменти) і кнопки маршрутів -------------------
+ *
+ * Розмітка — у панелі (web/editor.html, копія з emulator.html: id збігаються).
+ * Логіка — web/emulator.js (setFleetMode / renderRouteChips / toggleRoute).
+ * Стилі скоупимо під #emu-panel: глобальні `button { padding: 9px 14px }` з
+ * цього ж файлу зробили б із сегментів і чипів «піґулки» в пів екрана.
+ */
+#emu-panel .fleet-kicker { color: var(--emu-muted); font-size: 12px; }
+
+#emu-panel .seg {
+  display: inline-flex;
+  border: 1px solid #333941;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+#emu-panel .seg button {
+  background: var(--emu-panel2);
+  color: var(--emu-text);
+  border: 0;
+  border-radius: 0;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+#emu-panel .seg button + button { border-left: 1px solid #333941; }
+#emu-panel .seg button[aria-pressed="true"] { background: var(--emu-accent); color: #fff; }
+
+#emu-panel .fleet-routes {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+  max-height: 148px;   /* 38 маршрутів: список скролиться, панель не росте */
+  overflow-y: auto;
+  border: 1px solid #2b3037;
+  border-radius: 8px;
+  padding: 6px 8px;
+}
+
+#emu-panel .fleet-routes-group { display: flex; gap: 8px; align-items: flex-start; }
+#emu-panel .fleet-routes-head { color: var(--emu-muted); font-size: 11px; padding-top: 5px; min-width: 62px; }
+#emu-panel .fleet-routes-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+
+#emu-panel .route-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: transparent;
+  color: var(--emu-text);
+  border: 1px solid #3a4048;
+  border-radius: 12px;
+  padding: 3px 8px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+#emu-panel .route-chip i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--emu-accent);
+}
+
+/* Схований маршрут: пунктир і приглушення — це фільтр, а не «маршруту немає». */
+#emu-panel .route-chip[aria-pressed="false"] { opacity: .4; border-style: dashed; }

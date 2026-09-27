@@ -188,6 +188,60 @@
       font-size: 13px;
     }
 
+    /* Фільтр парку: сегменти «джерело» + кнопки маршрутів (§ завдання:
+       вечером взять симулятор и посмотреть выбранные направления).
+       Логика — web/emulator.js (setFleetMode/renderRouteChips). */
+    .fleet-kicker { color: var(--muted); font-size: 12px; }
+
+    .seg {
+      display: inline-flex;
+      border: 1px solid #333941;
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .seg button {
+      background: var(--panel2);
+      color: var(--text);
+      border: 0;
+      border-radius: 0;
+      padding: 6px 10px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .seg button + button { border-left: 1px solid #333941; }
+    .seg button[aria-pressed="true"] { background: var(--accent); color: #fff; }
+
+    .fleet-routes {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin-top: 6px;
+      max-height: 148px;   /* 38 маршрутов: список скроллится, панель не растёт */
+      overflow-y: auto;
+      border: 1px solid #2b3037;
+      border-radius: 8px;
+      padding: 6px 8px;
+    }
+    .fleet-routes-group { display: flex; gap: 8px; align-items: flex-start; }
+    .fleet-routes-head { color: var(--muted); font-size: 11px; padding-top: 5px; min-width: 62px; }
+    .fleet-routes-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+    .route-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      background: transparent;
+      color: var(--text);
+      border: 1px solid #3a4048;
+      border-radius: 12px;
+      padding: 3px 8px;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .route-chip i { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+    /* Скрытый маршрут: пунктир + приглушение — сразу видно, что это фильтр. */
+    .route-chip[aria-pressed="false"] { opacity: .4; border-style: dashed; }
+
     /* Маркер ТС: вся вёрстка стрелки — в vehicleIcon() (web/emulator.js),
        здесь только состояния из спецификации дизайна: live / planned /
        stopped (пульс обводки) / target (золотой пульс «сідати сюди»). */
@@ -441,6 +495,28 @@
       <button id="fleet-now" class="secondary">зараз</button>
       <button id="fleet-play" class="secondary" disabled>▶ рух</button>
     </div>
+    <!-- Джерело парку і фільтр маршрутів: днём — живий GPS, вечером (машины в
+         депо) — симулятор, плюс выбранные направления, чтобы смотреть, как он
+         отработал. Логика — emulator.js (setFleetMode/toggleRoute),
+         стили — .fleet-* / .seg / .route-chip ниже. -->
+    <div class="row" style="margin-top:6px; align-items:center;">
+      <span class="fleet-kicker">джерело:</span>
+      <div class="seg" id="fleet-source" role="group" aria-label="Джерело парку">
+        <button type="button" data-source="auto">авто</button>
+        <button type="button" data-source="gps">GPS</button>
+        <button type="button" data-source="sim">симулятор</button>
+      </div>
+      <span id="fleet-feed" class="fleet-kicker"></span>
+    </div>
+    <div class="row" style="margin-top:6px; align-items:center;">
+      <span class="fleet-kicker">маршрути:</span>
+      <button type="button" id="fleet-route-all" class="secondary">усі</button>
+      <button type="button" id="fleet-route-none" class="secondary">жодного</button>
+      <label class="toggle"><input type="checkbox" id="fleet-trolley" /> тролейбуси</label>
+      <span id="fleet-filter-status" class="fleet-kicker"></span>
+    </div>
+    <div id="fleet-routes" class="fleet-routes" aria-label="Фільтр маршрутів"></div>
+
     <div id="fleet-status" class="status"></div>
 
     <div id="status" class="status">готовий до роботи</div>
@@ -469,7 +545,7 @@
   <div id="map" class="map"></div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script src="emulator.js?v=2026-09-25b"></script>
+  <script src="emulator.js?v=2026-09-27d"></script>
 </body>
 
 </html>

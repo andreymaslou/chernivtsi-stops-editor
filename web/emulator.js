@@ -39,6 +39,17 @@ const state = {
   modelNow: null,      // «машина часу»: ISO без секунд, null = реальное время
   fleetTimer: null,
   animFrame: null,
+  // Живий парк: потік (SSE) і фільтр «джерело/маршрути» — блок нижче.
+  fleetMode: 'auto',        // джерело парку: auto | gps | sim (source у запиті)
+  stream: null,             // EventSource потоку /api/fleet/stream (null у «рух»)
+  streamBroken: false,      // потік не піднявся — працюємо поллінгом /api/live
+  pollTimer: null,          // фолбек-полінг, коли SSE недоступний
+  hiddenRoutes: new Set(),  // ключі «тип|маршрут», прибрані кнопками фільтра
+  showTrolley: false,       // тролейбуси в ефірі: за замовчуванням не просимо
+  routeMeta: new Map(),     // ключ -> {type,label,colour}: кнопки маршрутів
+  routeAliases: new Map(),  // «аліас перевізника» -> канонічний ключ кнопки
+  renderedRoutes: -1,       // скільки маршрутів уже намальовано кнопками
+  animMs: 900,              // мс плавного переїзду (у потоці — до 4.5 с)
   // План маршруту: останній ответ сервера и слои по шагам. Нужны, чтобы
   // «крок плану» в тексте можно было связать с его линией на карте.
   lastPlan: null,
@@ -370,7 +381,10 @@ function upsertVehicle(vehicle) {
     const marker = L.marker(point, { icon: vehicleIcon(vehicle), zIndexOffset: 200 })
       .bindPopup(vehiclePopup(vehicle))
       .addTo(vehicleLayer);
-    entry = { marker, vehicle, from: L.latLng(point), to: null, t0: now };
+    entry = {
+      marker, vehicle, from: L.latLng(point), to: null, t0: now,
+      hidden: false,   // стан фільтра маршрутів (false — маршрут показано)
+    };
     state.vehicles.set(key, entry);
   } else {
     // Двигаемся от текущего положения (возможно, ещё в середине анимации) к новому.
@@ -402,7 +416,7 @@ function ensureAnimation() {
     let pending = false;
     state.vehicles.forEach((entry) => {
       if (!entry.to) return;
-      const t = Math.min(1, (now - entry.t0) / ANIM_MS);
+      const t = Math.min(1, (now - entry.t0) / glideMs());
       entry.marker.setLatLng([
         entry.from.lat + (entry.to.lat - entry.from.lat) * t,
         entry.from.lng + (entry.to.lng - entry.from.lng) * t,
@@ -422,6 +436,9 @@ function updateFleetStatus(counts) {
   let planned = 0;
   let sim = 0;
   state.vehicles.forEach((entry) => {
+    // Приховані фільтром маршрутів машини на карті відсутні: рахуємо лише
+    // видимі, інакше цифра не сходилася б з тим, що бачить користувач.
+    if (entry.hidden) return;
     if (entry.vehicle.is_live) live += 1;
     else planned += 1;
     if (vehicleSource(entry.vehicle) === 'sim') sim += 1;
@@ -442,30 +459,213 @@ function updateFleetStatus(counts) {
     (state.fleetOn ? '' : ' · парк вимкнено');
 }
 
-/** Полный снимок парка: /api/live (с «машиной часу», если время задано). */
-async function loadFleet() {
+// ---------------------------------------------------------------------------
+// Парк: потік (SSE), джерело парку і фільтр маршрутів
+// ---------------------------------------------------------------------------
+//
+// /api/fleet/stream віддає той самий JSON, що /api/live, але потоком: одне
+// довге з'єднання (EventSource) замість поллінгу — карта «живе» сама, без
+// кліку, а nginx не тримає зайвих запросів. «Машина часу» лишається на
+// поллінгу: там модельное время меняется каждый тик, а кадри потоку
+// привязані до одного now.
+//
+// Джерело (auto / GPS / симулятор) і фільтр маршрутів — на КЛІЄНТІ: сервер
+// шле весь парк, а кнопки ховають/показують машини без перезапиту срезів.
+// Це те, що потрібно власнику ввечері: взяти симулятор і подивитись, як він
+// відпрацював на конкретних напрямках.
+
+const STREAM_INTERVAL_MS = 5000;   // темп опроса перевозчика (live_layer)
+const STREAM_GLIDE_MS = 4500;      // плавний переїзд між кадрами потоку
+const FLEET_MODES = ['auto', 'gps', 'sim'];
+const FLEET_MODE_HINT = {
+  auto: 'джерело: авто (GPS + симулятор)',
+  gps: 'джерело: лише GPS перевізника',
+  sim: 'джерело: лише симулятор',
+};
+
+/**
+ * Ключ маршруту для фільтра: тип + підпис («bus|5», «trolley|3»).
+ *
+ * Канонізація по /api/manifest: перевізник і срез кличуть один маршрут
+ * по-різному («3» в манифесте против «3/3a» в графе и GPS), а кнопка в нього
+ * має бути ОДНА — інакше фільтр ховає лише половину машин лінії. Аліаси
+ * збираються з live_names (state.routeAliases) у loadManifest(); поки
+ * манифеста немає, ключ лишається сирим — поведінка як до цієї правки.
+ */
+function canonicalRouteKey(type, label) {
+  const raw = String(type) + '|' + String(label);
+  return state.routeAliases.get(raw) || raw;
+}
+
+function routeKey(vehicle) {
+  return canonicalRouteKey(
+    vehicle.vehicle_type || '?',
+    vehicle.route_label || vehicle.route_name || '?',
+  );
+}
+
+/** Мс плавного переїзду: у потоці кадри рідші, тому їдемо довше. */
+function glideMs() {
+  return state.animMs || ANIM_MS;
+}
+
+/**
+ * Параметри среза парка: джерело, типи ТС і (в «машині часу») момент.
+ *
+ * Тролейбуси за замовчуванням НЕ просимо: у перевізника живий охват нульовий
+ * (1 машина, §3.5), а в ефірі парку власнику потрібні автобуси; тролейбуси
+ * вмикаються галочкою → vehicle_types=bus,trolley. Фільтр саме на запиті, а
+ * не в API: /api/live і /api/manifest лишаються чесними для RN-клієнта, а
+ * манифест — whitelist для збірки графа (graph_layer.py:729).
+ */
+function fleetParams() {
   const params = new URLSearchParams();
+  params.set('source', state.fleetMode);
+  params.set('only_fresh', 'false');  // «за розкладом» теж показуємо (сірим)
+  params.set('vehicle_types', state.showTrolley ? 'bus,trolley' : 'bus');
   if (state.modelNow) params.set('now', state.modelNow);
-  params.set('only_fresh', 'false');  // «за розкладом» тоже показываем (серым)
+  return params;
+}
+
+/** Один снимок парка на карту — спільний шлях для потоку і поллінгу. */
+function applySnapshot(data) {
+  state.fleetSource = String(data.source || '');
+  rememberRoutes(data.vehicles || []);
+  if (state.routeMeta.size !== state.renderedRoutes) renderRouteChips();
+  const vehicles = (data.vehicles || []).filter((v) => !v.in_depo);
+  const seen = new Set();
+  vehicles.forEach((vehicle) => {
+    if (upsertVehicle(vehicle)) seen.add(vehicleKey(vehicle));
+  });
+  pruneVehicles(seen);
+  applyRouteFilter();
+  ensureAnimation();
+  updateFleetStatus(data.counts);
+}
+
+/** Снимок поллінгом: режим «рух» (модельний час іде) і фолбек потоку. */
+async function loadFleet() {
   try {
-    const res = await fetch('/api/live?' + params.toString());
+    const res = await fetch('/api/live?' + fleetParams().toString());
     if (!res.ok) throw new Error('HTTP ' + res.status);
-    const data = await res.json();
-    // Кореневе джерело знімка: у mixed кожна машина несе своє поле source,
-    // а в моно-режимі воно одне для всього парку — бейдж «SIM» малюється по ньому.
-    state.fleetSource = String(data.source || '');
-    const vehicles = (data.vehicles || []).filter((v) => !v.in_depo);
-    const seen = new Set();
-    vehicles.forEach((vehicle) => {
-      if (upsertVehicle(vehicle)) seen.add(vehicleKey(vehicle));
-    });
-    pruneVehicles(seen);
-    ensureAnimation();
-    updateFleetStatus(data.counts);
+    applySnapshot(await res.json());
   } catch (err) {
     updateFleetStatus(null);
     setStatus('не вдалось завантажити живий парк: ' + err.message, 'error');
   }
+}
+
+/** Живий парк: сервер сам пушіть кадри (SSE). */
+function openFleetStream() {
+  closeFleetStream();
+  state.animMs = STREAM_GLIDE_MS;
+  const stream = new EventSource('/api/fleet/stream?' + fleetParams().toString());
+  state.stream = stream;
+  setFleetFeedNote('потік · чекаю перший кадр…');
+
+  stream.addEventListener('open', () => {
+    setFleetFeedNote('потік · оновлення кожні ' + Math.round(STREAM_INTERVAL_MS / 1000) + ' с');
+  });
+  stream.addEventListener('snapshot', (event) => {
+    try {
+      applySnapshot(JSON.parse(event.data));
+    } catch (err) {
+      setFleetFeedNote('потік: зіпсований кадр (' + err.message + ')');
+    }
+  });
+  // Подія failed приходить, коли срез не зібрався вже ВСЕРЕДИНІ потоку:
+  // кадри до цього клієнт отримав, з'єднання живе — це не розрив.
+  stream.addEventListener('failed', (event) => {
+    setFleetFeedNote('потік: срез не зібрано (' + (event.data || '') + ')');
+  });
+  stream.addEventListener('error', () => {
+    // CLOSED означає, що автоперепідключення не буде (4xx/5xx або проксі) —
+    // тоді чесно переходимо на полінг, щоб карта не застигла до перезагрузки.
+    if (stream.readyState === EventSource.CLOSED) {
+      state.streamBroken = true;
+      closeFleetStream();
+      setFleetFeedNote('потік недоступний — полінг /api/live');
+      if (state.fleetOn && !state.playing) startFleetFeed();
+    }
+  });
+}
+
+function closeFleetStream() {
+  if (state.stream) {
+    state.stream.close();
+    state.stream = null;
+  }
+}
+
+/** Вибрати «привід» парку: потік (SSE), «рух» або фолбек-полінг. */
+function startFleetFeed() {
+  stopFleetFeed();
+  if (!state.fleetOn && !state.playing) return;
+  if (state.playing) {
+    // «Машина часу»: модельное время меняется каждый тик — это перезапрос,
+    // кадри потоку привязані до одного now и тут не годятся.
+    state.animMs = ANIM_MS;
+    state.fleetTimer = setInterval(fleetTick, FLEET_TICK_MS);
+    setFleetFeedNote('«рух» · полінг /api/live кожні ' + (FLEET_TICK_MS / 1000) + ' с');
+    loadFleet();
+    return;
+  }
+  if (state.streamBroken || typeof EventSource === 'undefined') {
+    // Потік недоступний (старый браузер, проксі без SSE): тот же срез, но
+    // полінгом — карта живе, просто з більшим оверхедом на сервері.
+    state.animMs = ANIM_MS;
+    state.pollTimer = setInterval(loadFleet, STREAM_INTERVAL_MS);
+    setFleetFeedNote('полінг /api/live кожні ' + Math.round(STREAM_INTERVAL_MS / 1000) + ' с');
+    loadFleet();
+    return;
+  }
+  openFleetStream();
+}
+
+function stopFleetFeed() {
+  closeFleetStream();
+  if (state.fleetTimer) { clearInterval(state.fleetTimer); state.fleetTimer = null; }
+  if (state.pollTimer) { clearInterval(state.pollTimer); state.pollTimer = null; }
+}
+
+/** Кнопки «джерело»: авто / GPS / симулятор. */
+function setFleetMode(mode) {
+  if (FLEET_MODES.indexOf(mode) === -1) return;
+  state.fleetMode = mode;
+  renderSourceButtons();
+  setFleetFeedNote(FLEET_MODE_HINT[mode] || '');
+  startFleetFeed();   // нічого не робить, якщо парк вимкнено
+}
+
+function renderSourceButtons() {
+  const box = document.getElementById('fleet-source');
+  if (!box) return;
+  box.querySelectorAll('button[data-source]').forEach((button) => {
+    button.setAttribute('aria-pressed', String(button.dataset.source === state.fleetMode));
+  });
+}
+
+function setFleetFeedNote(text) {
+  const el = document.getElementById('fleet-feed');
+  if (el) el.textContent = text;
+}
+
+/** Маршрут у список кнопок фільтра (колір беремо зі среза). */
+function rememberRoute(source) {
+  const type = String(source.vehicle_type || '').trim().toLowerCase();
+  const label = String(source.route_label || source.route_name || '').trim();
+  if (!type || !label) return;
+  const key = canonicalRouteKey(type, label);
+  // На кнопці — канонічна підпис («3», а не «3/3a» зі среза): ярлик не має
+  // залежати від того, хто прислав машину (симулятор чи перевізник).
+  const shown = key.slice(type.length + 1) || label;
+  const colour = source.route_colour_hex ||
+    (state.routeMeta.get(key) || {}).colour || '#4f8cff';
+  state.routeMeta.set(key, { type: type, label: shown, colour: colour });
+}
+
+function rememberRoutes(vehicles) {
+  (Array.isArray(vehicles) ? vehicles : []).forEach(rememberRoute);
 }
 
 /** ISO без секунд — формат для /api/live?now= и для input[datetime-local]. */
@@ -475,8 +675,178 @@ function isoMinute(date) {
     'T' + pad(date.getHours()) + ':' + pad(date.getMinutes());
 }
 
+// ---------------------------------------------------------------------------
+// Фільтр маршрутів: кнопки в панелі, ховання машин на карті
+// ---------------------------------------------------------------------------
+//
+// Кнопки будуються з двох джерел: /api/manifest (38 активних маршрутів міста,
+// .agents/rules/active_routes.md) і среза парка (колір + маршрути, яких у
+// whitelist немає — тоді вони чесно видно замість «машини без кнопки»).
+
+const ROUTE_GROUP_TITLES = { bus: 'автобуси', trolley: 'тролейбуси', other: 'інші' };
+const ROUTE_KINDS = { bus: 'автобус ', trolley: 'тролейбус ' };
+
+/** Кнопки маршрутів: групи «автобуси/тролейбуси», колір і номер маршруту. */
+function renderRouteChips() {
+  const box = document.getElementById('fleet-routes');
+  if (!box) return;
+  const groups = { bus: [], trolley: [], other: [] };
+  state.routeMeta.forEach((meta) => {
+    (groups[meta.type] || groups.other).push(meta);
+  });
+  box.innerHTML = '';
+  ['bus', 'trolley', 'other'].forEach((type) => {
+    const items = groups[type].sort((a, b) =>
+      a.label.localeCompare(b.label, 'uk', { numeric: true }));
+    if (!items.length) return;
+    const group = document.createElement('div');
+    group.className = 'fleet-routes-group';
+    const head = document.createElement('span');
+    head.className = 'fleet-routes-head';
+    head.textContent = ROUTE_GROUP_TITLES[type];
+    const chips = document.createElement('div');
+    chips.className = 'fleet-routes-chips';
+    items.forEach((meta) => {
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      // data-key — тот же ключ, что routeKey() у машины: фильтр по нему.
+      chip.dataset.key = meta.type + '|' + meta.label;
+      chip.className = 'route-chip';
+      chip.title = (ROUTE_KINDS[type] || '') + meta.label;
+      const dot = document.createElement('i');
+      dot.style.background = meta.colour;
+      chip.appendChild(dot);
+      chip.appendChild(document.createTextNode(meta.label));
+      chips.appendChild(chip);
+    });
+    group.appendChild(head);
+    group.appendChild(chips);
+    box.appendChild(group);
+  });
+  state.renderedRoutes = state.routeMeta.size;
+  syncRouteChips();
+}
+
+/** aria-pressed на кнопках маршрутів = стан фільтра (DOM не перебудовуємо). */
+function syncRouteChips() {
+  const box = document.getElementById('fleet-routes');
+  if (!box) return;
+  box.querySelectorAll('.route-chip').forEach((chip) => {
+    chip.setAttribute('aria-pressed', String(!routeHidden(chip.dataset.key)));
+  });
+}
+
 function modelDate() {
   return state.modelNow ? new Date(state.modelNow) : new Date();
+}
+
+/**
+ * Маршрут приховано: або вручну кнопкою, або типом машини (поки галочка
+ * «тролейбуси» вимкнена). Тип — не окремий фільтр у списку: так нові
+ * тролейбусні ключі, що прийшли зі среза, теж одразу ховаються.
+ */
+function routeHidden(key) {
+  if (state.hiddenRoutes.has(key)) return true;
+  return !state.showTrolley && key.indexOf('trolley|') === 0;
+}
+
+/**
+ * Показати/сховати машини за фільтром маршрутів.
+ *
+ * Ховаємо зняттям маркера з шару (не opacity): схована машина не ловить клік
+ * попапом і не заважає дивитись вибрані напрямки. Запис у state.vehicles
+ * лишається — тому машина «оживає» миттєво, коли маршрут повертають кнопкою,
+ * без очікування наступного кадру.
+ */
+function applyRouteFilter() {
+  let visible = 0;
+  state.vehicles.forEach((entry) => {
+    const hidden = routeHidden(routeKey(entry.vehicle));
+    if (hidden !== entry.hidden) {
+      entry.hidden = hidden;
+      if (hidden) entry.marker.remove();
+      else entry.marker.addTo(vehicleLayer);
+    }
+    if (!hidden) visible += 1;
+  });
+  updateFilterStatus(visible);
+  return visible;
+}
+
+function updateFilterStatus(visible) {
+  const el = document.getElementById('fleet-filter-status');
+  if (!el) return;
+  const total = state.vehicles.size;
+  if (!total) { el.textContent = ''; return; }
+  const shown = visible === undefined ? total : visible;
+  el.textContent = shown === total ? 'усі ' + total : 'показано ' + shown + ' із ' + total;
+}
+
+/** Тумблер маршруту: показати/сховати його машини. */
+function toggleRoute(key) {
+  if (state.hiddenRoutes.has(key)) state.hiddenRoutes.delete(key);
+  else state.hiddenRoutes.add(key);
+  syncRouteChips();
+  applyRouteFilter();
+}
+
+/** «Усі» / «жодного»: швидка установка фільтра. */
+function setAllRoutes(visible) {
+  state.hiddenRoutes = visible ? new Set() : new Set(state.routeMeta.keys());
+  syncRouteChips();
+  applyRouteFilter();
+}
+
+/**
+ * Майстер-вимикач тролейбусів (галочка «тролейбуси» в панелі).
+ *
+ * Дві дії в одному місці: тип у запиті (vehicle_types) і видимість маркерів
+ * (routeHidden). За замовчуванням вимкнено — у перевізника живий охват
+ * тролейбусів нульовий (§3.5), а в ефірі парку потрібні автобуси.
+ */
+function setTrolleysVisible(on) {
+  state.showTrolley = !!on;
+  const box = document.getElementById('fleet-trolley');
+  if (box) box.checked = state.showTrolley;
+  syncRouteChips();
+  applyRouteFilter();
+  // vehicle_types у запиті змінився — перепіднімаємо потік (або полінг);
+  // якщо парк вимкнено, startFleetFeed() просто нічого не робить.
+  startFleetFeed();
+}
+
+/** Справочник активних маршрутів (38): кнопки на місці ще до вмикання парку. */
+async function loadManifest() {
+  try {
+    const res = await fetch('/api/manifest');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    ['bus', 'trolley'].forEach((type) => {
+      (data[type] || []).forEach((item) => {
+        const label = String(item.display_name || item.number || '').trim();
+        if (!label) return;
+        const canonical = type + '|' + label;
+        // Алиасы перевізника (live_names) + номер: у срезе маршрут приходить
+        // то як «3», то як «3/3a», а кнопка на лінію має бути одна.
+        [item.display_name, item.number]
+          .concat(item.live_names || [])
+          .forEach((alias) => {
+            const name = String(alias || '').trim();
+            if (name) state.routeAliases.set(type + '|' + name, canonical);
+          });
+        rememberRoute({ vehicle_type: type, route_label: label });
+      });
+    });
+    // Кнопки-аліаси, зібрані зі среза ДО манифеста, прибираємо: їхні машини
+    // тепер ідуть до канонічної кнопки (див. canonicalRouteKey).
+    Array.from(state.routeMeta.keys()).forEach((key) => {
+      const canonical = state.routeAliases.get(key);
+      if (canonical && canonical !== key) state.routeMeta.delete(key);
+    });
+    renderRouteChips();
+  } catch (err) {
+    setFleetFeedNote('довідник маршрутів недоступний: ' + err.message);
+  }
 }
 
 function syncTimeInput() {
@@ -493,12 +863,22 @@ function toggleFleet(on) {
 
   if (on) {
     syncTimeInput();
-    loadFleet();
+    // Потік приносить перший кадр одразу — карта оживає без тику полінг-таймера.
+    startFleetFeed();
   } else {
     setPlaying(false);
+    stopFleetFeed();   // після «паузи»: лишаємось вимкненими, поки не увімкнуть знову
     pruneVehicles(new Set());  // парк выключен — машин на карте быть не должно
     updateFleetStatus(null);
+    updateFilterStatus();
   }
+}
+
+/** Тик «руху»: сдвигаем модельное время на FLEET_STEP_MIN и берём снимок. */
+function fleetTick() {
+  state.modelNow = isoMinute(new Date(modelDate().getTime() + FLEET_STEP_MIN * 60000));
+  syncTimeInput();
+  loadFleet();
 }
 
 /** «Рух»: каждый тик сдвигаем модельное время и забираем новый снимок парка. */
@@ -511,15 +891,11 @@ function setPlaying(on) {
     if (!state.fleetOn) toggleFleet(true);
     if (!state.modelNow) state.modelNow = isoMinute(modelDate());
     syncTimeInput();
-    state.fleetTimer = setInterval(() => {
-      state.modelNow = isoMinute(new Date(modelDate().getTime() + FLEET_STEP_MIN * 60000));
-      syncTimeInput();
-      loadFleet();
-    }, FLEET_TICK_MS);
-    loadFleet();
-  } else if (state.fleetTimer) {
-    clearInterval(state.fleetTimer);
-    state.fleetTimer = null;
+    startFleetFeed();   // модельное время идёт → поллинг, кадры потока не годятся
+  } else if (state.fleetOn) {
+    startFleetFeed();   // «пауза» возвращает поток (парк ещё включён)
+  } else {
+    stopFleetFeed();
   }
   updateFleetStatus(null);
 }
@@ -1378,9 +1754,11 @@ document.getElementById('clear-btn').onclick = () => {
 
 function clearVehicles() {
   setPlaying(false);
+  stopFleetFeed();         // «Очистити карту» спиняє і потік, і фолбек-полінг
   pruneVehicles(new Set());
   setTargetBoards(null);   // цель снимается вместе с картой
   updateFleetStatus(null);
+  updateFilterStatus();
 }
 
 const fleetToggle = document.getElementById('fleet-toggle');
@@ -1394,7 +1772,8 @@ if (fleetNow) {
   fleetNow.onclick = () => {
     state.modelNow = null;
     syncTimeInput();
-    if (state.fleetOn) loadFleet();
+    // now уходит в параметры и потока, и поллинга — соединение переподнимаем.
+    if (state.fleetOn) startFleetFeed();
     updateFleetStatus(null);
   };
 }
@@ -1403,11 +1782,51 @@ const modelTime = document.getElementById('model-time');
 if (modelTime) {
   modelTime.onchange = (event) => {
     state.modelNow = event.target.value ? event.target.value : null;
-    if (state.fleetOn) loadFleet();
+    // «Машина часу»: у потока момент зашит в URL подписки — переподключаемся.
+    if (state.fleetOn) startFleetFeed();
     updateFleetStatus(null);
   };
   syncTimeInput();
 }
+
+// --- Фільтр парку: джерело (авто/GPS/симулятор) і маршрути -------------------
+//
+// Розмітка живе в панелі (emulator.html і editor.html, ідентичні id), логіка —
+// setFleetMode()/toggleRoute() вище. Кнопки маршрутів малюються одразу з
+// /api/manifest: фільтр вибирають ДО вмикання парку, а не після того, як на
+// карту вже висипались усі машини міста.
+
+const fleetSourceBox = document.getElementById('fleet-source');
+if (fleetSourceBox) {
+  fleetSourceBox.addEventListener('click', (event) => {
+    const button = event.target.closest('button[data-source]');
+    if (button) setFleetMode(button.dataset.source);
+  });
+}
+
+const fleetRoutesBox = document.getElementById('fleet-routes');
+if (fleetRoutesBox) {
+  fleetRoutesBox.addEventListener('click', (event) => {
+    const chip = event.target.closest('.route-chip');
+    if (chip) toggleRoute(chip.dataset.key);
+  });
+}
+
+const fleetRouteAll = document.getElementById('fleet-route-all');
+if (fleetRouteAll) fleetRouteAll.onclick = () => setAllRoutes(true);
+const fleetRouteNone = document.getElementById('fleet-route-none');
+if (fleetRouteNone) fleetRouteNone.onclick = () => setAllRoutes(false);
+
+// Галочка «тролейбуси» — майстер-вимикач типу (за замовчуванням вимкнена).
+const fleetTrolley = document.getElementById('fleet-trolley');
+if (fleetTrolley) {
+  fleetTrolley.checked = state.showTrolley;
+  fleetTrolley.onchange = (event) => setTrolleysVisible(event.target.checked);
+}
+
+renderSourceButtons();
+setFleetFeedNote(FLEET_MODE_HINT[state.fleetMode] || '');
+loadManifest();
 
 // --- Голосове введення (Web Speech API) -------------------------------------
 //

@@ -14,7 +14,7 @@
 | `https://<домен>/ui/emulator.html` | эмулятор отдельной страницей (оставлен: на него нацелен `tools/ui/check_emulator.js`) |
 | `https://<домен>/ui/admin.html` | админка: **сленговый редактор** + логи жалоб |
 | `https://<домен>/docs` | автогенерация API (Swagger) |
-| `https://<домен>/api/stops`, `/api/slang`, `/api/feedback`, `/api/route`, `/api/live` | API |
+| `https://<домен>/api/stops`, `/api/slang`, `/api/feedback`, `/api/route`, `/api/live`, `/api/manifest`, `/api/fleet/stream` | API (поток `/api/fleet/stream` — SSE: живой парк без клиентского поллинга) |
 
 Один контейнер отдаёт и API, и UI (статику берёт из папки `web/`).
 **Внимание:** наружу отдаётся только `web/` — корень репозитория не публикуется, иначе `.env` оказался бы в открытом доступе.
@@ -77,6 +77,48 @@ docker compose up -d --build
 
 Правки сленга и логи жалоб при этом **не теряются** — они лежат в `./data` на хосте.
 
+### Если версия первая «с потоком парка» — обновите конфиг nginx
+
+Поток парка (`/api/fleet/stream`, SSE) обязан идти без буферизации: с ней nginx
+копит кадры, и браузер не получает ни одного — снаружи это выглядит как «карта
+не обновляется». В конфиге репозитория для этого есть отдельный
+`location = /api/fleet/stream` с `proxy_buffering off`.
+
+⚠️ **Не копируйте `deploy/nginx-emulator.conf` на сервер целиком** (`cp`): в
+репозитории это шаблон с доменом `emulator.example.com` и путями к его
+сертификату. На VPS домен другой (`169.58.82.105.nip.io` или свой) — копия
+затрёт `server_name` и `ssl_certificate`, и HTTPS перестанет подниматься
+(`nginx -t` упадёт: нет `/etc/letsencrypt/live/emulator.example.com/…`).
+Правильно — подставить домен из ЖИВОГО конфига (скрипт `deploy/setup-https.sh`
+делает то же самое, строки 81 и 111):
+
+```bash
+cd /opt/transgps-emulator
+git pull
+
+# 1. Домен — из уже стоящего конфига (менять руками ничего не нужно)
+DOMAIN=$(sudo grep -m1 -oP 'server_name\s+\K[^;]+' /etc/nginx/sites-available/transgps)
+echo "домен стенда: ${DOMAIN}"
+
+# 2. Бэкап + подстановка домена в свежий шаблон
+sudo cp /etc/nginx/sites-available/transgps /etc/nginx/sites-available/transgps.bak-$(date +%F)
+sudo sed "s/emulator\.example\.com/${DOMAIN}/g" deploy/nginx-emulator.conf \
+  | sudo tee /etc/nginx/sites-available/transgps >/dev/null
+
+# 3. Проверка и мягкая перезагрузка (без простоя)
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+Идемпотентная альтернатива одной командой (сама подставит домен, перезапустит
+nginx и проверит продление сертификата): `sudo bash deploy/setup-https.sh ${DOMAIN}`.
+
+Проверка с любого компьютера (пароль Basic Auth — свой):
+
+```bash
+curl -N -u admin:<пароль> "https://<домен>/api/fleet/stream?once=true"  # один кадр SSE
+curl -u  admin:<пароль> "https://<домен>/api/manifest" | head -c 300    # 38 маршрутов
+```
+
 ---
 
 ## 4. Данные и бэкап
@@ -106,7 +148,7 @@ docker compose logs --tail=200 api_router                                # по�
 
 ## 6. Ограничения, о которых надо знать
 
-- **Защита настроена через Nginx.** Порт бэкенда в `docker-compose.yml` проброшен безопасно (`127.0.0.1:8000:8000`), так что он не торчит наружу. Внешний доступ идёт только через Nginx с настроенным Basic Auth, что закрывает доступ случайным пользователям. При переносе в React Native эту авторизацию потребуется заменить на токены.
+- **Защита настроена через Nginx.** Порт бэкенда в `docker-compose.yml` проброшен безопасно (`127.0.0.1:8000:8000`), так что он не торчит наружу. Внешний доступ идёт только через Nginx с настроенным Basic Auth, что закрывает доступ случайным пользователям. При переносе в React Native эту авторизацию потребуется заменить на токены. В конфиге nginx есть отдельный `location = /api/fleet/stream` с `proxy_buffering off` — без него SSE-поток живого парка до браузера не доходит.
 - **Ключ OpenRouter тратится API.** `/api/route` вызывает LLM и расходует `OPENROUTER_API_KEY`, а API доступен любому, кто знает адрес: держите лимит расхода в кабинете OpenRouter (или `docker compose stop`, когда не тестируете).
 - **DNS/домен** и `certbot` настраиваются один раз руками; после этого всё обновляется одной командой `docker compose up -d --build`.
 - **Логи жалоб пишутся на диск** контейнера/хоста, чистку делать вручную (`data/feedback/`), автопродление и ротация не настроены — на объёмах «сотни мелких JSON» это не проблема.

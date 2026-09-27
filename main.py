@@ -1,4 +1,4 @@
-﻿"""
+"""
 API-сервер голосового помощника транспортного приложения г. Черновцы.
 
 Стек: FastAPI + Uvicorn + OpenAI SDK (клиент подключён к OpenRouter) +
@@ -16,6 +16,7 @@ RapidFuzz (нечёткий поиск) + math (формула гаверсин�
     4. Результат — ID двух остановок + debug_info с типом найденного совпадения.
 """
 
+import asyncio
 import json
 import logging
 import math
@@ -25,13 +26,13 @@ import threading
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, AsyncIterator, Dict, List, Optional, Tuple, Union
 
 from time_utils import as_kyiv, format_kyiv, now_kyiv
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from openai import OpenAI
 from pydantic import BaseModel
@@ -64,6 +65,12 @@ STOPS_PATH = BASE_DIR / "stops.json"
 STREETS_PATH = BASE_DIR / "streets.json"
 GRAPH_PATH = BASE_DIR / "graph.json"
 SCHEDULE_PATH = BASE_DIR / "routes_schedule.json"
+
+# Whitelist активных маршрутов города (30 автобусных + 8 троллейбусных, правило
+# .agents/rules/active_routes.md). Отдаётся наружу эндпоинтом /api/manifest:
+# кнопки фильтра в эмуляторе должны показывать все городские маршруты, даже
+# если сегодня на них нет ни одной машины (трекер пустой, машины в депо).
+ROUTES_MANIFEST_PATH = BASE_DIR / "data" / "routes_manifest.json"
 
 # Журнал выбора варианта плана (поставка 1, §13.3 брифа): одна JSON-строка на
 # запрос. Анализ предпочтений идёт по этому потоку, поэтому кладём его рядом с
@@ -809,6 +816,22 @@ async def lifespan(app: FastAPI):
         )
     app_state["router"] = router
 
+    # Whitelist активных маршрутов (38) — для фильтра парка в эмуляторе
+    # (/api/manifest). Файл маленький и меняется вместе с данными графа,
+    # поэтому читаем один раз на старте; если его нет — эндпоинт честно
+    # ответит 503, а сервер поднимется (фильтр в UI просто будет пустым).
+    try:
+        app_state["routes_manifest"] = json.loads(
+            ROUTES_MANIFEST_PATH.read_text(encoding="utf-8")
+        )
+        logger.info(
+            "Справочник активных маршрутов прочитан: %d автобусов + %d троллейбусов.",
+            len(app_state["routes_manifest"].get("bus", [])),
+            len(app_state["routes_manifest"].get("trolley", [])),
+        )
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.warning("routes_manifest.json не прочитан (%s) — /api/manifest вернёт 503.", exc)
+
     # Источник данных о машинах (бриф §3): симулятор и/или реальный трекер.
     # В режиме auto опрашиваются оба, а сливаются они в merge_fleet() при
     # каждом запросе — тогда на маршрутах со свежим GPS видны реальные
@@ -1020,11 +1043,23 @@ def merge_fleet(
     Каждой машине добавляется поле `source: "real" | "sim"` — роутер
     прокидывает его в ногу плана, а UI рисует бейдж «SIM». Без этой
     пометки приоритет превращается в подмену (§3.3 п.3-4).
+
+    Исключение: троллейбусы никогда не берутся из реального GPS (§3.5).
+    Причина: у перевозчика trans-gps.cv.ua реально работает 1 тролл,
+    трек нестабильный, охват маршрутов нулевой. Симулятор держит все
+    8 троллейбусных маршрутов с правильным интервалом — он лучше.
+    Если в будущем GPS-охват троллейбусов вырастет — убрать проверку
+    `vtype == "trolley"` ниже.
     """
     real_keys: set = set()
     real_vehicles: List[Dict[str, Any]] = []
     for vehicle in real_fleet:
         real_vehicles.append(dict(vehicle, source="real"))
+        # Троллейбусы из реального GPS в приоритет НЕ идут: охват у
+        # перевозчика нулевой (1 машина), симулятор даёт полный парк.
+        vtype = str(vehicle.get("vehicle_type") or "").strip().lower()
+        if vtype == "trolley":
+            continue
         # Право забрать маршрут у симулятора — только у свежей машины не из
         # депо: старый трек и машины на смене — это дыра, её заполняем симом.
         if vehicle.get("is_live") and not vehicle.get("in_depo"):
@@ -1595,88 +1630,101 @@ def _parse_type_list(raw: Optional[str]) -> Optional[List[str]]:
     return types or None
 
 
-@app.get("/api/live")
-def get_live_vehicles(
-    only_fresh: bool = Query(
-        True,
-        description="Только ТС со свежим GPS-треком (<= 5 мин) и не в депо",
-    ),
-    include_depo: bool = Query(False, description="Включать ТС, стоящие в депо"),
-    routes: Optional[str] = Query(
-        None, description="Фильтр по routeId источника, напр. 6_9_12 или 6,9,12"
-    ),
-    vehicle_types: Optional[str] = Query(
-        None, description="Фильтр по типу ТС: bus, trolley"
-    ),
-    now: Optional[str] = Query(
-        None,
-        description="«Модельное время» ISO-8601: отдать парк на этот момент (только симулятор)",
-    ),
-):
+# ---------------------------------------------------------------------------
+# Срез парка для клиента: /api/live и поток /api/fleet/stream — одна сборка
+# ---------------------------------------------------------------------------
+
+# Источники парка, которые можно запросить на один запрос (кнопки «джерело»
+# в панели эмулятора). PARK_SOURCE в .env — тот же набор: это режим стенда.
+FLEET_SOURCES = ("auto", "gps", "sim")
+
+
+def _fleet_mode(source: Optional[str]) -> str:
     """
-    Живой GPS-слой: текущее положение транспорта Черновцов.
+    Источник парка для одного HTTP-запроса: явный source важнее .env.
 
-    Параметр now работает только для виртуального парка (PARK_SOURCE=sim):
-    он позволяет запросить парк на произвольный момент — проверить ночь,
-    утро или конец смены, не переводя часы на сервере. Реальный трекер
-    умеет отдавать только «сейчас» (§3.1).
+    Днём владелец смотрит живой GPS перевозчика, вечером, когда машины уже
+    в депо, — «як відпрацював симулятор» (там пусто у трекера, но не у
+    симулятора). Неизвестное значение — ошибка клиента, а не тихий откат на
+    .env: иначе UI показывал бы не то, что просил, и «пустой GPS» выглядел бы
+    как поломка сервера.
+    """
+    if source is None or not str(source).strip():
+        return PARK_SOURCE
+    mode = str(source).strip().lower()
+    if mode not in FLEET_SOURCES:
+        raise HTTPException(
+            status_code=400,
+            detail="Query 'source' must be one of " + ", ".join(FLEET_SOURCES),
+        )
+    return mode
 
-    Данные берутся с открытого сайта перевозчика trans-gps.cv.ua
-    (/map/tracker/), опрашиваются фоновой задачей раз в 5 секунд и
-    отдаются уже нормализованными:
 
-        speed / orientation -> float (в источнике это строки "000.0");
-        gpstime             -> плюс age_seconds и status (live/stale/depo);
-        routeId             -> подпись и цвет маршрута из /map/routes/1|2;
-        routeColour         -> CSS-имя, продублировано в hex для RN-клиента.
+def _parse_query_now(now: Optional[str]) -> Optional[datetime]:
+    """«Машина времени»: ISO-8601 из query → киевское время (иначе 400)."""
+    if not now:
+        return None
+    try:
+        return as_kyiv(datetime.fromisoformat(now.replace("Z", "+00:00")))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"Query 'now' is not ISO-8601: {exc}")
 
-    Поле counts считается ДО фильтров, поэтому клиент может показать
-    «живих: 12 із 26 машин». Промежуточного кэша нет: срез уже лежит
-    в памяти процесса и обновляется фоновым поллером.
 
-    При PARK_SOURCE=auto опрашиваются оба источника и срез сливается
-    (merge_fleet, §3): маршрут со свежей реальной машиной целиком берётся
-    из трекера, остальные — из симулятора. В этом случае source="mixed",
-    а каждая машина помечена своим источником в поле source — UI рисует
-    бейдж «SIM», чтобы виртуальные машины не выдавались за живой GPS.
+def build_fleet_snapshot(
+    *,
+    source: Optional[str] = None,
+    plan_now: Optional[datetime] = None,
+    only_fresh: bool = True,
+    include_depo: bool = False,
+    route_ids: Optional[List[int]] = None,
+    vehicle_types: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    """
+    Один срез парка в формате клиента — для /api/live и /api/fleet/stream.
+
+    Сборка жила в теле /api/live; вынесли, чтобы SSE не расходился с
+    поллингом: клиент, откатившийся на /api/live (старый браузер, ошибка
+    потока), получает ровно тот же JSON. Отличие от _collect_fleet: тот
+    собирает парк для /api/plan и возвращает (vehicles, snapshot_at, source),
+    здесь — полный ответ клиенту плюс переопределение источника на запрос.
+
+    source: None — режим стенда (PARK_SOURCE), иначе "auto" | "gps" | "sim".
     """
     sim_layer: Optional[SimLayer] = app_state.get("sim_layer")
     tracker: Optional[LiveTracker] = app_state.get("tracker")
     if sim_layer is None and tracker is None:
         raise HTTPException(status_code=503, detail="Live layer is not initialized yet")
 
-    query_now: Optional[datetime] = None
-    if now:
-        try:
-            raw_now = now.replace("Z", "+00:00")
-            query_now = as_kyiv(datetime.fromisoformat(raw_now))
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=f"Query 'now' is not ISO-8601: {exc}")
+    mode = _fleet_mode(source)
 
     snapshot_kwargs: Dict[str, Any] = {
         "only_fresh": only_fresh,
         "include_depo": include_depo,
-        "route_ids": _parse_id_list(routes),
-        "vehicle_types": _parse_type_list(vehicle_types),
+        "route_ids": route_ids,
+        "vehicle_types": vehicle_types,
     }
     sim_kwargs: Dict[str, Any] = dict(snapshot_kwargs)
-    if query_now is not None and sim_layer is not None:
+    if plan_now is not None and sim_layer is not None:
         # Симулятор умеет отдать парк на произвольный момент («машина времени»),
         # реальный трекер — только «сейчас» (§3.1: у источников разные эпохи).
-        sim_kwargs["now"] = query_now
+        sim_kwargs["now"] = plan_now
 
     # Моно-режим отдаёт срез своего слоя как есть — формат тот же.
-    if PARK_SOURCE == "gps":
+    if mode == "gps":
         if tracker is None:
             raise HTTPException(status_code=503, detail="Live tracker is not initialized yet")
         return tracker.snapshot(**snapshot_kwargs)
+    if mode == "sim":
+        if sim_layer is None:
+            raise HTTPException(status_code=503, detail="Simulator is not initialized yet")
+        return sim_layer.snapshot(**sim_kwargs)
     if tracker is None:
         # Тестовый стенд/деградация: трекер не поднят — отдаём виртуальный парк.
         return sim_layer.snapshot(**sim_kwargs)
 
-    # PARK_SOURCE == "auto": опросили оба источника, сливаем с приоритетом
-    # реального GPS. Свежесть и депо проверяются внутри слоёв (only_fresh),
-    # поэтому в слияние уже не попадут stale-машины, маскирующие дыры.
+    # mode == "auto": опросили оба источника, сливаем с приоритетом реального
+    # GPS. Свежесть и депо проверяются внутри слоёв (only_fresh), поэтому в
+    # слияние уже не попадут stale-машины, маскирующие дыры.
     sim_snap = sim_layer.snapshot(**sim_kwargs)
     real_snap = tracker.snapshot(**snapshot_kwargs)
     vehicles = merge_fleet(
@@ -1719,9 +1767,214 @@ def get_live_vehicles(
     }
 
 
+@app.get("/api/live")
+def get_live_vehicles(
+    only_fresh: bool = Query(
+        True,
+        description="Только ТС со свежим GPS-треком (<= 5 мин) и не в депо",
+    ),
+    include_depo: bool = Query(False, description="Включать ТС, стоящие в депо"),
+    routes: Optional[str] = Query(
+        None, description="Фильтр по routeId источника, напр. 6_9_12 или 6,9,12"
+    ),
+    vehicle_types: Optional[str] = Query(
+        None, description="Фильтр по типу ТС: bus, trolley"
+    ),
+    source: Optional[str] = Query(
+        None,
+        description="Источник парка на один запрос: auto | gps | sim "
+                    "(по умолчанию — PARK_SOURCE стенда)",
+    ),
+    now: Optional[str] = Query(
+        None,
+        description="«Модельное время» ISO-8601: отдать парк на этот момент (только симулятор)",
+    ),
+):
+    """
+    Живой GPS-слой: текущее положение транспорта Черновцов.
+
+    Параметр now работает только для виртуального парка (PARK_SOURCE=sim):
+    он позволяет запросить парк на произвольный момент — проверить ночь,
+    утро или конец смены, не переводя часы на сервере. Реальный трекер
+    умеет отдавать только «сейчас» (§3.1).
+
+    Данные берутся с открытого сайта перевозчика trans-gps.cv.ua
+    (/map/tracker/), опрашиваются фоновой задачей раз в 5 секунд и
+    отдаются уже нормализованными:
+
+        speed / orientation -> float (в источнике это строки "000.0");
+        gpstime             -> плюс age_seconds и status (live/stale/depo);
+        routeId             -> подпись и цвет маршрута из /map/routes/1|2;
+        routeColour         -> CSS-имя, продублировано в hex для RN-клиента.
+
+    Поле counts считается ДО фильтров, поэтому клиент может показать
+    «живих: 12 із 26 машин». Промежуточного кэша нет: срез уже лежит
+    в памяти процесса и обновляется фоновым поллером.
+
+    При PARK_SOURCE=auto опрашиваются оба источника и срез сливается
+    (merge_fleet, §3): маршрут со свежей реальной машиной целиком берётся
+    из трекера, остальные — из симулятора. В этом случае source="mixed",
+    а каждая машина помечена своим источником в поле source — UI рисует
+    бейдж «SIM», чтобы виртуальные машины не выдавались за живой GPS.
+
+    Параметр source переопределяет режим стенда на один запрос (auto/gps/sim):
+    это кнопки «джерело» в панели эмулятора — днём смотрят живой GPS, а
+    вечером, когда перевозчик уже в депо, — как отработал симулятор. Тот же
+    срез, но потоком (без клиентского поллинга), отдаёт /api/fleet/stream.
+    """
+    return build_fleet_snapshot(
+        source=source,
+        plan_now=_parse_query_now(now),
+        only_fresh=only_fresh,
+        include_depo=include_depo,
+        route_ids=_parse_id_list(routes),
+        vehicle_types=_parse_type_list(vehicle_types),
+    )
+
+# ---------------------------------------------------------------------------
+# Поток парка (SSE): сервер сам пушит снимок, клиент держит одно соединение
+# ---------------------------------------------------------------------------
+#
+# Зачем не поллинг: эмулятор в режиме «рух» тянет /api/live каждые 0.9 с, а
+# «живий онлайн» днём раньше обновлялся только по клику. SSE (EventSource) —
+# одно долгое соединение, сервер отправляет срез в темпе опроса перевозчика
+# (5 с), и карта едет сама.
+# ⚠️ Прокси обязан отключить буферизацию, иначе кадры копятся в буфере и
+# клиент не получает ничего: X-Accel-Buffering: no (заголовок ниже) +
+# proxy_buffering off в deploy/nginx-emulator.conf.
+
+FLEET_STREAM_INTERVAL_SECONDS = 5.0
+FLEET_STREAM_MIN_INTERVAL = 0.5
+FLEET_STREAM_MAX_INTERVAL = 30.0
+FLEET_STREAM_RETRY_MS = 5000
+
+
+def _sse_frame(event: str, payload: Dict[str, Any]) -> str:
+    """Кадр SSE: имя события + data одной строкой (JSON без переводов строк)."""
+    return "event: " + event + "\ndata: " + json.dumps(payload, ensure_ascii=False) + "\n\n"
+
+
+@app.get("/api/fleet/stream")
+async def stream_fleet(
+    request: Request,
+    source: Optional[str] = Query(
+        None, description="Источник парка: auto | gps | sim (по умолчанию PARK_SOURCE)"
+    ),
+    interval: float = Query(
+        FLEET_STREAM_INTERVAL_SECONDS,
+        ge=FLEET_STREAM_MIN_INTERVAL,
+        le=FLEET_STREAM_MAX_INTERVAL,
+        description="Период отправки снимков, сек",
+    ),
+    only_fresh: bool = Query(
+        True, description="Только ТС со свежим GPS-треком (<= 5 мин) и не в депо"
+    ),
+    include_depo: bool = Query(False, description="Включать ТС, стоящие в депо"),
+    routes: Optional[str] = Query(
+        None, description="Фильтр по routeId источника: 6_9_12 или 6,9,12"
+    ),
+    vehicle_types: Optional[str] = Query(None, description="Фильтр по типу ТС: bus, trolley"),
+    now: Optional[str] = Query(
+        None, description="«Модельное время» ISO-8601: снимки на этот момент (только симулятор)"
+    ),
+    once: bool = Query(False, description="Отдать один снимок и закрыть поток (curl/тесты)"),
+    limit: int = Query(
+        0, ge=0, le=1000, description="Сколько кадров отдать (0 — без ограничения)"
+    ),
+):
+    """
+    Поток парка: text/event-stream, событие snapshot с тем же JSON, что /api/live.
+
+    Формат кадров:
+        retry: 5000                     — один раз в начале (переподключение)
+        event: snapshot
+        data: {"source": "mixed", "vehicles": [...], "counts": {...}, ...}
+
+    Событие failed приходит, если срез не собрался уже внутри потока (предыдущие
+    кадры клиент получил) — имя намеренно не "error": в EventSource под этим
+    именем живёт событие разрыва соединения, и клиент не отличил бы одно от
+    другого. Ошибки первого снимка (400/503) отдаются обычным JSON ДО начала
+    потока — иначе EventSource молча переподключался бы вечно и на экране не
+    было бы ни данных, ни причины.
+    """
+    kwargs: Dict[str, Any] = {
+        "source": source,
+        "plan_now": _parse_query_now(now),
+        "only_fresh": only_fresh,
+        "include_depo": include_depo,
+        "route_ids": _parse_id_list(routes),
+        "vehicle_types": _parse_type_list(vehicle_types),
+    }
+    # Первый снимок собираем до заголовков: ошибку источника клиент должен
+    # увидеть как HTTP-статус, а не как пустой поток.
+    first = build_fleet_snapshot(**kwargs)
+    frames_total = 1 if once else limit
+
+    async def frames() -> AsyncIterator[str]:
+        sent = 0
+        payload = first
+        try:
+            yield f"retry: {FLEET_STREAM_RETRY_MS}\n\n"
+            while True:
+                yield _sse_frame("snapshot", payload)
+                sent += 1
+                if frames_total and sent >= frames_total:
+                    break
+                await asyncio.sleep(interval)
+                if await request.is_disconnected():
+                    break
+                try:
+                    # Сбор среза синхронный (индекс в памяти, в сеть не ходим):
+                    # уводим его в поток, чтобы не блокировать event loop.
+                    payload = await asyncio.to_thread(build_fleet_snapshot, **kwargs)
+                except HTTPException as exc:
+                    yield _sse_frame("failed", {"status": exc.status_code, "detail": exc.detail})
+        finally:
+            logger.info("SSE-поток парка завершён: кадров %d.", sent)
+
+    return StreamingResponse(
+        frames(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "Connection": "keep-alive",
+            # nginx: не буферизовать этот ответ (иначе SSE не доходит).
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 # ---------------------------------------------------------------------------
 # Сленг: псевдонимы и переименование остановок (админка)
 # ---------------------------------------------------------------------------
+
+@app.get("/api/manifest")
+def get_routes_manifest():
+    """
+    Whitelist активных маршрутов города (.agents/rules/active_routes.md).
+
+    Нужен фильтру парка в панели эмулятора: кнопки маршрутов должны быть
+    стабильными (все 30 автобусных + 8 троллейбусных), а не появляться по мере
+    того, как трекер увидит машину на линии. `live_names` — алиасы перевозчика,
+    которыми GPS-подписи сопоставляются с внутренним id (например «3/3a» →
+    trolley:3); наружу они отдаются как справка, не как id.
+    """
+    manifest = app_state.get("routes_manifest")
+    if manifest is None:
+        try:
+            manifest = json.loads(ROUTES_MANIFEST_PATH.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise HTTPException(status_code=503, detail=f"routes_manifest.json не прочитан: {exc}")
+    bus = manifest.get("bus") or []
+    trolley = manifest.get("trolley") or []
+    return {
+        "version": manifest.get("version"),
+        "source": ROUTES_MANIFEST_PATH.name,
+        "counts": {"bus": len(bus), "trolley": len(trolley), "total": len(bus) + len(trolley)},
+        "bus": bus,
+        "trolley": trolley,
+    }
+
 
 class SlangStopRequest(BaseModel):
     """Правка одной остановки. None = «это поле не трогать»."""
