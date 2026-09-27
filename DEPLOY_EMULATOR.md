@@ -34,6 +34,8 @@ git pull
 cp .env.example .env 2>/dev/null || nano .env
 #   OPENROUTER_API_KEY=...
 #   OPENROUTER_MODEL=qwen/qwen-2.5-72b-instruct
+#   PARK_SOURCE=auto          # auto | gps | sim — источник парка (см. «Живой GPS» ниже)
+#   GPS_SIMULATOR             # устарел; при =1 запись PARK_SOURCE=auto превратится в sim
 
 # 3. Папка данных: сленг и жалобы (монтируется томом, переживает пересборку)
 mkdir -p data
@@ -209,6 +211,78 @@ diff <(sed 's|/etc/letsencrypt/live/[^/]*|LIVE|g' /etc/nginx/sites-available/tra
   После смены пароля браузер продолжит слать старый из кэша Basic Auth и
   получит `401` — проверяйте в приватном окне.
 
+### Живой GPS перевозчика на стенде: `PARK_SOURCE`
+
+> **Факт на 27.09.2026:** стенд уже переведён на `PARK_SOURCE=auto` командами ниже
+> (бэкап `/root/env.transgps.bak-2026-09-27-2119`), трекер поднят и отвечает
+> (`last_error: None`, `source=auto` → `mixed`, `{real: 6, sim: 93}`). Раздел
+> нужен, чтобы повторить это на другом сервере и чтобы знать, как откатить.
+
+Стенд изначально поднят как **витрина симулятора**: в `/opt/transgps-emulator/.env`
+стоит устаревший `GPS_SIMULATOR=1`, а `PARK_SOURCE` не задан. По коду
+(`main.py:445-453`) это ровно `PARK_SOURCE=sim`, и `LiveTracker` при таком режиме
+**вообще не создаётся** (`main.py:846` — трекер поднимается только для `auto`
+и `gps`). Следствия в UI, которые легко принять за поломку:
+
+* кнопка **«GPS»** (и запрос `source=gps`) → **HTTP 503** «Live tracker is not
+  initialized yet» — это не сбой сети перевозчика, трекера просто нет;
+* **«авто»** → чистый симулятор: срез уходит без поля `source` у машин, на каждом
+  маркере плашка **SIM**.
+
+Чтобы посмотреть **реальную** телеметрию (`https://trans-gps.cv.ua`), нужен явный
+`PARK_SOURCE=auto` (приоритет реального GPS, дыры закрывает симулятор) или
+`PARK_SOURCE=gps` (только реальные):
+
+```bash
+cd /opt/transgps-emulator
+sudo cp .env .env.bak-$(date +%F)
+
+# ⚠️ Ловушка: при GPS_SIMULATOR=1 запись PARK_SOURCE=auto НЕ поможет —
+# main.py:446 перепишет auto обратно в sim. Убираем устаревший ключ, а не
+# дописываем новый: оставлять оба нельзя.
+sudo sed -i 's/^GPS_SIMULATOR=.*/PARK_SOURCE=auto/' .env
+grep -nE 'PARK_SOURCE|GPS_SIMULATOR' .env        # ждём одну строку PARK_SOURCE=auto
+
+# env читается при старте процесса — контейнер надо пересоздать
+docker compose up -d && docker compose logs --tail=25 api_router
+```
+
+Если строки `GPS_SIMULATOR` в `.env` нет вообще (свежий файл из `.env.example`) —
+достаточно дописать `PARK_SOURCE=auto` (или `gps`).
+
+Проверка **на сервере**, до браузера и без пароля Basic Auth:
+
+```bash
+# Реальный парк: counts.live — машины со свежим треком (<= 300 с, не в депо)
+curl -s "http://127.0.0.1:8000/api/live?source=gps&only_fresh=false" \
+  | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['counts']); print('last_error:', d.get('last_error'))"
+# Смешанный режим: видно, сколько машин реальных, а сколько добито симом
+curl -s "http://127.0.0.1:8000/api/live?source=auto&only_fresh=false" \
+  | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('source'), d.get('by_source'))"
+```
+
+Что считать нормой на живом GPS:
+
+* `counts.total > 0`, но `counts.live` может быть **`0`** (утро/вечер, все в депо
+  или трек старше 5 минут) — это данные перевозчика, а не ошибка стенда;
+* `last_error: null` — последний опрос трекера прошёл; непустая строка = сеть
+  `trans-gps.cv.ua` не ответила;
+* в UI на «авто»: маршрут с хотя бы одной свежей реальной машиной берётся из
+  трекера **целиком** (бейджа SIM у этих машин нет), остальные маршруты — SIM;
+* «GPS» в UI не покажет ничего вне окна свежести — порог `FRESH_MAX_AGE_SECONDS
+  = 300` (`live_layer.py:59`).
+
+Откат к витрине симулятора — тем же порядком, контейнер пересоздать обязательно:
+
+```bash
+cd /opt/transgps-emulator
+sudo cp .env.bak-<дата> .env && docker compose up -d
+```
+
+`PARK_SOURCE` влияет не только на карту: тот же режим выбирает источник парка для
+`/api/plan` (`_collect_fleet`), то есть на «авто» планы начинают опираться на
+живой GPS перевозчика, а не на модель.
+
 ---
 
 ## 4. Данные и бэкап
@@ -242,4 +316,4 @@ docker compose logs --tail=200 api_router                                # по�
 - **Ключ OpenRouter тратится API.** `/api/route` вызывает LLM и расходует `OPENROUTER_API_KEY`, а API доступен любому, кто знает адрес: держите лимит расхода в кабинете OpenRouter (или `docker compose stop`, когда не тестируете).
 - **DNS/домен** и `certbot` настраиваются один раз руками; после этого всё обновляется одной командой `docker compose up -d --build`.
 - **Логи жалоб пишутся на диск** контейнера/хоста, чистку делать вручную (`data/feedback/`), автопродление и ротация не настроены — на объёмах «сотни мелких JSON» это не проблема.
-- **Я (ассистент) не имею SSH-доступа** к VPS: все команды выше выполняются тобой. Если дашь доступ — могу деплоить и обновлять сам.
+- **Я (ассистент) имею SSH-доступ** к VPS: ключ `~/.ssh/transgps_deploy`, вход `ssh -i ~/.ssh/transgps_deploy root@169.58.82.105`. Репозиторий на сервере — `/opt/transgps-emulator`. То есть деплой (`git pull`, `docker compose up -d`) и проверки могу выполнять сам; команды выше нужны для ручного пути и когда ключа под рукой нет.
