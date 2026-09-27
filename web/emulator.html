@@ -188,6 +188,19 @@
       font-size: 13px;
     }
 
+    /* Швидкість «руху»: маленький селектор поруч із кнопкою, у тому ж тоні, що
+       datetime-local вище (темна панель + системний світлий список вибивались). */
+    #fleet-speed {
+      background: var(--panel2);
+      color: var(--text);
+      border: 1px solid #333941;
+      border-radius: 8px;
+      padding: 6px 6px;
+      font: inherit;
+      font-size: 13px;
+      cursor: pointer;
+    }
+
     /* Фільтр парку: сегменти «джерело» + кнопки маршрутів (§ завдання:
        вечером взять симулятор и посмотреть выбранные направления).
        Логика — web/emulator.js (setFleetMode/renderRouteChips). */
@@ -528,6 +541,15 @@
       <input type="datetime-local" id="model-time" step="60" />
       <button id="fleet-now" class="secondary">зараз</button>
       <button id="fleet-play" class="secondary" disabled>▶ рух</button>
+      <!-- Швидкість модельного часу в «русі»: ×1 — реальний час (0.9 с моделі за
+           тик), ×67 — колишня поведінка (1 хв моделі за тик), дефолт ×6. Логіка —
+           emulator.js (fleetTick/FLEET_SPEEDS). -->
+      <select id="fleet-speed" title="Швидкість модельного часу в режимі «рух»">
+        <option value="1">×1</option>
+        <option value="6" selected>×6</option>
+        <option value="20">×20</option>
+        <option value="67">×67</option>
+      </select>
     </div>
     <!-- Джерело парку і фільтр маршрутів: днём — живий GPS, вечером (машины в
          депо) — симулятор, плюс выбранные направления, чтобы смотреть, как он

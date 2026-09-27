@@ -15,7 +15,7 @@
   <!-- Панель эмулятора: стили скоупированы под #emu-panel (см. файл), чтобы
        не переопределять разметку/цвета редактора. -->
   <link rel="stylesheet" href="slang-panel.css?v=2026-09-23a" />
-  <link rel="stylesheet" href="emulator-panel.css?v=2026-09-27b" />
+  <link rel="stylesheet" href="emulator-panel.css?v=2026-09-28b" />
   <!-- ⚠️ ?v=... у css/js — защита от кэша браузера. Без него телефон после
        деплоя продолжал рисовать СТАРЫЙ CSS (панель 45vh вместо шторок): сервер
        отдавал новый файл, а Chrome — свою копию. Поднимайте версию при правках
@@ -243,6 +243,14 @@
           <input type="datetime-local" id="model-time" step="60" />
           <button id="fleet-now" class="secondary">зараз</button>
           <button id="fleet-play" class="secondary" disabled>▶ рух</button>
+          <!-- Швидкість модельного часу в «русі»: ×1 — реальний час, ×67 —
+               колишня поведінка (1 хв моделі за тик), дефолт ×6. -->
+          <select id="fleet-speed" title="Швидкість модельного часу в режимі «рух»">
+            <option value="1">×1</option>
+            <option value="6" selected>×6</option>
+            <option value="20">×20</option>
+            <option value="67">×67</option>
+          </select>
         </div>
         <!-- Джерело парку і фільтр маршрутів: днём — живий GPS, вечером
              (машины в депо) — симулятор, плюс выбранные направления.

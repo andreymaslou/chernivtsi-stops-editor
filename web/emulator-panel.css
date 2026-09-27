@@ -531,6 +531,20 @@ body.zoom-out .veh-wrap .veh-sim-badge { display: none; }
 }
 
 #emu-panel .fleet-routes-group { display: flex; gap: 8px; align-items: flex-start; }
+
+/* Швидкість «руху»: селектор поруч із кнопкою; темна панель, тому системний
+   світлий список доводиться перефарбовувати в --emu-*. */
+#emu-panel #fleet-speed {
+  background: var(--emu-panel2);
+  color: var(--emu-text);
+  border: 1px solid #333941;
+  border-radius: 8px;
+  padding: 5px 6px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
 #emu-panel .fleet-routes-head { color: var(--emu-muted); font-size: 11px; padding-top: 5px; min-width: 62px; }
 #emu-panel .fleet-routes-chips { display: flex; flex-wrap: wrap; gap: 4px; }
 

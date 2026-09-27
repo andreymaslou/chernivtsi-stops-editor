@@ -36,7 +36,9 @@ const state = {
   fleetSource: '',
   fleetOn: false,
   playing: false,
-  modelNow: null,      // «машина часу»: ISO без секунд, null = реальное время
+  modelNow: null,      // «машина часу»: ISO з секундами (URL, поле вводу); null = реальний час
+  modelMs: null,       // те саме у мілісекундах — джерело правди для дробового кроку
+  fleetSpeed: 6,       // множитель модельных часов в «русі» (FLEET_SPEEDS)
   fleetTimer: null,
   animFrame: null,
   // Живий парк: потік (SSE) і фільтр «джерело/маршрути» — блок нижче.
@@ -203,7 +205,16 @@ function markerFor(stop, color, label) {
 // Оформление маркера живёт в одном месте — vehicleIcon() + класс .veh-marker.
 
 const FLEET_TICK_MS = 900;   // как часто обновляем парк в режиме «рух»
-const FLEET_STEP_MIN = 1;    // на сколько минут двигаем модель за один тик
+// Скорость модельных часов в «руху» — множитель к реальному времени: за один
+// тик модель проходит `fleetSpeed × FLEET_TICK_MS`. ×1 — реальное время
+// (0.9 с модели за тик), ×67 ≈ прежнее поведение (1 минута модели за тик:
+// владелец описал его как «ощущение, будто нажали ×4»). Дефолт — ×6: рейс на
+// ~40 минут проходит за ~7 минут стены, машины ещё различимы глазом. Сервер
+// принимает `now` с секундами (замер: 12:00:00 и 12:00:30 дают разные позиции),
+// поэтому дробный шаг не режется до минут — иначе ×1 и ×6 не отличались бы от
+// паузы.
+const FLEET_SPEEDS = [1, 6, 20, 67];
+const FLEET_SPEED_DEFAULT = 6;
 const ANIM_MS = 900;         // за сколько миллисекунд «доезжаем» до новой точки
 
 function vehicleKey(vehicle) {
@@ -606,7 +617,7 @@ function startFleetFeed() {
     // кадри потоку привязані до одного now и тут не годятся.
     state.animMs = ANIM_MS;
     state.fleetTimer = setInterval(fleetTick, FLEET_TICK_MS);
-    setFleetFeedNote('«рух» · полінг /api/live кожні ' + (FLEET_TICK_MS / 1000) + ' с');
+    setFleetFeedNote(fleetSpeedNote());
     loadFleet();
     return;
   }
@@ -650,6 +661,16 @@ function setFleetFeedNote(text) {
   if (el) el.textContent = text;
 }
 
+/**
+ * Текст канала парка: тик, множитель и сколько модельных секунд проходит за тик.
+ * Скорость рядом с «▶ рух» меняет именно эту цифру (fleetTick).
+ */
+function fleetSpeedNote() {
+  const stepSec = state.fleetSpeed * FLEET_TICK_MS / 1000;
+  return '«рух» · полінг /api/live кожні ' + (FLEET_TICK_MS / 1000) + ' с · ×' +
+    state.fleetSpeed + ' (' + String(Number(stepSec.toFixed(1))) + ' с моделі за тик)';
+}
+
 /** Маршрут у список кнопок фільтра (колір беремо зі среза). */
 function rememberRoute(source) {
   const type = String(source.vehicle_type || '').trim().toLowerCase();
@@ -668,11 +689,17 @@ function rememberRoutes(vehicles) {
   (Array.isArray(vehicles) ? vehicles : []).forEach(rememberRoute);
 }
 
-/** ISO без секунд — формат для /api/live?now= и для input[datetime-local]. */
+/** ISO без секунд — формат для input[datetime-local] и для /api/live?now=. */
 function isoMinute(date) {
   const pad = (value) => String(value).padStart(2, '0');
   return date.getFullYear() + '-' + pad(date.getMonth() + 1) + '-' + pad(date.getDate()) +
     'T' + pad(date.getHours()) + ':' + pad(date.getMinutes());
+}
+
+/** ISO с секундами — модельное время «руху»: шаг меньше минуты резать нельзя. */
+function isoSecond(date) {
+  const pad = (value) => String(value).padStart(2, '0');
+  return isoMinute(date) + ':' + pad(date.getSeconds());
 }
 
 // ---------------------------------------------------------------------------
@@ -863,7 +890,7 @@ function syncRoutesLegend(gps, stale) {
 }
 
 function modelDate() {
-  return state.modelNow ? new Date(state.modelNow) : new Date();
+  return state.modelMs === null ? new Date() : new Date(state.modelMs);
 }
 
 /**
@@ -981,9 +1008,22 @@ async function loadManifest() {
   }
 }
 
+/**
+ * Модельное время: единственный вход. `ms` — источник правды (доли секунды
+ * нужны для ×1/×6), строка modelNow — то, что уходит в URL и в поле ввода.
+ * null = реальное время.
+ */
+function setModelTime(ms) {
+  state.modelMs = ms === null || ms === undefined ? null : Number(ms);
+  state.modelNow = state.modelMs === null ? null : isoSecond(new Date(state.modelMs));
+  syncTimeInput();
+}
+
 function syncTimeInput() {
   const input = document.getElementById('model-time');
-  if (input) input.value = state.modelNow || isoMinute(new Date());
+  // У input шаг 60 с (минуты), а модельное время «руху» идёт с секундами: в
+  // поле показываем минуту, полное значение уходит в /api/live?now=.
+  if (input) input.value = (state.modelNow || isoMinute(new Date())).slice(0, 16);
 }
 
 /**
@@ -1019,10 +1059,15 @@ function toggleFleet(on) {
   }
 }
 
-/** Тик «руху»: сдвигаем модельное время на FLEET_STEP_MIN и берём снимок. */
+/**
+ * Тик «руху»: двигаем модельные часы на `state.fleetSpeed × FLEET_TICK_MS` и
+ * берём новый срез. Считаем по state.modelMs (доли секунды), а не по строке
+ * modelNow: при ×1 шаг 0.9 с, и строка с секундами его теряла — модель стояла
+ * (проверено пробником: ×1 не двигал маркеры, ×6 шёл).
+ */
 function fleetTick() {
-  state.modelNow = isoMinute(new Date(modelDate().getTime() + FLEET_STEP_MIN * 60000));
-  syncTimeInput();
+  const stepMs = state.fleetSpeed * FLEET_TICK_MS;
+  setModelTime(modelDate().getTime() + stepMs);
   loadFleet();
 }
 
@@ -1034,8 +1079,9 @@ function setPlaying(on) {
 
   if (on) {
     if (!state.fleetOn) toggleFleet(true);
-    if (!state.modelNow) state.modelNow = isoMinute(modelDate());
-    syncTimeInput();
+    // Стартовая точка «руху» — текущая минута: строка без секунд читается
+    // человеком, а дальше часы ведёт setModelTime (modelMs).
+    if (state.modelMs === null) setModelTime(Math.floor(Date.now() / 60000) * 60000);
     startFleetFeed();   // модельное время идёт → поллинг, кадры потока не годятся
   } else if (state.fleetOn) {
     startFleetFeed();   // «пауза» возвращает поток (парк ещё включён)
@@ -1912,11 +1958,24 @@ if (fleetToggle) fleetToggle.onchange = (event) => toggleFleet(event.target.chec
 const fleetPlay = document.getElementById('fleet-play');
 if (fleetPlay) fleetPlay.onclick = () => setPlaying(!state.playing);
 
+// Скорость модельных часов («×1/×6/×20/×67» рядом с «▶ рух»). Менять можно и на
+// ходу: следующий тик возьмёт новое значение, переподнимать поток не нужно.
+const fleetSpeed = document.getElementById('fleet-speed');
+if (fleetSpeed) {
+  fleetSpeed.value = String(state.fleetSpeed);
+  fleetSpeed.onchange = (event) => {
+    const value = Number(event.target.value);
+    state.fleetSpeed = FLEET_SPEEDS.includes(value) ? value : FLEET_SPEED_DEFAULT;
+    // Значение возвращаем в селект: чужое число в value не должно оставаться.
+    event.target.value = String(state.fleetSpeed);
+    if (state.playing) setFleetFeedNote(fleetSpeedNote());
+  };
+}
+
 const fleetNow = document.getElementById('fleet-now');
 if (fleetNow) {
   fleetNow.onclick = () => {
-    state.modelNow = null;
-    syncTimeInput();
+    setModelTime(null);
     // now уходит в параметры и потока, и поллинга — соединение переподнимаем.
     if (state.fleetOn) startFleetFeed();
     updateFleetStatus(null);
@@ -1926,7 +1985,8 @@ if (fleetNow) {
 const modelTime = document.getElementById('model-time');
 if (modelTime) {
   modelTime.onchange = (event) => {
-    state.modelNow = event.target.value ? event.target.value : null;
+    // Из поля приходит время без секунд — это честная точка отсчёта.
+    setModelTime(event.target.value ? new Date(event.target.value).getTime() : null);
     // «Машина часу»: у потока момент зашит в URL подписки — переподключаемся.
     if (state.fleetOn) startFleetFeed();
     updateFleetStatus(null);
