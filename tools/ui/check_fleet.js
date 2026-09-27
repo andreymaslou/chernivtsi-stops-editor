@@ -47,6 +47,11 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const chips = await page.$$eval('.route-chip', (els) => els.map((el) => el.dataset.key));
   console.log('кнопок маршрутів:', chips.length, '| приклади:', chips.slice(0, 4).join(', '));
 
+  // Парк выключен по умолчанию: подсказка рядом с галочкой — единственный
+  // видимый на телефоне сигнал об этом (#fleet-status ниже списка маршрутов).
+  const hintOff = await page.$eval('#fleet-toggle-note', (el) => el.textContent.trim());
+  console.log('парк вимкнено, підказка:', hintOff || '(порожньо)');
+
   await page.click('#fleet-toggle');
   await page.waitForFunction(
     () => document.querySelectorAll('.veh-marker').length > 5, { timeout: 30000 });
@@ -58,6 +63,8 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   }));
   console.log('після вмикання: маркерів', first.markers,
     '| джерело:', first.source, '| канал:', first.feed.trim());
+  const hintOn = await page.$eval('#fleet-toggle-note', (el) => el.textContent.trim());
+  console.log('після вмикання, підказка:', hintOn || '(порожньо)');
 
   await page.$eval('#model-time', (input, value) => {
     input.value = value;
@@ -93,16 +100,24 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const none = await page.evaluate(() => ({
     markers: document.querySelectorAll('.veh-marker').length,
     filter: (document.getElementById('fleet-filter-status') || {}).textContent || '',
+    // Крайні режими фільтра: «жодного» має бути натиснутим, інакше на телефоні
+    // не відрізнити «фільтр стоїть» від «ТС не їдуть».
+    pressed: (document.getElementById('fleet-route-none') || {}).getAttribute
+      ? document.getElementById('fleet-route-none').getAttribute('aria-pressed') : '',
   }));
-  console.log('«жодного»: маркерів', none.markers, '| фільтр:', none.filter.trim());
+  console.log('«жодного»: маркерів', none.markers, '| фільтр:', none.filter.trim(),
+    '| натиснуто:', none.pressed);
 
   await page.click('#fleet-route-all');
   await sleep(500);
   const all = await page.evaluate(() => ({
     markers: document.querySelectorAll('.veh-marker').length,
     filter: (document.getElementById('fleet-filter-status') || {}).textContent || '',
+    pressed: (document.getElementById('fleet-route-all') || {}).getAttribute
+      ? document.getElementById('fleet-route-all').getAttribute('aria-pressed') : '',
   }));
-  console.log('«усі»: маркерів', all.markers, '| фільтр:', all.filter.trim());
+  console.log('«усі»: маркерів', all.markers, '| фільтр:', all.filter.trim(),
+    '| натиснуто:', all.pressed);
 
   const chipKey = chips[chips.length - 1];
   await page.click('.route-chip[data-key="' + chipKey + '"]');
@@ -159,6 +174,8 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     trolleyOff.off === 8 && trolleyOff.checked === false && askedBusOnly &&
     trolleyOn.off === 0 && trolleyOn.markers > trolleyOff.markers && askedTrolleys &&
     none.markers === 0 && all.markers > 5 && one.markers < all.markers && one.off === 1 &&
+    // крайние режимы фильтра видны на кнопках, подсказка парка гаснет/загорается
+    none.pressed === 'true' && all.pressed === 'true' && hintOff.length > 0 && hintOn === '' &&
     // ровно 38 кнопок: алиасы перевозчика («3/3a») не должны давать вторую кнопку
     grid.count === 38 && grid.first === 'bus|1' && grid.last === 'trolley|8' &&
     /пауза/.test(play.label) && errors.length === 0;

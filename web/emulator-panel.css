@@ -487,6 +487,9 @@ body.zoom-out .veh-sim-badge { display: none; }
  * цього ж файлу зробили б із сегментів і чипів «піґулки» в пів екрана.
  */
 #emu-panel .fleet-kicker { color: var(--emu-muted); font-size: 12px; }
+/* Стан парку поруч із галочкою «живий парк»: #fleet-status лежить під списком
+   маршрутів, і на мобільному його не видно — «ТС не їдуть» без пояснення. */
+#emu-panel .fleet-hint { color: var(--emu-text); font-size: 12px; }
 
 #emu-panel .seg {
   display: inline-flex;
@@ -548,3 +551,13 @@ body.zoom-out .veh-sim-badge { display: none; }
 
 /* Схований маршрут: пунктир і приглушення — це фільтр, а не «маршруту немає». */
 #emu-panel .route-chip[aria-pressed="false"] { opacity: .4; border-style: dashed; }
+
+/* Крайні режими фільтра («усі» / «жодного») несуть стан у aria-pressed: чипи
+   показують деталі, а ці дві кнопки — сам режим. Ободок + акцент, бо
+   приглушення двох кнопок одразу читалося б як «обидві вимкнені». */
+#emu-panel #fleet-route-all[aria-pressed="true"],
+#emu-panel #fleet-route-none[aria-pressed="true"] {
+  background: var(--emu-accent);
+  border-color: var(--emu-accent);
+  color: #fff;
+}

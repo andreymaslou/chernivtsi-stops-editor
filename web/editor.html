@@ -15,7 +15,7 @@
   <!-- Панель эмулятора: стили скоупированы под #emu-panel (см. файл), чтобы
        не переопределять разметку/цвета редактора. -->
   <link rel="stylesheet" href="slang-panel.css?v=2026-09-23a" />
-  <link rel="stylesheet" href="emulator-panel.css?v=2026-09-27a" />
+  <link rel="stylesheet" href="emulator-panel.css?v=2026-09-27b" />
   <!-- ⚠️ ?v=... у css/js — защита от кэша браузера. Без него телефон после
        деплоя продолжал рисовать СТАРЫЙ CSS (панель 45vh вместо шторок): сервер
        отдавал новый файл, а Chrome — свою копию. Поднимайте версию при правках
@@ -239,6 +239,7 @@
         <!-- Живий парк + «машина часу»: дивимось, як рухаються ТС по місту -->
         <div class="row" style="margin-top:8px; align-items:center;">
           <label class="toggle"><input type="checkbox" id="fleet-toggle" /> 🚌 живий парк</label>
+          <span id="fleet-toggle-note" class="fleet-hint"></span>
           <input type="datetime-local" id="model-time" step="60" />
           <button id="fleet-now" class="secondary">зараз</button>
           <button id="fleet-play" class="secondary" disabled>▶ рух</button>
@@ -258,8 +259,8 @@
         </div>
         <div class="row" style="margin-top:6px; align-items:center;">
           <span class="fleet-kicker">маршрути:</span>
-          <button type="button" id="fleet-route-all" class="secondary">усі</button>
-          <button type="button" id="fleet-route-none" class="secondary">жодного</button>
+          <button type="button" id="fleet-route-all" class="secondary" aria-pressed="true">усі</button>
+          <button type="button" id="fleet-route-none" class="secondary" aria-pressed="false">жодного</button>
           <label class="toggle"><input type="checkbox" id="fleet-trolley" /> тролейбуси</label>
           <span id="fleet-filter-status" class="fleet-kicker"></span>
         </div>
@@ -349,7 +350,7 @@
        отдельной странице /ui/emulator.html создаёт свою). -->
   <script src="app.js?v=2026-09-20d"></script>
   <script src="slang-panel.js?v=2026-09-23a"></script>
-  <script src="emulator.js?v=2026-09-27d"></script>
+  <script src="emulator.js?v=2026-09-27e"></script>
 </body>
 
 </html>

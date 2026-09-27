@@ -242,6 +242,16 @@
     /* Скрытый маршрут: пунктир + приглушение — сразу видно, что это фильтр. */
     .route-chip[aria-pressed="false"] { opacity: .4; border-style: dashed; }
 
+    /* Крайні режими фільтра видно на самій кнопці: інакше на мобільному
+       не зрозуміти, чому «ТС не їдуть» — фільтр це чи поломка парку. */
+    #fleet-route-all[aria-pressed="true"],
+    #fleet-route-none[aria-pressed="true"] {
+      background: var(--accent); border-color: var(--accent); color: #fff;
+    }
+    /* Стан галочки «живий парк» — біля неї самої: #fleet-status стоїть нижче
+       списку маршрутів і на мобільному лишається за межами екрана. */
+    .fleet-hint { color: var(--text); font-size: 12px; }
+
     /* Маркер ТС: вся вёрстка стрелки — в vehicleIcon() (web/emulator.js),
        здесь только состояния из спецификации дизайна: live / planned /
        stopped (пульс обводки) / target (золотой пульс «сідати сюди»). */
@@ -491,6 +501,7 @@
     <!-- Живий парк + «машина часу»: дивимось, як рухаються ТС по місту -->
     <div class="row" style="margin-top:8px; align-items:center;">
       <label class="toggle"><input type="checkbox" id="fleet-toggle" /> 🚌 живий парк</label>
+      <span id="fleet-toggle-note" class="fleet-hint"></span>
       <input type="datetime-local" id="model-time" step="60" />
       <button id="fleet-now" class="secondary">зараз</button>
       <button id="fleet-play" class="secondary" disabled>▶ рух</button>
@@ -510,8 +521,8 @@
     </div>
     <div class="row" style="margin-top:6px; align-items:center;">
       <span class="fleet-kicker">маршрути:</span>
-      <button type="button" id="fleet-route-all" class="secondary">усі</button>
-      <button type="button" id="fleet-route-none" class="secondary">жодного</button>
+      <button type="button" id="fleet-route-all" class="secondary" aria-pressed="true">усі</button>
+      <button type="button" id="fleet-route-none" class="secondary" aria-pressed="false">жодного</button>
       <label class="toggle"><input type="checkbox" id="fleet-trolley" /> тролейбуси</label>
       <span id="fleet-filter-status" class="fleet-kicker"></span>
     </div>
@@ -545,7 +556,7 @@
   <div id="map" class="map"></div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script src="emulator.js?v=2026-09-27d"></script>
+  <script src="emulator.js?v=2026-09-27e"></script>
 </body>
 
 </html>

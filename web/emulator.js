@@ -727,6 +727,24 @@ function renderRouteChips() {
   syncRouteChips();
 }
 
+/**
+ * Крайні режими фільтра («усі» / «жодного») теж несуть стан у aria-pressed.
+ *
+ * Чипи показують, ЯКІ маршрути видно, а ці дві кнопки — сам режим. Без
+ * атрибута на телефоні не зрозуміти, стоїть фільтр чи ні: «ТС не їдуть»
+ * читається як поломка парку, а не як вимкнений фільтр.
+ */
+function syncRouteBulkButtons() {
+  const total = state.routeMeta.size;
+  const hidden = state.hiddenRoutes.size;
+  const all = document.getElementById('fleet-route-all');
+  const none = document.getElementById('fleet-route-none');
+  // Порожній довідник маршрутів — це ще не «жодного»: лишаємо «усі».
+  // Частковий фільтр не позначаємо як крайній, деталі видно на чипах.
+  if (all) all.setAttribute('aria-pressed', String(hidden === 0));
+  if (none) none.setAttribute('aria-pressed', String(total > 0 && hidden >= total));
+}
+
 /** aria-pressed на кнопках маршрутів = стан фільтра (DOM не перебудовуємо). */
 function syncRouteChips() {
   const box = document.getElementById('fleet-routes');
@@ -734,6 +752,7 @@ function syncRouteChips() {
   box.querySelectorAll('.route-chip').forEach((chip) => {
     chip.setAttribute('aria-pressed', String(!routeHidden(chip.dataset.key)));
   });
+  syncRouteBulkButtons();
 }
 
 function modelDate() {
@@ -854,8 +873,21 @@ function syncTimeInput() {
   if (input) input.value = state.modelNow || isoMinute(new Date());
 }
 
+/**
+ * Підказка біля галочки «живий парк»: `#fleet-status` стоїть під списком
+ * маршрутів, а на телефоні він за межами екрана. Через це порожня карта
+ * виглядає як «ТС не їдуть», хоч парк просто не увімкнено, — тому стан
+ * дублюємо прямо в рядку з галочкою.
+ */
+function syncFleetToggleNote() {
+  const el = document.getElementById('fleet-toggle-note');
+  if (!el) return;
+  el.textContent = state.fleetOn ? '' : 'парк вимкнено — увімкніть, щоб бачити ТС';
+}
+
 function toggleFleet(on) {
   state.fleetOn = on;
+  syncFleetToggleNote();
   const box = document.getElementById('fleet-toggle');
   if (box) box.checked = on;
   const play = document.getElementById('fleet-play');
@@ -1825,6 +1857,8 @@ if (fleetTrolley) {
 }
 
 renderSourceButtons();
+// Парк вимкнено за замовчуванням — підказку малюємо одразу, не після першого кліку.
+syncFleetToggleNote();
 setFleetFeedNote(FLEET_MODE_HINT[state.fleetMode] || '');
 loadManifest();
 
