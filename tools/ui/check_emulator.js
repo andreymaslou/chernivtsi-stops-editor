@@ -31,8 +31,9 @@
  *   6. попап машини: структура, світлий бейдж, екранування зовнішніх рядків;
  *   7. розвантаження при віддаленні: zoom < 13 — крапки без номера й стрілки,
  *      zoom >= 13 — повний маркер, і крапка не з'їжджає з координати;
- *   7.1 бейдж «SIM» на віртуальних машинах (§3): на стенді всі машини sim —
- *      плашка та клас .sim є на кожному маркері, data-source збігається;
+ *   7.1 бейдж «SIM» на віртуальних машинах (§3): плашка видна ЛИШЕ у машин з
+ *      класом .sim (у моно sim — на всіх маркерах), на реальному борті трекера
+ *      її нема; data-source збігається з класом sim;
  *   8. на 390 px: контроли парка видны, легенда влезает в экран, нижняя полоса
  *      (подсказка о клике / легенда / кнопка «Емулятор») не перекрывается, а на
  *      /ui/editor.html ещё и адаптив — карта на весь экран, панели открываются
@@ -119,8 +120,17 @@ const probe = () => ({
     target: el.classList.contains('target'),
     sim: el.classList.contains('sim'),
   })),
-  // Бейдж «SIM» на віртуальних машинах (§3: симулятор не видається за живий GPS)
-  simBadges: [...document.querySelectorAll('.veh-sim-badge')].map((el) => el.textContent.trim()),
+  // Бейдж «SIM» на віртуальних машинах (§3: симулятор не видається за живий
+  // GPS). Перевіряємо не «плашка є в DOM» (вона там завжди), а ЧИ ЇЇ ВИДНО і
+  // чи збігається це з класом .sim: саме так реальний борт трекера в змішаному
+  // парку відрізняється від віртуального.
+  simBadges: [...document.querySelectorAll('.veh-wrap')].map((el) => {
+    const badge = el.querySelector('.veh-sim-badge');
+    return {
+      text: badge ? badge.textContent.trim() : '',
+      shown: badge ? getComputedStyle(badge).display !== 'none' : false,
+    };
+  }),
   targetBoards: [...document.querySelectorAll('.veh-wrap.target')]
     .map((el) => el.getAttribute('data-board')),
   targetMarkers: document.querySelectorAll('.veh-marker.is-target').length,
@@ -561,17 +571,17 @@ const probe = () => ({
   check('в статусе видно время', /час:/.test(fleet.fleetStatus), fleet.fleetStatus.trim());
 
   // --- 3.1 Бейдж «SIM» на віртуальних машинах (§3 брифа) ------------------
-  // Стенд працює на PARK_SOURCE=sim, тож УСІ машини віртуальні: плашка «SIM»
-  // має бути на кожному маркері (джерело беремо з кореневого source знімка —
-  // в моно-режимі машини поле source не несуть). В змішаному парку плачка
-  // стоїть лише на sim-машинах (перевіряємо через data-source).
+  // Плашка стоїть ЛИШЕ на віртуальних (клас .sim, його ставить vehicleIcon()):
+  // у монорежимі sim вона на всіх маркерах, у змішаному парку — тільки на
+  // сим-бортах. Реальний борт трекера не має виглядати віртуальним, інакше
+  // звірка карти з сайтом перевізника читається навпаки.
   const allSim = fleet.wraps.length > 0 && fleet.wraps.every((item) => item.sim);
-  const badgesOk = fleet.simBadges.length === fleet.wraps.length &&
-    fleet.simBadges.every((text) => text === 'SIM');
-  check('віртуальні машини помічені «SIM»',
+  const badgesOk = fleet.simBadges.length > 0 &&
+    fleet.simBadges.every((item) => item.text === 'SIM' && item.shown === allSim);
+  check('плашка «SIM» лише на віртуальних машинах',
     allSim && badgesOk,
     'sim-класів: ' + fleet.wraps.filter((item) => item.sim).length + ' із ' + fleet.wraps.length +
-      ', бейджів: ' + fleet.simBadges.length);
+      ', плашок видно: ' + fleet.simBadges.filter((item) => item.shown).length);
   check('data-source маркера збігається з класом sim',
     fleet.wraps.length > 0 && fleet.wraps.every((item) =>
       (item.source === 'sim') === item.sim),

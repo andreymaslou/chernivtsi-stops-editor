@@ -305,10 +305,14 @@
     body.zoom-out .veh-wrap text { display: none; }
     body.zoom-out .veh-arrow-group { display: none; }
     /* Віртуальна машина: штрих-пунктирне коло + плашка «SIM» (§3 брифа —
-       симулятор не має видаватись за живий GPS). Плашку ховаємо при віддаленні,
-       як і номер маршруту. */
+       симулятор не має видаватись за живий GPS). Плашка — ТІЛЬКИ під класом
+       .sim (його ставить vehicleSource() у vehicleIcon()): інакше в змішаному
+       парку реальний борт трекера виглядав би віртуальним, і звірка з сайтом
+       перевізника читалась би навпаки. Плашку ховаємо при віддаленні, як і
+       номер маршруту. */
     .veh-wrap.sim circle { stroke-dasharray: 3.5 2.5; }
     .veh-sim-badge {
+      display: none;
       position: absolute;
       top: -10px;
       left: 50%;
@@ -323,7 +327,8 @@
       pointer-events: none;
       box-shadow: 0 1px 2px rgba(0, 0, 0, .5);
     }
-    body.zoom-out .veh-sim-badge { display: none; }
+    .veh-wrap.sim .veh-sim-badge { display: block; }
+    body.zoom-out .veh-wrap .veh-sim-badge { display: none; }
 
     /* Попап машини (специфікація дизайну, п. 2): попапи Leaflet світлі,
        тому верстка під світлу тему. Розмітка — vehiclePopup() в emulator.js. */

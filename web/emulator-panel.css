@@ -310,6 +310,11 @@ body.zoom-out .veh-arrow-group { display: none; }
    як і номер маршруту. */
 .veh-wrap.sim circle { /* stroke-dasharray removed by request */ }
 .veh-sim-badge {
+  /* Плашка «SIM» — ТІЛЬКИ на віртуальних машинах (клас .sim ставить
+     vehicleSource() у vehicleIcon()): у змішаному парку реальний борт трекера
+     не має виглядати віртуальним, інакше звірка з сайтом перевізника
+     читається навпаки. */
+  display: none;
   position: absolute;
   top: -10px;
   left: 50%;
@@ -324,7 +329,8 @@ body.zoom-out .veh-arrow-group { display: none; }
   pointer-events: none;
   box-shadow: 0 1px 2px rgba(0, 0, 0, .5);
 }
-body.zoom-out .veh-sim-badge { display: none; }
+body.zoom-out .veh-wrap .veh-sim-badge { display: none; }
+.veh-wrap.sim .veh-sim-badge { display: block; }
 
 /* Попап машини (попапи Leaflet світлі — верстка під світлу тему) */
 .veh-popup-head {
