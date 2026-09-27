@@ -23,9 +23,11 @@
  *   5.1 карта плану (UX): номери кроків у кольорі маршруту з пульсацією, шеврони
  *      напрямку (азимут звіряється з `leg.path`), хвости маршруту, фініш 🏁,
  *      іконка 🚶 на пешій пересадці, цифри в панелі = бейджам на карті;
- *   5.2 картки варіантів (§13 брифа): дві картки над саммарі, перша активна,
- *      «програшна» цифра підсвічена приглушеним (⚠️, не червоним) з поясненням;
- *      клік по другій картці перемальовує лінії на карті й цифри в саммарі;
+ *   5.2 картки варіантів (§13 брифа): дві картки над саммарі, активною є та,
+ *      чий план намальовано (корінь відповіді; першою може стояти «Дешевий» —
+ *      ціновий пріоритет), «програшна» цифра підсвічена приглушеним (⚠️, не
+ *      червоним) з поясненням; клік по другій картці перемальовує лінії на
+ *      карті й цифри в саммарі;
  *      телеметрія §13.3: подія йде і при показі карток (chosen=null), і при
  *      кліку (chosen=id), з тим самим порядком карток, що на екрані;
  *   6. попап машини: структура, світлий бейдж, екранування зовнішніх рядків;
@@ -789,8 +791,10 @@ const probe = () => ({
   report.shots.push('plan.png');
 
   // --- 5.2 Картки варіантів плану (поставка 1, §13 брифа) ------------------
-  // Сервер кладе в /api/plan масив variants: перший елемент — кореневий план
-  // («Швидкий», він уже на карті), другий — прогін «≤1 пересадка» («Дешевий»).
+  // Сервер кладе в /api/plan масив variants. Кореневий план (активний за
+  // замовчуванням, «Швидкий») — той, що вже на карті; але ціновий пріоритет
+  // (PRICE_PREFER_*) може поставити першою карточку «Дешевий», тож активну
+  // карточку перевіряємо за цифрами кореня, а не за місцем у списку.
   // Картки живуть у #plan-variants НАД саммарі (#answer). Клік по другій
   // мусить: зупинити голос, перемалювати план і цифри панелі, підсвітити картку.
   const variantsProbe = () => page.evaluate(() => {
@@ -828,6 +832,18 @@ const probe = () => ({
         const el = box ? box.querySelector('.variant-card.active') : null;
         return el ? el.getAttribute('data-variant-id') : null;
       })(),
+      // Незалежно від клієнта рахуємо, яка карточка відповідає кореню
+      // відповіді (той план уже намальований і озвучений). Після цінового
+      // пріоритету це може бути НЕ перша карточка.
+      rootId: (() => {
+        const offer = window.Emulator && window.Emulator.variantOffer();
+        if (!offer || !Array.isArray(offer.variants)) return null;
+        const same = (v) => Number(v.total_min) === Number(offer.total_min) &&
+          Number(v.price_grn) === Number(offer.price_grn) &&
+          Number(v.transfers) === Number(offer.transfers);
+        const hit = offer.variants.filter(same)[0];
+        return hit ? String(hit.id) : null;
+      })(),
       worseCount: cards.reduce((sum, card) =>
         sum + card.querySelectorAll('.variant-num.worse').length, 0),
       summary: answer ? answer.textContent.replace(/\s+/g, ' ').trim() : '',
@@ -842,9 +858,10 @@ const probe = () => ({
     check('карточки вариантов отрисованы над саммари',
       variantsBefore.boxPresent && !variantsBefore.hidden && variantsBefore.count === 2,
       'карточек: ' + variantsBefore.count + ', id: [' + variantsBefore.ids.join(', ') + ']');
-    check('корневой план — первая карточка (активна по умолчанию)',
-      variantsBefore.activeId === variantsBefore.ids[0],
-      'активная: ' + variantsBefore.activeId);
+    check('активна та карточка, чий план уже намальовано (корінь відповіді)',
+      variantsBefore.rootId !== null && variantsBefore.activeId === variantsBefore.rootId,
+      'активна: ' + variantsBefore.activeId + ', корінь: ' + variantsBefore.rootId +
+      ', порядок: [' + variantsBefore.ids.join(', ') + ']');
     check('карточка показывает тег, транспорт, цену и время',
       variantsBefore.tags.every(Boolean) &&
       variantsBefore.texts.every((text) => /грн/.test(text) && /хв/.test(text)),
@@ -881,15 +898,18 @@ const probe = () => ({
         shown.offer.map((entry) => entry.source).join(',')
         : 'немає запиту');
 
-    await page.click('.plan-variants .variant-card[data-variant-id="' +
-      variantsBefore.ids[1] + '"]');
+    // Клікаємо ту карточку, яка НЕ активна (не «другу»): після цінового
+    // пріоритету активною може бути як перша, так і друга — перевірка мусить
+    // лишатися причинною («клік перемикає план»), а не залежати від порядку.
+    const otherId = variantsBefore.ids.filter((id) => id !== variantsBefore.activeId)[0];
+    await page.click('.plan-variants .variant-card[data-variant-id="' + otherId + '"]');
     await sleep(1200);
     const variantsAfter = await variantsProbe();
-    check('клик по второй карточке сделал её активной',
-      variantsAfter.activeId === variantsBefore.ids[1],
-      'активная: ' + variantsAfter.activeId);
+    check('клик по другой карточке сделал её активной',
+      variantsAfter.activeId === otherId,
+      'активная: ' + variantsAfter.activeId + ' (клик по ' + otherId + ')');
     check('клик переключил план без перезапроса',
-      variantsAfter.planId === variantsBefore.ids[1] &&
+      variantsAfter.planId === otherId &&
       variantsAfter.planId !== variantsBefore.planId,
       'последний план: ' + variantsBefore.planId + ' → ' + variantsAfter.planId);
     check('после клика линии на карте изменились',
@@ -902,22 +922,24 @@ const probe = () => ({
       variantsAfter.summary !== variantsBefore.summary,
       'саммари: «' + variantsAfter.summary.slice(0, 90) + '»');
 
-    // Телеметрія §13.3: клік → подія з обраним варіантом; дефолт залишається
-    // першою карткою (роутер так і віддає — перший елемент variants).
+    // Телеметрія §13.3: клік → подія з обраним варіантом; default_variant_id —
+    // карточка, чий план клієнт показував до кліку (корінь відповіді, а не
+    // обов'язково перша карточка: ціновий пріоритет ставить «Дешевий» першим).
     await sleep(400);
     const chosen = telemetry.find((body) => body &&
-      body.chosen_variant_id === variantsBefore.ids[1]);
+      body.chosen_variant_id === otherId);
     check('телеметрія «клік по картці» відправлена',
-      !!chosen && chosen.default_variant_id === variantsBefore.ids[0],
-      chosen ? 'обрано: ' + chosen.chosen_variant_id + ' із order [' +
+      !!chosen && chosen.default_variant_id === variantsBefore.activeId,
+      chosen ? 'обрано: ' + chosen.chosen_variant_id + ', дефолт: ' +
+        chosen.default_variant_id + ' із order [' +
         chosen.variant_order.join(', ') + '], запитів: ' + telemetry.length
         : 'запитів: ' + telemetry.length);
     await page.screenshot({ path: path.join(OUT, 'variants.png') });
     report.shots.push('variants.png');
 
-    // Возвращаем первый вариант — остальной сценарий смотрит дефолтный вид.
+    // Повертаємо дефолтний вид (план кореня) — решта сценарію дивиться його.
     await page.click('.plan-variants .variant-card[data-variant-id="' +
-      variantsBefore.ids[0] + '"]');
+      variantsBefore.activeId + '"]');
     await sleep(800);
   } else {
     console.log('        (карточки вариантов: пропущено — сервер дал один вариант, это честный ответ)');

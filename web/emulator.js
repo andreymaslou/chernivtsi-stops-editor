@@ -57,8 +57,14 @@ const state = {
   lastPlan: null,
   planStepLayers: {},
   // Картки варіантів плану (поставка 1, §13 брифа): останній оффер з
-  // /api/plan та id обраної карточки. Кореневий план — завжди перший варіант.
+  // /api/plan, id карточки, чий план ЗАРАЗ на карті (activeVariantId), і id
+  // дефолтної карточки (defaultVariantId — для телеметрії). Два різні id
+  // потрібні, бо після цінового пріоритету (PRICE_PREFER_*) «Дешевий» іде
+  // першим, тобто «перша карточка» вже НЕ означає «дефолтний план».
+  // Кореневий план відповіді — саме дефолтний (мінімум часу, §13.1 брифа):
+  // його малює карта, його читає голос і його ж цифри стоять у саммарі.
   variantOffer: null,
+  defaultVariantId: null,
   activeVariantId: null,
 };
 
@@ -1553,8 +1559,11 @@ function renderVehicles(vehicles, bounds, planLegs) {
 // Картки варіантів плану («Швидкий» / «Дешевий», §13 брифа, поставка 1)
 // ---------------------------------------------------------------------------
 //
-// Сервер (/api/plan) кладе в відповідь `variants`: перший елемент — кореневий
-// план (він уже намальований), другий — прогін «≤1 пересадка» («Дешевий»).
+// Сервер (/api/plan) кладе в відповідь `variants`, а кореневий план відповіді
+// вже намальований на карті. Порядок карточок задає сервер: зазвичай перший —
+// кореневий («Швидкий»), але ціновий пріоритет (PRICE_PREFER_*) ставить
+// «Дешевий» першим. Тому «кореневий» ≠ «перший»: активну карточку шукаємо за
+// цифрами кореня (rootVariantId), а не за індексом 0.
 // Карточки малюємо ЛИШЕ коли варіантів ≥ 2: один варіант — це не вибір, а
 // порожні чіпи тільки шуміли б. Клік по карточці: (а) зупиняємо озвучення,
 // якщо воно грає; (б) clearLayers() + renderPlan(варіант) — логіку renderPlan
@@ -1602,6 +1611,7 @@ function speakPlanSummary(plan) {
 
 function hideVariantCards() {
   state.variantOffer = null;
+  state.defaultVariantId = null;
   state.activeVariantId = null;
   const box = document.getElementById('plan-variants');
   if (box) {
@@ -1694,6 +1704,9 @@ function variantToOfferEntry(variant) {
 /**
  * Тіло події вибору або null, якщо оффера немає (картки не показували).
  * variant_order — id у тому порядку, в якому картки лежать на екрані.
+ * default_variant_id — id карточки, чий план клієнт показував як основний
+ * (корінь відповіді). Це не `ids[0]`: після цінового пріоритету першою йде
+ * «Дешевий», хоч основний (намальований) план лишається кореневим.
  */
 function buildPlanChoiceBody(chosenVariantId) {
   const plan = state.variantOffer;
@@ -1704,7 +1717,7 @@ function buildPlanChoiceBody(chosenVariantId) {
     from_stop_id: plan.from_stop_id,
     to_stop_id: plan.to_stop_id,
     offer: plan.variants.map(variantToOfferEntry),
-    default_variant_id: ids[0],
+    default_variant_id: state.defaultVariantId || ids[0],
     variant_order: ids,
     chosen_variant_id: chosenVariantId == null ? null : String(chosenVariantId),
     device_id: deviceId(),
@@ -1733,6 +1746,20 @@ function sendPlanChoice(chosenVariantId) {
 }
 
 /**
+ * id карточки, чей план совпадает с корнем ответа (корневой план уже на карте
+ * и уже озвучен). Сравниваем цифры, а не место в списке: ціновий пріоритет
+ * (PRICE_PREFER_*) ставить «Дешевий» першим, и индекс 0 перестал означать
+ * «дефолт». Если совпадения нет (старый сервер, чужой формат) — первая карточка.
+ */
+function rootVariantId(plan, variants) {
+  const same = (entry) => Number(entry.total_min) === Number(plan.total_min) &&
+    Number(entry.price_grn) === Number(plan.price_grn) &&
+    Number(entry.transfers) === Number(plan.transfers);
+  const hit = variants.filter(same)[0] || variants[0] || {};
+  return hit.id == null ? '' : String(hit.id);
+}
+
+/**
  * Карточки над саммарі (#plan-variants). Викликається з render(): картки
  * з'являються одразу, паралельно з озвученням тексту. Один варіант або жодного
  * — карток НЕ рендеримо взагалі (панель схована, лишається стандартний текст).
@@ -1746,16 +1773,21 @@ function renderVariantCards(plan) {
     return false;
   }
 
+  // Карточка, чий план уже на карті: корінь відповіді. Шукаємо за цифрами —
+  // після цінового пріоритету вона може стояти не першою.
+  const shownId = rootVariantId(plan, variants);
+  state.defaultVariantId = shownId;
+  state.activeVariantId = shownId;
+
   const times = variants.map((v) => Number(v.total_min)).filter(Number.isFinite);
   const prices = variants.map((v) => Number(v.price_grn)).filter(Number.isFinite);
   const bestTime = Math.min.apply(null, times);
   const bestPrice = Math.min.apply(null, prices);
 
   state.variantOffer = plan;
-  state.activeVariantId = variants[0].id;
 
   box.innerHTML = '';
-  variants.forEach((variant, index) => {
+  variants.forEach((variant) => {
     const time = Number(variant.total_min);
     const price = Number(variant.price_grn);
     const timeWorse = Number.isFinite(time) && time > bestTime + 0.05;
@@ -1766,9 +1798,12 @@ function renderVariantCards(plan) {
 
     const card = document.createElement('button');
     card.type = 'button';
-    card.className = 'variant-card' + (index === 0 ? ' active' : '');
-    card.setAttribute('data-variant-id', String(variant.id || index));
-    card.setAttribute('aria-pressed', index === 0 ? 'true' : 'false');
+    // Активна — та карточка, чий план зараз на карті (а не перша в списку):
+    // інакше підсвітка казала б «обрано Дешевий», коли на карті «Швидкий».
+    const isActive = String(variant.id) === shownId;
+    card.className = 'variant-card' + (isActive ? ' active' : '');
+    card.setAttribute('data-variant-id', String(variant.id));
+    card.setAttribute('aria-pressed', isActive ? 'true' : 'false');
 
     const tag = document.createElement('span');
     tag.className = 'variant-tag';

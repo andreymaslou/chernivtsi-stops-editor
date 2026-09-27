@@ -182,9 +182,10 @@ def test_variants_carry_their_own_speech(monkeypatch):
     assert body["mode"] == "plan", body
     # Корінь теж озвучується повністю (окремі тести — вище).
     assert _legs_not_spoken(body) == []
-    # Перший варіант — завжди кореневий план, тож список непорожній навіть
-    # коли другого прогону немає.
-    assert body["variants"], "варіанти мусять бути завжди (перший — дефолт)"
+    # Кореневий план — завжди серед варіантів (і він один, коли другого прогону
+    # немає). Першим він стоїть лише коли не спрацював ціновий пріоритет
+    # (PRICE_PREFER_* у router_layer: «Дешевий» виходить перед «Швидким»).
+    assert body["variants"], "варіанти мусять бути завжди (корінь + другий прогін)"
     for variant in body["variants"]:
         assert (variant.get("speech") or {}).get("text"), (
             "варіант без speech: %r" % variant.get("id")
