@@ -1,7 +1,8 @@
 /*
  * Дешёвая проверка живого парка в браузере: поток (SSE), кнопки маршрутов,
  * метки джерела на них (GPS/sim), хрестик ❌ «GPS маршруту мертвий» (§3.6),
- * источник «симулятор», режим «рух».
+ * голосовий моніторинг маршрутів (фільтр парку за номером), источник
+ * «симулятор», режим «рух».
  *
  * Зачем отдельно от tools/ui/check_emulator.js: тот прогоняет ВЕСЬ сценарий
  * эмулятора, включая /api/plan, — то есть тратит ключ OpenRouter. Здесь только
@@ -273,6 +274,55 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     '| легенда:', deadMarks ? deadMarks.realLegend.trim() : '(нема)');
   await page.screenshot({ path: path.join(__dirname, 'out', 'fleet_filter.png') });
 
+  // Голосовой мониторинг маршрутов (идея 2026-09-28, renderMonitorRoutes):
+  // сервер вернул mode=monitor_routes — фронт не рисует путь А→Б, а применяет
+  // фильтр парка к названным маршрутам. LLM и ключ OpenRouter тут не нужны:
+  // подаём ответ напрямую через мини-API — тем же путём его отдал бы
+  // /api/plan, если бы владелец сказал «покажи дев'ятку і десятку».
+  const monitor = await page.evaluate(async () => {
+    window.Emulator.applySnapshot({
+      source: 'mixed',
+      vehicles: [
+        { vehicle_type: 'bus', route_label: '9', board_number: 'M-9', lat: 48.2921,
+          lon: 25.9358, is_live: true, speed_kmh: 20, heading_deg: 90, source: 'sim' },
+        { vehicle_type: 'bus', route_label: '10', board_number: 'M-10', lat: 48.2931,
+          lon: 25.9368, is_live: true, speed_kmh: 20, heading_deg: 90, source: 'sim' },
+        { vehicle_type: 'bus', route_label: '15', board_number: 'M-15', lat: 48.2941,
+          lon: 25.9378, is_live: true, speed_kmh: 20, heading_deg: 90, source: 'sim' },
+      ],
+    });
+    const before = document.querySelectorAll('.veh-marker').length;
+    await window.Emulator.renderMonitorRoutes({
+      mode: 'monitor_routes',
+      routes: [
+        { key: 'bus|9', type: 'bus', label: '9', number: '9' },
+        { key: 'bus|10', type: 'bus', label: '10', number: '10' },
+      ],
+      missing_routes: [],
+      message: 'Показую маршрути 9 та 10 — на карті лише їхні машини.',
+      speech: { text: 'Показую маршрути 9 та 10.', lang: 'uk-UA' },
+    });
+    const chip15 = document.querySelector('.route-chip[data-key="bus|15"]');
+    return {
+      before: before,
+      after: document.querySelectorAll('.veh-marker').length,
+      on: [...document.querySelectorAll('.route-chip[aria-pressed="true"]')]
+        .map((el) => el.dataset.key),
+      off: document.querySelectorAll('.route-chip[aria-pressed="false"]').length,
+      chip15Off: chip15 ? chip15.getAttribute('aria-pressed') : null,
+      fleet: (document.getElementById('fleet-toggle') || {}).checked === true,
+      speech: window.Emulator.lastSpeech(),
+      answer: (document.getElementById('answer') || {}).textContent || '',
+      status: (document.getElementById('status') || {}).textContent || '',
+    };
+  });
+  console.log('моніторинг маршрутів: увімкнено', monitor.on.join(' + '),
+    '| маркерів', monitor.before, '->', monitor.after,
+    '| кнопок вимкнено', monitor.off, '| парк увімкнено:', monitor.fleet);
+  console.log('  голос:', JSON.stringify(monitor.speech),
+    '| панель:', monitor.answer.trim().slice(0, 80),
+    '| статус:', monitor.status.trim());
+
   console.log('помилок консолі:', errors.length, errors.join(' | '));
   await browser.close();
 
@@ -301,6 +351,13 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     deadMarks.realBack.dead === false && deadMarks.realBack.shown === false &&
     deadMarks.realBack.badge === 'GPS' && deadMarks.realBack.source === 'gps' &&
     deadMarks.realCount === 37 && /без GPS понад 1 годину: 37/.test(deadMarks.realLegend) &&
+    // голосовий моніторинг: парк сужено до 9 і 10, 15 сховано, фраза озвучена
+    monitor.before === 3 && monitor.after === 2 &&
+    monitor.on.join(',') === 'bus|9,bus|10' && monitor.off === 36 &&
+    monitor.chip15Off === 'false' && monitor.fleet &&
+    /Показую маршрути 9 та 10\./.test(monitor.speech) &&
+    /моніторинг/.test(monitor.answer) && /9 та 10/.test(monitor.answer) &&
+    /показую маршрути: 9, 10/.test(monitor.status) &&
     /пауза/.test(play.label) && errors.length === 0;
   console.log(ok ? 'OK: потік і фільтр працюють у браузері.' : 'FAIL');
   process.exit(ok ? 0 : 1);

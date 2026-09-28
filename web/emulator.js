@@ -18,6 +18,7 @@ const EXAMPLES = [
   'з Калинки до Універу',
   'Тралка → Гравітон',
   'як доїхати до Готелю Буковина',
+  'покажи дев\'ятку і десятку',
 ];
 
 const state = {
@@ -65,6 +66,10 @@ const state = {
   variantOffer: null,
   defaultVariantId: null,
   activeVariantId: null,
+  // Остання фраза, віддана в голосовий синтез (speakUk). Читається UI-проверкой
+  // через window.Emulator: у headless-браузері голос не послухати, а факт
+  // озвучки («показую маршрути 9 та 10») перевірити треба.
+  lastSpeech: '',
 };
 
 // ---------------------------------------------------------------------------
@@ -999,6 +1004,29 @@ function toggleRoute(key) {
   applyRouteFilter();
 }
 
+/**
+ * Ключі кнопок маршрутів из ответа сервера — для программного фильтра парка.
+ *
+ * Ключ сервер собирает так же, как renderRouteChips («bus|9A»), поэтому
+ * обычно берём его как есть; canonicalRouteKey — страховка на случай алиаса
+ * перевозчика («3/3a» = кнопка «3»). Ключ, которого нет среди кнопок (номер
+ * вне активных 38), молча отбрасываем: такой маршрут на карте всё равно
+ * нечем показать, а сервер о нём уже сказал в missing_routes.
+ */
+function selectFleetRoutes(routes) {
+  const keys = [];
+  (Array.isArray(routes) ? routes : []).forEach((route) => {
+    if (!route) return;
+    const type = String(route.type || '').trim();
+    const label = String(route.label || route.number || '').trim();
+    if (!type || !label) return;
+    const served = String(route.key || '');
+    const key = state.routeMeta.has(served) ? served : canonicalRouteKey(type, label);
+    if (state.routeMeta.has(key) && keys.indexOf(key) === -1) keys.push(key);
+  });
+  return keys;
+}
+
 /** «Усі» / «жодного»: швидка установка фільтра. */
 function setAllRoutes(visible) {
   state.hiddenRoutes = visible ? new Set() : new Set(state.routeMeta.keys());
@@ -1145,6 +1173,9 @@ function render(endpoint, data) {
   clearLayers();
   if (data.mode === 'off_topic') {
     renderOffTopic(data);
+  } else if (data.mode === 'monitor_routes') {
+    // «Покажи дев'ятку і десятку»: рисовать нечего — только парк фильтруем.
+    renderMonitorRoutes(data);
   } else if (data.mode === 'clarify' || data.mode === 'no_route' || data.mode === 'manual_input') {
     renderInfo(data);
   } else if (Array.isArray(data.legs)) {
@@ -1206,6 +1237,72 @@ function renderOffTopic(data) {
     utterance.lang = 'uk-UA';
     window.speechSynthesis.speak(utterance);
   }
+}
+
+/**
+ * Голосовий моніторинг маршрутів (ідея 2026-09-28): сервер прислав не маршрут
+ * А→Б, а номери — «покажи дев'ятку і десятку».
+ *
+ * Малювати тут нічого: треба звузити ЖИВИЙ ПАРК до цих маршрутів. Тому
+ * використовуємо той самий стан, що й кліки по кнопках (`state.hiddenRoutes`):
+ * фільтр і далі поводиться як звичайний, власник бачить приховані чипи
+ * (пунктир + `aria-pressed=false`) і одною кнопкою «усі» повертає все місто.
+ * Ключі беремо з відповіді сервера (`routes[].key` = «bus|9A»), тому
+ * розбіжностей у написанні номера («9а»/«9А»/«9A») не виникає.
+ *
+ * Парк вмикаємо самі: моніторинг — це запит «де зараз машини», і порожня
+ * карта тут була б обманом. Якщо серед маршрутів є тролейбус — вмикаємо й
+ * галочку «тролейбуси»: у панелі вони за замовчуванням вимкнені (§3.5), і
+ * без цього «покажи 5» для тролейбуса не показало б нічого.
+ */
+async function renderMonitorRoutes(data) {
+  if (!state.routeMeta.size) await loadManifest();  // кнопки могли ще не приїхати
+  const keys = selectFleetRoutes(data.routes);
+  // Плана на карті більше немає (render() уже почистив шари), а разом з ним
+  // зникають картки варіантів і золота ціль «сідати сюди».
+  hideVariantCards();
+  state.lastPlan = null;
+  setTargetBoards(null);
+
+  if (keys.length) {
+    if (!state.fleetOn) toggleFleet(true);
+    if (keys.some((key) => key.indexOf('trolley|') === 0)) setTrolleysVisible(true);
+    state.hiddenRoutes = new Set(
+      Array.from(state.routeMeta.keys()).filter((key) => keys.indexOf(key) === -1)
+    );
+    syncRouteChips();
+    applyRouteFilter();
+  }
+
+  const labels = keys.map((key) => key.slice(key.indexOf('|') + 1));
+  const message = String(data.message || '').trim() ||
+    (labels.length ? 'На карті лише машини названих маршрутів.' : 'Не знаю такого маршруту.');
+  const parts = ['<span class="badge plan">моніторинг</span>', esc(message)];
+  if (labels.length) {
+    parts.push('на карті: ' + labels.map((label) => esc('🚌 ' + label)).join(' + '));
+  }
+  document.getElementById('answer').innerHTML = parts.join('\n');
+  setStatus(
+    labels.length ? 'показую маршрути: ' + labels.join(', ') : 'маршрут не знайдено',
+    labels.length ? 'ok' : 'error',
+  );
+  speakUk(monitorSpeech(data, labels));
+}
+
+/**
+ * Фраза для озвучки моніторингу: готова з сервера (`speech.text`), інакше —
+ * короткий локальний варіант из номеров (старый сервер поля не отдаёт).
+ */
+function monitorSpeech(data, labels) {
+  const speech = data && data.speech;
+  const fromServer = speech && typeof speech.text === 'string' ? speech.text.trim() : '';
+  if (fromServer) return fromServer;
+  if (labels.length === 1) return 'Показую маршрут ' + labels[0] + '.';
+  if (labels.length > 1) {
+    return 'Показую маршрути ' + labels.slice(0, -1).join(', ') + ' та ' +
+      labels[labels.length - 1] + '.';
+  }
+  return String((data && data.message) || '').trim() || 'Не знаю такого маршруту.';
 }
 
 /** Откат: сервер только понял фразу и вернул две остановки. */
@@ -1629,6 +1726,28 @@ function stopVoice() {
       typeof window.speechSynthesis.cancel === 'function') {
     try { window.speechSynthesis.cancel(); } catch (err) { /* немає голосів */ }
   }
+}
+
+/**
+ * Коротка фраза вголос (uk-UA) — для режимів без плана: моніторинг маршрутів.
+ *
+ * Готовый текст собирает сервер (`speech.text`), дублировать формулировки на
+ * клиенте нельзя: «Показую маршрути 9 та 10» звучит одинаково во всех клиентах.
+ * `state.lastSpeech` хранит последнюю фразу — UI-проверка в headless-браузере
+ * иначе не может убедиться, что озвучка была (голос там не послушать).
+ */
+function speakUk(text) {
+  const phrase = String(text || '').trim();
+  if (!phrase) return;
+  state.lastSpeech = phrase;
+  if (typeof window.speechSynthesis === 'undefined' ||
+      typeof window.SpeechSynthesisUtterance !== 'function') return;
+  try {
+    const utterance = new SpeechSynthesisUtterance(phrase);
+    utterance.lang = 'uk-UA';
+    stopVoice();
+    window.speechSynthesis.speak(utterance);
+  } catch (err) { /* синтез може бути вимкнений — текст і так видно */ }
 }
 
 /** Озвучення відповіді паралельно з появою карток (Web Speech, uk-UA).
@@ -2457,6 +2576,11 @@ window.Emulator = {
   // змішаний сріз (real + sim) і перевіряє метку GPS на чипах маршрутів: на
   // локальному стенді трекера немає, і GPS-стан інакше не відтворити.
   applySnapshot,
+  // Голосовий моніторинг (render) і озвучка: UI-проверка подаёт ответ
+  // /api/plan з mode=monitor_routes напрямую — без ключа OpenRouter — и
+  // сверяет фильтр парка + текст, который ушёл в синтез.
+  renderMonitorRoutes,
+  lastSpeech: () => state.lastSpeech,
 };
 
 })(); // конец IIFE: внутренние имена не текут в глобальную область редактора
