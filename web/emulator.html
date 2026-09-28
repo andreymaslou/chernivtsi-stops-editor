@@ -271,6 +271,16 @@
     .route-chip.is-gps .route-chip-src { color: #4ade80; }
     .route-chip.is-stale { border-color: #4a5058; }
     .route-chip.is-stale .route-chip-src { color: #9aa4b2; }
+
+    /* Мертвий GPS маршруту (§3.6): координат по маршруту не приходило понад
+       годину — він на фоллбеку, машини на карті віртуальні. Червоний хрестик
+       біля номера + червона рамка: на телефоні це видно одразу, без відкриття
+       маркерів і легенди. Хрестик лежить у розмітці чипа (renderRouteChips),
+       показує його лише клас .is-dead — список на кожному кадрі потоку не
+       перебудовується. */
+    .route-chip-dead { display: none; font-size: 9px; line-height: 1; }
+    .route-chip.is-dead { border-color: #7f2d2d; }
+    .route-chip.is-dead .route-chip-dead { display: inline; }
     #fleet-routes-legend { display: block; margin-top: 4px; }
 
     /* Крайні режими фільтра видно на самій кнопці: інакше на мобільному
@@ -604,7 +614,7 @@
   <div id="map" class="map"></div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script src="emulator.js?v=2026-09-28d"></script>
+  <script src="emulator.js?v=2026-09-28e"></script>
 </body>
 
 </html>

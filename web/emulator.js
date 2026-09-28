@@ -749,6 +749,15 @@ function renderRouteChips() {
       dot.style.background = meta.colour;
       chip.appendChild(dot);
       chip.appendChild(document.createTextNode(meta.label));
+      // Хрестик «GPS мертвий» (§3.6): у маршрута в срезе нет жодної машини від
+      // трекера — координат не приходило понад годину, працює фоллбек на
+      // симулятор. Показ/скриття — syncRouteSourceMarks(); сам список на
+      // кожному кадрі потоку не перебудовуємо, тому елемент створюємо тут.
+      const dead = document.createElement('span');
+      dead.className = 'route-chip-dead';
+      dead.textContent = '❌';
+      dead.setAttribute('aria-hidden', 'true');
+      chip.appendChild(dead);
       // Метка джерела (GPS / порожньо): вміст і клас ставить
       // syncRouteSourceMarks() — список не перебудовуємо на кожен кадр потоку.
       const mark = document.createElement('span');
@@ -824,6 +833,27 @@ const ROUTE_MARKS = {
 };
 
 /**
+ * Пояснення до хрестика «GPS мертвий» (§3.6): годину без координат —
+ * маршрут на фоллбеку, машини на карті віртуальні.
+ */
+const ROUTE_DEAD_NOTE = '❌ GPS маршруту немає понад 1 годину (фоллбек на симулятор)';
+
+/**
+ * Чи чекаємо ми взагалі реальний GPS у цьому срезі.
+ *
+ * На «симуляторі» хрестиків немає: GPS і не запитували, тож «жодної реальної
+ * машини» — це сам режим, а не втрата зв'язку. Так само, коли в «авто» трекер
+ * не піднятий або мовчить: сервер віддає срез симулятора (`source: "sim"`), і
+ * позначати всі 38 маршрутів мертвими означало б малювати поломку, якої немає.
+ * А от у «авто» з живим трекером (source `mixed`) і в режимі «лише GPS»
+ * (трекер) хрестик — єдина ознака, що реального зв'язку по маршруту немає.
+ */
+function gpsExpected() {
+  const snapshot = String(state.fleetSource || '');
+  return state.fleetMode !== 'sim' && snapshot !== '' && snapshot !== 'sim';
+}
+
+/**
  * Джерело по кожному маршруту: скільки машин якого джерела і чи є жива.
  * Рахуємо ЗАВЖДИ по всьому срізу (навіть приховані фільтром) — метка описує
  * маршрут, а не те, що зараз видно на карті.
@@ -852,8 +882,10 @@ function syncRouteSourceMarks() {
   const box = document.getElementById('fleet-routes');
   if (!box) return;
   const states = routeSourceStates();
+  const gpsAlive = gpsExpected();
   let gps = 0;
   let stale = 0;
+  let dead = 0;
   box.querySelectorAll('.route-chip').forEach((chip) => {
     const stat = states.get(chip.dataset.key);
     let mark = 'none';
@@ -867,30 +899,43 @@ function syncRouteSourceMarks() {
     ['gps', 'stale', 'sim'].forEach((name) => {
       chip.classList.toggle('is-' + name, name === mark);
     });
+    // «Мертвий» GPS (§3.6): реального борта на маршруті немає взагалі — ні
+    // живого, ні «за розкладом». Так сервер і віддає маршрут на фоллбеку:
+    // симуляторних машин у ньому скільки завгодно, жодної з source="real" — ні
+    // (merge_fleet прибирає призраки старшого за годину треку). Тому стан
+    // читається з даних среза, а не з окремого поля, і маршрут без машин
+    // теж «мертвий»: координат не приходило, показати реальне нема чого.
+    const isDead = gpsAlive && !(stat && stat.real);
+    if (isDead) dead += 1;
+    chip.classList.toggle('is-dead', isDead);
     const badge = chip.querySelector('.route-chip-src');
     if (badge) {
       badge.textContent = info.text;
       badge.title = info.note;
     }
-    chip.title = (chip.dataset.baseTitle || '') + ' · ' + info.note;
+    chip.title = (chip.dataset.baseTitle || '') + ' · ' + info.note +
+      (isDead ? ' · ' + ROUTE_DEAD_NOTE : '');
   });
-  syncRoutesLegend(gps, stale);
+  syncRoutesLegend(gps, stale, dead);
 }
 
 /** Легенда під списком: скільком маршрутам реальний GPS віддав машини. */
-function syncRoutesLegend(gps, stale) {
+function syncRoutesLegend(gps, stale, dead) {
   const el = document.getElementById('fleet-routes-legend');
   if (!el) return;
   const total = state.routeMeta.size;
   const staleNote = stale ? ' (+' + stale + ' «за розкладом»)' : '';
+  // Хрестик пояснюємо тут же: на сусідніх маршрутах метка GPS, а на цьому
+  // «без GPS понад годину» — інакше виглядає як збій, а не як фоллбек (§3.6).
+  const deadNote = dead ? ' · ❌ без GPS понад 1 годину: ' + dead : '';
   if (gps) {
     el.textContent = 'метка GPS — маршрут на даних перевізника: ' +
-      gps + ' із ' + total + staleNote;
+      gps + ' із ' + total + staleNote + deadNote;
   } else if (total && state.vehicles.size) {
     el.textContent = 'метка GPS — маршрут на даних перевізника: зараз жодного, ' +
-      'увесь парк віртуальний' + staleNote;
+      'увесь парк віртуальний' + staleNote + deadNote;
   } else {
-    el.textContent = 'метка GPS — маршрут на даних перевізника';
+    el.textContent = 'метка GPS — маршрут на даних перевізника' + deadNote;
   }
 }
 

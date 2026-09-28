@@ -1,6 +1,7 @@
 /*
  * Дешёвая проверка живого парка в браузере: поток (SSE), кнопки маршрутов,
- * метки джерела на них (GPS/sim), источник «симулятор», режим «рух».
+ * метки джерела на них (GPS/sim), хрестик ❌ «GPS маршруту мертвий» (§3.6),
+ * источник «симулятор», режим «рух».
  *
  * Зачем отдельно от tools/ui/check_emulator.js: тот прогоняет ВЕСЬ сценарий
  * эмулятора, включая /api/plan, — то есть тратит ключ OpenRouter. Здесь только
@@ -171,10 +172,14 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     gps: document.querySelectorAll('.route-chip[data-source="gps"]').length,
     sim: document.querySelectorAll('.route-chip[data-source="sim"]').length,
     none: document.querySelectorAll('.route-chip[data-source="none"]').length,
+    // Хрестиків у режимі «симулятор» бути не повинно: GPS там і не просили,
+    // «жодної реальної машини» — це сам режим, а не втрата звʼязку.
+    deads: document.querySelectorAll('.route-chip.is-dead').length,
     legend: (document.getElementById('fleet-routes-legend') || {}).textContent || '',
   }));
   console.log('метки без трекера: GPS', marksSim.gps, '| sim', marksSim.sim,
-    '| none', marksSim.none, '| легенда:', marksSim.legend.trim());
+    '| none', marksSim.none, '| хрестиків', marksSim.deads,
+    '| легенда:', marksSim.legend.trim());
 
   // GPS-стан метки: трекера локально немає, тому підмішуємо змішаний сріз
   // через публічний міні-API (той самий applySnapshot, що й кадр потоку).
@@ -206,6 +211,66 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   console.log('підмішаний real:', marksGps && marksGps.key, '-> метка', marksGps && marksGps.badge,
     '| data-source', marksGps && marksGps.source, '| GPS-кнопок', marksGps && marksGps.gps,
     '| легенда:', marksGps ? marksGps.legend.trim() : '(нема)');
+
+  // Хрестик «GPS мертвий» (§3.6): маршрут, у срезі якого немає жодної машини з
+  // реальним джерелом, — це фоллбек на симулятор (координат не приходило
+  // понад годину). Трекера локально немає, тому обидва стани підмішуємо тим
+  // самим applySnapshot: спершу срез з однією sim-машиною (мертві всі 38
+  // маршрутів), потім — з real-машиною того ж маршруту (хрестик гасне, метка
+  // стає GPS). Режим повертаємо на «авто»: у «симуляторі» хрестиків немає за
+  // задумом, і це вже перевірено вище (marksSim.deads).
+  await page.click('#fleet-source button[data-source="auto"]');
+  const deadMarks = await page.evaluate(() => {
+    const chip = document.querySelector('.route-chip[data-source="sim"]') ||
+      document.querySelector('.route-chip');
+    if (!chip) return null;
+    const key = chip.dataset.key;
+    const type = key.slice(0, key.indexOf('|'));
+    const label = key.slice(key.indexOf('|') + 1);
+    const vehicle = (source, board) => ({
+      vehicle_type: type, route_label: label, board_number: board,
+      lat: 48.2921, lon: 25.9358, is_live: source === 'real', speed_kmh: 18.4,
+      heading_deg: 100, source: source,
+    });
+    // Хрестик мусить бути не лише в DOM, а й видимий: CSS показує його
+    // виключно під класом .is-dead (інакше він тягнув би ширину чипа).
+    const read = () => {
+      const el = document.querySelector('.route-chip[data-key="' + key + '"]');
+      const cross = el ? el.querySelector('.route-chip-dead') : null;
+      return {
+        dead: el ? el.classList.contains('is-dead') : null,
+        cross: cross ? cross.textContent : '',
+        shown: cross ? cross.offsetWidth > 0 : false,
+        badge: el ? (el.querySelector('.route-chip-src') || {}).textContent : '',
+        source: el ? el.dataset.source : '',
+      };
+    };
+    const legendOf = () =>
+      (document.getElementById('fleet-routes-legend') || {}).textContent || '';
+
+    window.Emulator.applySnapshot({ source: 'mixed', vehicles: [vehicle('sim', 'SIM-FALLBACK')] });
+    const simOnly = read();
+    const simOnlyCount = document.querySelectorAll('.route-chip.is-dead').length;
+    const simOnlyLegend = legendOf();
+
+    window.Emulator.applySnapshot({ source: 'mixed', vehicles: [vehicle('real', 'TEST-REAL')] });
+    const realBack = read();
+    const realCount = document.querySelectorAll('.route-chip.is-dead').length;
+    const realLegend = legendOf();
+
+    return {
+      key: key, simOnly: simOnly, simOnlyCount: simOnlyCount,
+      simOnlyLegend: simOnlyLegend, realBack: realBack, realCount: realCount,
+      realLegend: realLegend,
+    };
+  });
+  console.log('хрестик ❌:', deadMarks && deadMarks.key,
+    '| sim-сріз ->', deadMarks && (deadMarks.simOnly.shown ? deadMarks.simOnly.cross : 'нема'),
+    '(мертвих', deadMarks && deadMarks.simOnlyCount + ')',
+    '| real-сріз ->', deadMarks && (deadMarks.realBack.shown ? deadMarks.realBack.cross : 'нема'),
+    '(мертвих', deadMarks && deadMarks.realCount + ', метка',
+    deadMarks && deadMarks.realBack.source + ')',
+    '| легенда:', deadMarks ? deadMarks.realLegend.trim() : '(нема)');
   await page.screenshot({ path: path.join(__dirname, 'out', 'fleet_filter.png') });
 
   console.log('помилок консолі:', errors.length, errors.join(' | '));
@@ -226,6 +291,16 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     marksSim.gps + marksSim.sim + marksSim.none === 38 && /жодного/.test(marksSim.legend) &&
     marksGps && marksGps.source === 'gps' && marksGps.badge === 'GPS' && marksGps.gpsChecked &&
     marksGps.gps === 1 && /1 із 38/.test(marksGps.legend) &&
+    // хрестик ❌ «GPS мертвий» (§3.6): у «симуляторі» його немає взагалі, а в
+    // змішаному срізі мертві всі маршрути без real-машини — і жодного після
+    // того, як real прийшов на цей маршрут
+    marksSim.deads === 0 &&
+    deadMarks && deadMarks.simOnly.dead === true && deadMarks.simOnly.cross === '❌' &&
+    deadMarks.simOnly.shown && deadMarks.simOnlyCount === 38 &&
+    /без GPS понад 1 годину: 38/.test(deadMarks.simOnlyLegend) &&
+    deadMarks.realBack.dead === false && deadMarks.realBack.shown === false &&
+    deadMarks.realBack.badge === 'GPS' && deadMarks.realBack.source === 'gps' &&
+    deadMarks.realCount === 37 && /без GPS понад 1 годину: 37/.test(deadMarks.realLegend) &&
     /пауза/.test(play.label) && errors.length === 0;
   console.log(ok ? 'OK: потік і фільтр працюють у браузері.' : 'FAIL');
   process.exit(ok ? 0 : 1);
