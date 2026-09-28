@@ -188,6 +188,50 @@ const probe = () => ({
       dash: walkLine ? getComputedStyle(walkLine).strokeDasharray.replace(/px/g, '') : null,
       steps: document.querySelectorAll('.plan-step').length,
       tails: document.querySelectorAll('.plan-tail').length,
+      // Прапорець пересадки: в этом плане нога transfer есть, поэтому пунктир
+      // рисует она, а номер пересадки — наш новый маркер (идея 2026-09-29).
+      transfers: document.querySelectorAll('.plan-transfer').length,
+      transferLabels: [...document.querySelectorAll('.plan-transfer')]
+        .map((el) => el.getAttribute('data-transfer')),
+      // Стиль мераем именно здесь: в синтетическом плане прапорець ТОЧНО є
+      // (реальный план может быть прямым, без пересадок — тогда метрики null).
+      transferStyle: (() => {
+        const el = document.querySelector('.plan-transfer');
+        if (!el) return null;
+        const style = getComputedStyle(el);
+        return {
+          width: parseFloat(style.width),
+          height: parseFloat(style.height),
+          borderRadius: style.borderRadius,
+          borderWidth: parseFloat(style.borderTopWidth),
+          background: style.backgroundColor,
+          text: el.textContent.trim(),
+        };
+      })(),
+    };
+    // Фолбэк по координатам: ноги transfer НЕТ, а посадка следующей ноги — в
+    // 111 м от места выхода (+0.001° широты). Пунктир и 🚶 обязан появиться
+    // сам — иначе «куди йти» осталось бы загадкой (роутер иногда выбрасывает
+    // состояние «сел и сразу вышел», и ноги стыкуются без перехода).
+    // Вторую ногу собираем явно: копия первой, но посадка сдвинута на 111 м —
+    // иначе «провал» между ногами был бы равен целому маршруту (километры), а
+    // такой переход рисовать нельзя (порог TRANSFER_WALK_MAX_METERS).
+    const alight = rides[0].path[rides[0].path.length - 1];
+    const board = [alight[0] + 0.001, alight[1]];
+    const rideB = Object.assign({}, rides[0], {
+      path: [board, [board[0] + 0.0015, board[1]]],
+      stops: [],
+    });
+    api.clearLayers();
+    api.renderPlan({
+      legs: [rides[0], rideB],
+      vehicles: [],
+      to_stop_id: real.to_stop_id,
+    });
+    out.fallback = {
+      lines: document.querySelectorAll('.plan-walk-line').length,
+      icons: document.querySelectorAll('.plan-walk-icon').length,
+      transfers: document.querySelectorAll('.plan-transfer').length,
     };
     api.clearLayers();
     api.renderPlan(real);
@@ -297,6 +341,13 @@ const probe = () => ({
         ? getComputedStyle(walkLine).strokeDasharray.replace(/px/g, '') : null,
       walkIcons: document.querySelectorAll('.plan-walk-icon').length,
       finish: document.querySelectorAll('.plan-finish').length,
+      // Пересадки (ідея 2026-09-29): прапорець із номером на посадці 2-ї й
+      // наступних ног. Номер = порядковий рахунок пересадки, тому очікування
+      // считаем из числа ног-поездок, а не из plan.transfers: у плане может не
+      // быть ноги transfer, а номер у посадки следующей ноги всё равно есть.
+      transfers: document.querySelectorAll('.plan-transfer').length,
+      transferLabels: [...document.querySelectorAll('.plan-transfer')]
+        .map((el) => el.getAttribute('data-transfer')),
       stopDotStyle: visualMetrics(document.querySelector('.plan-stop-dot')),
       finishStyle: visualMetrics(document.querySelector('.plan-finish')),
       panelDots: [...document.querySelectorAll('#answer .step-dot')]
@@ -481,7 +532,20 @@ const probe = () => ({
     if (message.type() === 'error') report.errors.push('console: ' + message.text());
   });
   page.on('pageerror', (error) => report.errors.push('pageerror: ' + error.message));
-  page.on('requestfailed', (request) => report.errors.push('requestfailed: ' + request.url()));
+  page.on('requestfailed', (request) => {
+    // Закрытый EventSource потока парка — это НЕ ошибка: клиент намеренно рвёт
+    // соединение при смене режима/модельного времени и сразу открывает новое
+    // (`startFleetFeed()` → `closeFleetStream()`), а Chromium такой abort честно
+    // показывает как `net::ERR_ABORTED`. Без этого фильтра проверка «ошибок
+    // консоли нет» красная на ровном месте — замер на HEAD (без правок этого
+    // брифа) даёт те же два abort'а: стрим без `now` и стрим с `now`.
+    const failure = request.failure() || {};
+    if (failure.errorText === 'net::ERR_ABORTED' &&
+        request.url().includes('/api/fleet/stream')) {
+      return;
+    }
+    report.errors.push('requestfailed: ' + request.url());
+  });
   page.on('response', (response) => {
     if (response.status() >= 400) {
       report.errors.push('HTTP ' + response.status() + ': ' + response.url());
@@ -755,6 +819,31 @@ const probe = () => ({
     plan.mapWalk ? 'іконок: ' + plan.mapWalk.icons + ', пунктирів: ' + plan.mapWalk.lines +
       ' (синтетичний план: пеша нога без геометрії → пряма між зупинками)'
       : 'немає синтетичного плану');
+  check('прапорець пересадки з номером 1',
+    !!plan.mapWalk && plan.mapWalk.transfers === 1 &&
+    (plan.mapWalk.transferLabels || []).join(',') === '1',
+    plan.mapWalk ? 'прапорців: ' + plan.mapWalk.transfers + ', номери: ' +
+      JSON.stringify(plan.mapWalk.transferLabels) : 'немає синтетичного плану');
+  check('пунктир пересадки без ноги transfer (фолбэк по координатах)',
+    !!plan.mapWalk && !!plan.mapWalk.fallback &&
+    plan.mapWalk.fallback.lines === 1 && plan.mapWalk.fallback.icons === 1 &&
+    plan.mapWalk.fallback.transfers === 1,
+    plan.mapWalk && plan.mapWalk.fallback
+      ? 'пунктирів: ' + plan.mapWalk.fallback.lines + ', іконок: ' +
+        plan.mapWalk.fallback.icons + ', прапорців: ' + plan.mapWalk.fallback.transfers
+      : 'немає фолбэк-замера');
+  check('прапорці пересадок = кількості переходів',
+    ux.transfers === Math.max(0, ux.transit - 1) &&
+    (ux.transferLabels || []).join(',') ===
+      Array.from({ length: Math.max(0, ux.transit - 1) }, (_, i) => i + 1).join(','),
+    'прапорців: ' + ux.transfers + ' (ніг: ' + ux.transit + '), номери: ' +
+      JSON.stringify(ux.transferLabels));
+  const hasTransfers = Math.max(0, ux.transit - 1) > 0;
+  const ts = plan.mapWalk && plan.mapWalk.transferStyle;
+  check('прапорець пересадки — білий кружечок у колір лінії',
+    !!ts && ts.width === 24 && ts.height === 24 && ts.borderRadius === '50%' &&
+    ts.borderWidth >= 2 && ts.background === 'rgb(255, 255, 255)' && ts.text === '1',
+    JSON.stringify(ts) + (hasTransfers ? '' : ' (реальний план без пересадок — міряли синтетичний)'));
   check('пунктир пешої ноги не змінився',
     !!plan.mapWalk && String(plan.mapWalk.dash).replace(/\s+/g, '') === '1,10',
     'stroke-dasharray: ' + (plan.mapWalk ? plan.mapWalk.dash : 'немає'));

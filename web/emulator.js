@@ -1274,6 +1274,10 @@ async function renderMonitorRoutes(data) {
     applyRouteFilter();
   }
 
+  // Линии запрошенных маршрутов: одной машины на карте мало — «де зараз 9»
+  // читается только вместе с самой линией (идея 2026-09-29, п.2).
+  const shapeBounds = drawMonitorShapes(keys, data.shapes);
+
   const labels = keys.map((key) => key.slice(key.indexOf('|') + 1));
   const message = String(data.message || '').trim() ||
     (labels.length ? 'На карті лише машини названих маршрутів.' : 'Не знаю такого маршруту.');
@@ -1287,6 +1291,9 @@ async function renderMonitorRoutes(data) {
     labels.length ? 'ok' : 'error',
   );
   speakUk(monitorSpeech(data, labels));
+  // Маршрут мог быть в другом конце города — показываем его целиком. Парк при
+  // этом не трогаем: поток продолжает обновлять машины в своих точках.
+  if (shapeBounds.length) map.fitBounds(shapeBounds, { padding: [40, 40], maxZoom: 14 });
 }
 
 /**
@@ -1303,6 +1310,41 @@ function monitorSpeech(data, labels) {
       labels[labels.length - 1] + '.';
   }
   return String((data && data.message) || '').trim() || 'Не знаю такого маршруту.';
+}
+
+/**
+ * Полілінії маршрутів моніторингу (ідея 2026-09-29, п.2).
+ *
+ * Геометрію рахує сервер (`shapes` у відповіді /api/plan — обидва напрямки
+ * ланцюжка): у браузера свого джерела немає, `graph.json` (537 КБ) ми в клієнт
+ * не тягнемо, а `routes_manifest.json` — довідник номерів без координат.
+ * Колір берём із тих самих даних, що й чип маршруту (`state.routeMeta`): один
+ * маршрут не сміє бути зеленим у списку і синім на карті.
+ *
+ * Живуть лінії в `layerGroup` — тому у layerGroup, а не окремим шаром: кожен
+ * наступний ответ (`render()` → `clearLayers()`) і «Очистити карту» чистять
+ * рівно цей шар, отже «при виході з режиму моніторингу» прибирати нічого
+ * спеціально не треба, і забути теж нічого.
+ *
+ * Возвращает точки для fitBounds (пусто — линии не рисуем).
+ */
+function drawMonitorShapes(keys, shapes) {
+  const bounds = [];
+  (Array.isArray(shapes) ? shapes : []).forEach((shape) => {
+    const key = String((shape && shape.key) || '');
+    if (keys.indexOf(key) === -1) return;   // линии только запрошенных маршрутов
+    const meta = state.routeMeta.get(key);
+    const colour = (meta && meta.colour) || '#4f8cff';
+    (Array.isArray(shape.directions) ? shape.directions : []).forEach((route) => {
+      const coords = (route && Array.isArray(route.coords)) ? route.coords : [];
+      if (coords.length < 2) return;
+      L.polyline(coords, {
+        color: colour, weight: 4, opacity: .6, className: 'monitor-shape',
+      }).addTo(layerGroup);
+      coords.forEach((point) => bounds.push(point));
+    });
+  });
+  return bounds;
 }
 
 /** Откат: сервер только понял фразу и вернул две остановки. */
@@ -1344,6 +1386,15 @@ function renderRoute(data) {
 // клиенте: полная линия через весь город даёт «простыню» вместо контекста.
 const TAIL_CLIP_STOPS = 6;        // ± столько остановок маршрута вокруг ноги
 const ARROW_MIN_SEGMENT_M = 800;  // длинный сегмент получает свой шеврон
+// Пересадка: с какого расстояния выход и посадка — уже РАЗНЫЕ остановки (а не
+// одна и та же точка двух маршрутов) и до какого переход ещё «пеший».
+// Нижний порог — тот же смысл, что у группировки остановок в графе: две
+// цепочки вполне могут делить одну остановку, и тогда пунктир между ними был
+// бы нулевой длины. Верхний — запас в два квартала: дальше это уже не
+// «перейти дорогу», а подозрительные данные, и рисовать «иди пешком километр»
+// нечестно (§ TRANSFER_MAX_METERS в graph_layer.py — 150 м на группировку).
+const SAME_STOP_METERS = 15;
+const TRANSFER_WALK_MAX_METERS = 500;
 
 /** Азимут сегмента (0° — север, по часовой) — та же формула, что в роутере. */
 function bearingDeg(lat1, lon1, lat2, lon2) {
@@ -1509,6 +1560,75 @@ function walkBadge(point) {
   });
 }
 
+/**
+ * Пересадка: прапорець із номером у кружечку на посадці другої й наступних ног
+ * (ідея 2026-09-29, п.1).
+ *
+ * Смысл: по плану с пересадкой пассажир видел только номера шагов (1, 2, 3), и
+ * «где именно пересаживаться» приходилось искать в тексте. Флажок стоит ровно
+ * на остановке посадки следующего ТС (та же точка, что и 🚶-пунктир от места
+ * выхода), цвет — линия, в которую садимся, номер — счёт пересадок.
+ */
+function transferBadge(number, point, colour, name) {
+  const marker = L.marker(point, {
+    interactive: true,
+    keyboard: true,
+    zIndexOffset: 480,
+    icon: L.divIcon({
+      className: 'plan-transfer-wrap',
+      html: '<div class="plan-transfer" data-transfer="' + number +
+        '" style="--route-colour: ' + colour + '">' +
+        '<span class="plan-transfer-num">' + number + '</span></div>',
+      iconSize: [24, 34],
+      // Якір — внизу «ножки» прапорця: флажок стоит НА остановке, а не парит
+      // над ней (как и фініш).
+      iconAnchor: [12, 32],
+    }),
+  });
+  if (name) {
+    const label = document.createElement('span');
+    label.textContent = 'пересадка: ' + name;
+    marker.bindTooltip(label, {
+      className: 'plan-stop-tooltip',
+      direction: 'top',
+      offset: [0, -14],
+    });
+    marker.on('click', () => marker.openTooltip());
+  }
+  return marker;
+}
+
+/** Ближайшая нога-поездка от индекса в нужную сторону (-1 назад, +1 вперёд). */
+function nearestTransitIndex(legs, index, step) {
+  for (let i = index + step; i >= 0 && i < legs.length; i += step) {
+    if (legs[i] && legs[i].type === 'transit') return i;
+  }
+  return -1;
+}
+
+/**
+ * Какие провалы между ногами уже закрыты ногой `transfer` (§ роутер её всегда
+ * добавляет между посадками). Ключ — «индекс ноги выхода>индекс ноги посадки».
+ *
+ * Зачем: у такой ноги есть `at` (название остановки) и `walk_min`, и рендер
+ * ниже уже рисует по ней пунктир. Второй пунктир поверх — это две линии на
+ * одном месте, и хуже: они бы спорили, какая из них «правильная».
+ * Нога без ходьбы (kind «transfer» и walk_min = 0 — пересадка на той же
+ * остановке) линии не рисует, поэтому такую щель «закрытой» не считаем.
+ */
+function bridgedTransferGaps(legs) {
+  const gaps = new Set();
+  (Array.isArray(legs) ? legs : []).forEach((leg, index) => {
+    if (!leg || (leg.type !== 'transfer' && leg.kind !== 'walk')) return;
+    const isWalk = leg.kind === 'walk' || Number(leg.walk_min) > 0;
+    if (!isWalk || index === 0) return;   // walk[0] — это дорога до первой посадки
+    const prev = nearestTransitIndex(legs, index, -1);
+    const next = nearestTransitIndex(legs, index, 1);
+    if (prev >= 0 && next >= 0) gaps.add(prev + '>' + next);
+  });
+  return gaps;
+}
+
 /** Основной режим: сервер посчитал маршрут (возможно, с пересадкой). */
 function renderPlan(plan) {
   // Гасим режим добавления остановок: клики по карте теперь смотрят план
@@ -1530,6 +1650,11 @@ function renderPlan(plan) {
   const legEnds = plan.legs.map((leg) =>
     (leg.type === 'transit' && Array.isArray(leg.path) && leg.path.length
       ? leg.path[leg.path.length - 1] : null));
+
+  // Пересадки (идея 2026-09-29, п.1): щели между ногами, которые уже закрыла
+  // нога transfer, и индекс предыдущей ноги-поездки — для координатного фолбэка.
+  const walkBridged = bridgedTransferGaps(plan.legs);
+  let prevTransitIndex = -1;
 
   let step = 0;
 
@@ -1588,6 +1713,29 @@ function renderPlan(plan) {
 
       // Посадка: номер шага вместо безликой точки — глаз цепляется сразу.
       if (path.length) stepBadge(step, path[0], colour, leg.from).addTo(legLayer);
+
+      // Пересадка: прапорець із номером на посадці 2-ї та наступних ног і
+      // піший зв'язок із місцем виходу. Нога transfer малює його сама, але її
+      // може й не бути (роутер викидає стан «сів і відразу вийшов» — тоді
+      // ноги з'єднуються без перехода) — тоді ведемо пунктир по координатах.
+      if (step > 1 && path.length) {
+        transferBadge(step - 1, path[0], colour, leg.from).addTo(legLayer);
+        const prevEnd = prevTransitIndex >= 0 ? legEnds[prevTransitIndex] : null;
+        const bridged = walkBridged.has(prevTransitIndex + '>' + index);
+        if (prevEnd && !bridged) {
+          const gap = distanceM(prevEnd[0], prevEnd[1], path[0][0], path[0][1]);
+          if (gap > SAME_STOP_METERS && gap <= TRANSFER_WALK_MAX_METERS) {
+            L.polyline([prevEnd, path[0]], {
+              color: '#808080', weight: 5, dashArray: '1, 10',
+              lineCap: 'round', lineJoin: 'round', className: 'plan-walk-line',
+            }).addTo(legLayer);
+            walkBadge([(prevEnd[0] + path[0][0]) / 2, (prevEnd[1] + path[0][1]) / 2])
+              .addTo(legLayer);
+            bounds.push(prevEnd, path[0]);
+          }
+        }
+      }
+      prevTransitIndex = index;
 
       // Ожидание: если показанная цифра посчитана по расписанию (нет живого борта
       // или живой приедет позже расписания), помечаем её как расчётную, а живой

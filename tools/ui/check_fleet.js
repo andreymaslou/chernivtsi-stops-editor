@@ -299,10 +299,30 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
         { key: 'bus|10', type: 'bus', label: '10', number: '10' },
       ],
       missing_routes: [],
+      // Геометрия линий: у 9-го два направления, у 10-го — одно. Вторая линия
+      // 10-го не должна появиться (её и не прислали), а линия 15-го — тоже:
+      // рисуем ТОЛЬКО запрошенные маршруты (идея 2026-09-29, п.2).
+      shapes: [
+        { key: 'bus|9', type: 'bus', label: '9', directions: [
+          { direction: 'A', coords: [[48.2921, 25.9358], [48.2961, 25.9428]] },
+          { direction: 'B', coords: [[48.2961, 25.9428], [48.2921, 25.9358]] },
+        ] },
+        { key: 'bus|10', type: 'bus', label: '10', directions: [
+          { direction: 'A', coords: [[48.2931, 25.9368], [48.2991, 25.9318]] },
+        ] },
+        { key: 'bus|15', type: 'bus', label: '15', directions: [
+          { direction: 'A', coords: [[48.2941, 25.9378], [48.3011, 25.9278]] },
+        ] },
+      ],
       message: 'Показую маршрути 9 та 10 — на карті лише їхні машини.',
       speech: { text: 'Показую маршрути 9 та 10.', lang: 'uk-UA' },
     });
     const chip15 = document.querySelector('.route-chip[data-key="bus|15"]');
+    const shapesDrawn = document.querySelectorAll('.monitor-shape').length;
+    // Выход из режима — любой следующий ответ ("Очистити карту", план, новый
+    // мониторинг) чистит layerGroup: линии обязаны исчезнуть сами.
+    window.Emulator.clearLayers();
+    const shapesAfterClear = document.querySelectorAll('.monitor-shape').length;
     return {
       before: before,
       after: document.querySelectorAll('.veh-marker').length,
@@ -311,6 +331,7 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
       off: document.querySelectorAll('.route-chip[aria-pressed="false"]').length,
       chip15Off: chip15 ? chip15.getAttribute('aria-pressed') : null,
       fleet: (document.getElementById('fleet-toggle') || {}).checked === true,
+      shapes: { drawn: shapesDrawn, afterClear: shapesAfterClear },
       speech: window.Emulator.lastSpeech(),
       answer: (document.getElementById('answer') || {}).textContent || '',
       status: (document.getElementById('status') || {}).textContent || '',
@@ -322,6 +343,9 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   console.log('  голос:', JSON.stringify(monitor.speech),
     '| панель:', monitor.answer.trim().slice(0, 80),
     '| статус:', monitor.status.trim());
+  console.log('  лінії маршрутів:', monitor.shapes.drawn,
+    '(очікується 3: два напрямки 9-го + один у 10-го; линия 15-го не рисуется)',
+    '| після виходу з режиму:', monitor.shapes.afterClear);
 
   console.log('помилок консолі:', errors.length, errors.join(' | '));
   await browser.close();
@@ -358,6 +382,8 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     /Показую маршрути 9 та 10\./.test(monitor.speech) &&
     /моніторинг/.test(monitor.answer) && /9 та 10/.test(monitor.answer) &&
     /показую маршрути: 9, 10/.test(monitor.status) &&
+    // лінії маршрутів: тільки запрошені, і зникають разом із режимом
+    monitor.shapes.drawn === 3 && monitor.shapes.afterClear === 0 &&
     /пауза/.test(play.label) && errors.length === 0;
   console.log(ok ? 'OK: потік і фільтр працюють у браузері.' : 'FAIL');
   process.exit(ok ? 0 : 1);
