@@ -11,13 +11,14 @@ from time_utils import APP_TIMEZONE, as_kyiv
 
 
 def test_gps_time_is_kyiv_and_utc_now_does_not_make_it_stale():
-    parsed = parse_gpstime("2026-09-23 12:00:00")
+    from datetime import timezone, timedelta
+    parsed = parse_gpstime("2026-09-23 11:00:00")
     assert parsed is not None
-    assert parsed.tzinfo == APP_TIMEZONE
+    assert parsed.tzinfo == timezone(timedelta(hours=2))
 
     vehicle = normalize_vehicle(
         {
-            "gpstime": "2026-09-23 12:00:00",
+            "gpstime": "2026-09-23 11:00:00",
             "lat": 48.29,
             "lng": 25.93,
             "idBusTypes": 1,

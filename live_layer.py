@@ -35,6 +35,7 @@ import logging
 import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional
+from datetime import datetime, timezone, timedelta
 
 from time_utils import APP_TIMEZONE, as_kyiv, format_kyiv, now_kyiv
 
@@ -155,15 +156,18 @@ def parse_gpstime(raw: Any) -> Optional[datetime]:
     """
     Разбирает gpstime ("2026-09-15 20:05:51") как aware datetime.
 
-    Время в источнике — локальное (Europe/Kyiv), поэтому и сравниваем его
-    с локальным временем приложения, независимо от timezone хоста/Docker.
+    API трекера отдаёт время в жёстком зимнем поясе UTC+2 (EET),
+    игнорируя переход на летнее время. Жестко парсим как UTC+2,
+    чтобы при сравнении с now_kyiv() (UTC+3 летом) возраст
+    машин (age_seconds) считался корректно, а не с отрывом в час.
     """
     if not raw:
         return None
     text = str(raw).strip()
+    tracker_tz = timezone(timedelta(hours=2))
     for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%d.%m.%Y %H:%M:%S"):
         try:
-            return datetime.strptime(text[:19], fmt).replace(tzinfo=APP_TIMEZONE)
+            return datetime.strptime(text[:19], fmt).replace(tzinfo=tracker_tz)
         except ValueError:
             continue
     return None
