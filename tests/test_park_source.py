@@ -2,8 +2,9 @@
 """
 Тесты приоритета источников парка (поставка 2, §3 брифа «Идея A»).
 
-merge_fleet решает, какие машины увидит пользователь: маршрут со свежей
-реальной машиной вне депо целиком берётся из трекера, остальные — из
+merge_fleet решает, какие машины увидит пользователь: маршрут, у которого есть
+реальная машина вне депо с треком не старше ROUTE_FALLBACK_MAX_AGE_SECONDS
+(час, §3.6 — обед водителя), целиком берётся из трекера, остальные — из
 симулятора, чтобы демо не было пустым. Интеграционные тесты гоняют собранный
 парк через /api/live и /api/plan. PARK_SOURCE принудительно sim (conftest),
 чтобы эталоны не зависели от трекера и наличия интернета.
@@ -12,6 +13,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import main as app_main
+from live_layer import FRESH_MAX_AGE_SECONDS
 
 # Эталонная пара из test_router_plan.py: пл. Соборна -> Завод «Гравітон».
 PLAN_TEXT = "з площі Соборної до заводу Гравітон"
@@ -74,17 +76,87 @@ def test_merge_fills_route_without_real_with_sim():
     assert by_route == {"5": "real", "9A": "sim"}
 
 
-def test_merge_stale_real_does_not_block_simulator():
-    """Старый трек не даёт приоритета: дыра должна остаться видимой."""
-    real = [_vehicle(board="3001", route_label="5", is_live=False, status="stale", age_seconds=999.0)]
+def test_merge_stale_track_within_hour_keeps_route_on_gps():
+    """Трек «за розкладом», але молодший за годину — маршрут ще реальний (§3.6).
+
+    Порогу свіжості (5 хв) для приоритета маршруту мало: водій на обіді стоїть
+    на кінцевій, і підміняти маршрут симулятором означало б малювати вигадані
+    машини там, де є реальна.
+    """
+    real = [_vehicle(
+        board="3001", route_label="5", is_live=False, status="stale",
+        age_seconds=2700.0,  # 45 хв: довше за FRESH_MAX_AGE_SECONDS, коротше за годину
+    )]
     sim = [_vehicle(board="SIM-5-001", route_label="5")]
 
     merged = app_main.merge_fleet(real, sim)
 
     boards = {v["board_number"]: v["source"] for v in merged}
-    # Свежесть проверяется до слияния (§3.3 п.2): stale-машина приоритет не
-    # забирает, но из ответа не пропадает — клиент видит её «за розкладом».
-    assert boards["SIM-5-001"] == "sim"
+    assert boards == {"3001": "real"}
+    assert "SIM-5-001" not in boards, "маршрут у межах години симулятор не займає"
+
+
+def test_merge_dead_route_after_hour_goes_to_simulator():
+    """Трек мертвіший за годину — маршрут цілком бере симулятор (§3.6).
+
+    Призраків старого треку в ответе нет намеренно: по признаку «нет ни одной
+    машины с source=real» UI ставит хрестик ❌ на чип маршрута
+    (web/emulator.js, routeSourceStates).
+    """
+    real = [_vehicle(
+        board="3001", route_label="5", is_live=False, status="stale",
+        age_seconds=5400.0,
+    )]
+    sim = [_vehicle(board="SIM-5-001", route_label="5")]
+
+    merged = app_main.merge_fleet(real, sim)
+
+    assert [v["board_number"] for v in merged] == ["SIM-5-001"]
+    assert all(v["source"] == "sim" for v in merged)
+
+
+def test_merge_dead_route_without_sim_machines_is_empty():
+    """Мёртвий маршрут, якого симулятор не тримає: пусто, а не призрак треку."""
+    real = [_vehicle(
+        board="3001", route_label="5", is_live=False, status="stale",
+        age_seconds=7200.0,
+    )]
+
+    assert app_main.merge_fleet(real, []) == []
+
+
+def test_merge_route_is_alive_while_any_machine_is_within_hour():
+    """Правило маршрутом, а не машиной: одного борта в межах години досить."""
+    real = [
+        _vehicle(board="3001", route_label="5", is_live=False, status="stale",
+                 age_seconds=5400.0),
+        _vehicle(board="3002", route_label="5", is_live=False, status="stale",
+                 age_seconds=600.0),
+    ]
+    sim = [_vehicle(board="SIM-5-001", route_label="5")]
+
+    merged = app_main.merge_fleet(real, sim)
+
+    assert {v["board_number"] for v in merged} == {"3001", "3002"}
+    assert all(v["source"] == "real" for v in merged)
+
+
+def test_merge_unknown_track_age_is_dead():
+    """Вік треку невідомий (битий gpstime) — приоритет не отдаём (§3.3 п.2)."""
+    real = [_vehicle(board="3001", route_label="5", is_live=False,
+                     status="unknown", age_seconds=None)]
+    sim = [_vehicle(board="SIM-5-001", route_label="5")]
+
+    merged = app_main.merge_fleet(real, sim)
+
+    assert [v["board_number"] for v in merged] == ["SIM-5-001"]
+
+
+def test_route_fallback_window_is_one_hour():
+    """Час обідньої перерви водія — окремий порог, не порог свіжості (§3.6)."""
+    assert app_main.ROUTE_FALLBACK_MAX_AGE_SECONDS == 3600.0
+    # Порог свіжості машини (is_live, пульсація в UI) не рухали.
+    assert FRESH_MAX_AGE_SECONDS == 300.0
 
 
 def test_merge_depo_real_does_not_block_simulator():
@@ -277,6 +349,83 @@ def test_live_auto_mode_fills_holes_with_simulator(api_client, sim, fleet, auto_
         (v["route_label"], v["vehicle_type"]) != (probe["route_label"], probe["vehicle_type"])
         for v in sim_left
     ), "симулятор не должен дублировать занятый маршрут"
+
+
+def test_live_auto_mode_keeps_route_with_track_within_hour(
+    api_client, sim, fleet, auto_mode, monkeypatch
+):
+    """PARK_SOURCE=auto: трек старший за 5 хв, але молодший за годину — маршрут
+    лишається за трекером, симулятор його не підмінює (§3.6, обід водія).
+
+    Проверяем сразу два правила: окно фоллбека решает помаршрутно, а срез
+    трекера для этого решения берётся шире порога свежести (only_fresh=true
+    по умолчанию у /api/live — и раньше машина «за розкладом» просто не
+    доходила до слияния).
+    """
+    probe = fleet[0]
+    real = [_vehicle(
+        board="7777",
+        route_label=probe["route_label"],
+        vehicle_type=probe["vehicle_type"],
+        route_id=probe["route_id"],
+        is_live=False,          # свежести 5 хв немає: «за розкладом»
+        status="stale",
+        age_seconds=2700.0,     # 45 хв — обеденный перерыв
+    )]
+    real[0].pop("direction")
+    monkeypatch.setitem(app_main.app_state, "sim_layer", sim)
+    monkeypatch.setitem(app_main.app_state, "tracker", _FakeTracker(real))
+
+    resp = api_client.get("/api/live", params={"now": PLAN_NOW})
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["source"] == "mixed"
+    # Клиенту видно, по какому окну принято решение (сенсор для чипа ❌).
+    assert body["route_fallback_max_age_seconds"] == app_main.ROUTE_FALLBACK_MAX_AGE_SECONDS
+
+    on_route = [
+        v for v in body["vehicles"]
+        if (v["route_label"], v["vehicle_type"]) == (probe["route_label"], probe["vehicle_type"])
+    ]
+    assert [v["source"] for v in on_route] == ["real"], \
+        "маршрут у межах години трекер держит — симулятор в него не подмешивается"
+    assert on_route[0]["is_live"] is False, \
+        "порог свежести не тронут: машина остаётся «за розкладом»"
+
+
+def test_live_auto_mode_dead_route_goes_to_simulator(api_client, sim, fleet, auto_mode, monkeypatch):
+    """PARK_SOURCE=auto: трек мертвіший за годину — маршрут целиком у симулятора.
+
+    Інваріант для хрестика ❌ в UI: у «мёртвого» маршруту в ответе нет жодної
+    машини с source="real" — призраки треку слияние прибирает, и клиент по
+    этому признаку видит фоллбек.
+    """
+    probe = fleet[0]
+    real = [_vehicle(
+        board="7777",
+        route_label=probe["route_label"],
+        vehicle_type=probe["vehicle_type"],
+        route_id=probe["route_id"],
+        is_live=False,
+        status="stale",
+        age_seconds=5400.0,     # 1.5 години без координат
+    )]
+    real[0].pop("direction")
+    monkeypatch.setitem(app_main.app_state, "sim_layer", sim)
+    monkeypatch.setitem(app_main.app_state, "tracker", _FakeTracker(real))
+
+    resp = api_client.get("/api/live", params={"now": PLAN_NOW})
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    on_route = [
+        v for v in body["vehicles"]
+        if (v["route_label"], v["vehicle_type"]) == (probe["route_label"], probe["vehicle_type"])
+    ]
+    assert body["by_source"]["real"] == 0, "призрак старого треку в срез не идёт"
+    assert on_route, "маршрут не должен исчезнуть из карты: его держит симулятор"
+    assert all(v["source"] == "sim" for v in on_route)
 
 
 @pytest.fixture
