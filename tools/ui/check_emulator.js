@@ -791,10 +791,11 @@ const probe = () => ({
   report.shots.push('plan.png');
 
   // --- 5.2 Картки варіантів плану (поставка 1, §13 брифа) ------------------
-  // Сервер кладе в /api/plan масив variants. Кореневий план (активний за
-  // замовчуванням, «Швидкий») — той, що вже на карті; але ціновий пріоритет
-  // (PRICE_PREFER_*) може поставити першою карточку «Дешевий», тож активну
-  // карточку перевіряємо за цифрами кореня, а не за місцем у списку.
+  // Сервер кладе в /api/plan масив variants. Без кліку клієнт показує і
+  // малює ПЕРШУ картку, навіть коли ціновий пріоритет (PRICE_PREFER_*) поставив
+  // «Дешевий» попереду кореневого «Швидкого»: «перша карточка = те, що на
+  // карті» (геть розсинхрон панелі й мапи). Тому перевіряємо саме зв'язку
+  // «активна карточка ↔ намальований план», а не збіг із коренем відповіді.
   // Картки живуть у #plan-variants НАД саммарі (#answer). Клік по другій
   // мусить: зупинити голос, перемалювати план і цифри панелі, підсвітити картку.
   const variantsProbe = () => page.evaluate(() => {
@@ -858,10 +859,12 @@ const probe = () => ({
     check('карточки вариантов отрисованы над саммари',
       variantsBefore.boxPresent && !variantsBefore.hidden && variantsBefore.count === 2,
       'карточек: ' + variantsBefore.count + ', id: [' + variantsBefore.ids.join(', ') + ']');
-    check('активна та карточка, чий план уже намальовано (корінь відповіді)',
-      variantsBefore.rootId !== null && variantsBefore.activeId === variantsBefore.rootId,
-      'активна: ' + variantsBefore.activeId + ', корінь: ' + variantsBefore.rootId +
-      ', порядок: [' + variantsBefore.ids.join(', ') + ']');
+    check('активна та карточка, чий план намальовано (перша в списку)',
+      variantsBefore.ids.length > 0 &&
+      variantsBefore.activeId === variantsBefore.ids[0] &&
+      variantsBefore.planId === variantsBefore.ids[0],
+      'активна: ' + variantsBefore.activeId + ', намальовано: ' + variantsBefore.planId +
+      ', порядок: [' + variantsBefore.ids.join(', ') + '], корінь: ' + variantsBefore.rootId);
     check('карточка показывает тег, транспорт, цену и время',
       variantsBefore.tags.every(Boolean) &&
       variantsBefore.texts.every((text) => /грн/.test(text) && /хв/.test(text)),
@@ -937,7 +940,8 @@ const probe = () => ({
     await page.screenshot({ path: path.join(OUT, 'variants.png') });
     report.shots.push('variants.png');
 
-    // Повертаємо дефолтний вид (план кореня) — решта сценарію дивиться його.
+    // Повертаємо показний за замовчуванням варіант (першу картку) — решта
+    // сценарію дивиться саме його.
     await page.click('.plan-variants .variant-card[data-variant-id="' +
       variantsBefore.activeId + '"]');
     await sleep(800);
