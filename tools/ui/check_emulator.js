@@ -697,7 +697,7 @@ const probe = () => ({
   // «правило пропало», но не путается со страницей.
   const pulseBase = (value) => String(value || '').replace(/^emu-/, '');
   check('CSS станів за специфікацією',
-    plan.css.plannedOpacity === '0.6' && /grayscale/.test(plan.css.plannedGrayscale) &&
+    plan.css.plannedOpacity === '1' && /grayscale/.test(plan.css.plannedGrayscale) &&
     plan.css.stoppedArrowDisplay === 'none' &&
     pulseBase(plan.css.stoppedCircleAnimation) === 'pulse-stopped' &&
     pulseBase(plan.css.targetAnimation) === 'pulse-target' &&

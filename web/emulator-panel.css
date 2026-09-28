@@ -280,7 +280,7 @@
 .veh-wrap svg { filter: drop-shadow(0 2px 3px rgba(0, 0, 0, .45)); }
 
 /* За розкладом — приглушённо и чуть серо */
-.veh-wrap.planned { opacity: .6; filter: grayscale(40%); }
+.veh-wrap.planned { opacity: 1; filter: grayscale(40%); }
 
 /* Зупинено (speed_kmh < 3): стрілку ховаємо, обводку пульсуємо. */
 .veh-wrap.stopped .veh-arrow { display: none; }
