@@ -1620,6 +1620,11 @@ def build_plan_speech(plan: Dict[str, Any]) -> str:
 # завжди — тому тримаємо локальний словник і локальний розбір: він же працює,
 # коли модель недоступна (аварійний шлях без ключа OpenRouter).
 
+# Сколько точек линии отдаём на направление: ланцюг маршруту — это десятки
+# остановок, а клиент просит пару линий. Ограничение защищает от случайного
+# «нарисуй все 38» (список приходит из запроса).
+ROUTE_SHAPE_MAX_POINTS = 200
+
 # Словесные формы номеров, которые реально звучат в микрофон: сленг («дев'ятка»)
 # и порядковые («дев'ятий»). Формы даём в падежах — распознавание слышит
 # «покажи дев'ятку», а не «дев'ятка», и без этого номер терялся.
@@ -1864,6 +1869,78 @@ def resolve_requested_routes(
     return found, missing
 
 
+def route_shapes_for(routes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Геометрия маршрутов для линий на карте (идея 2026-09-29, п.2).
+
+    Линия рисуется по ОБОИМ направлениям («туди і назад»): у A и B ланцюжки
+    слегка расходятся, а пользователь просил «покажи 9» — нарисовать половину
+    линии было бы подменой. Координаты берём из уже загруженного графа
+    (`TransitRouter.route_coords` — те же цепочки остановок, что уезжают в
+    `leg.full_geom` плана): отдельного «osm_routes.json» у клиента нет, а тянуть
+    537 КБ `graph.json` в браузер ради двух линий незачем.
+
+    Формат: [{"key": "bus|9", "type": "bus", "label": "9",
+              "directions": [{"direction": "A", "coords": [[lat, lon], ...]}]}]
+    """
+    router: Optional[TransitRouter] = app_state.get("router")
+    if router is None or not routes:
+        return []
+
+    wanted: set = set()
+    for item in routes:
+        wanted.add((
+            str(item.get("type") or "").strip().lower(),
+            TransitRouter.normalize_label(str(item.get("label") or "")),
+        ))
+
+    shapes: Dict[str, Dict[str, Any]] = {}
+    for route_key, coords in router.route_coords.items():
+        parts = str(route_key).split(":")
+        if len(parts) < 2:
+            continue
+        vtype = parts[0].strip().lower()
+        route = router.routes.get(route_key) or {}
+        labels = [
+            route.get("live_route_name"),
+            route.get("route_name"),
+            *(route.get("live_route_names") or []),
+            parts[1],
+        ]
+        norms = {TransitRouter.normalize_label(str(label)) for label in labels if label}
+        if not any((vtype, candidate) in wanted for candidate in norms):
+            continue
+        # Ключ тот же, что у кнопки фильтра: его отдал resolve_requested_routes,
+        # по нему же клиент ставит фильтр парка.
+        item = next(
+            (
+                route_item for route_item in routes
+                if str(route_item.get("type") or "").strip().lower() == vtype
+                and TransitRouter.normalize_label(str(route_item.get("label") or "")) in norms
+            ),
+            None,
+        )
+        if item is None:
+            continue
+        points = [
+            [round(float(lat), 6), round(float(lon), 6)]
+            for lat, lon in coords
+        ][:ROUTE_SHAPE_MAX_POINTS]
+        if len(points) < 2:
+            continue
+        entry = shapes.setdefault(item["key"], {
+            "key": item["key"],
+            "type": item["type"],
+            "label": item["label"],
+            "directions": [],
+        })
+        entry["directions"].append({
+            "direction": router.route_direction.get(route_key) or parts[-1],
+            "coords": points,
+        })
+    return [item for item in shapes.values() if item["directions"]]
+
+
 def build_monitor_speech(routes: List[Dict[str, Any]], missing: List[str]) -> str:
     """
     Голосова фраза моніторингу: «Показую маршрути 9 та 10.»
@@ -1921,7 +1998,9 @@ def monitor_routes_response(text: str, route_numbers: List[str]) -> Dict[str, An
     линий. Поэтому остановки не ищем вовсе, а отдаём разобранные номера и
     ключи кнопок фильтра (`bus|9A`): клиент по ним программно сужает живой
     парк (web/emulator.js, renderMonitorRoutes), а фразу для TTS собираем
-    здесь — на фронт уходит готовый текст.
+    здесь — на фронт уходит готовый текст. Вместе с ключами едет `shapes` —
+    геометрия линий (оба направления), чтобы на карте были видны не только
+    машины, но и сам маршрут (идея 2026-09-29, п.2).
     """
     raw_numbers = [str(item) for item in (route_numbers or [])]
     # Числа чистим на входе: LLM могла вернуть «дев'ятку» словом (правило в
@@ -1930,9 +2009,10 @@ def monitor_routes_response(text: str, route_numbers: List[str]) -> Dict[str, An
     numbers = _clean_route_list(raw_numbers)
     dropped = [item for item in raw_numbers if not _clean_route_list([item])]
     routes, missing = resolve_requested_routes(numbers)
+    shapes = route_shapes_for(routes)
     logger.info(
-        "Моніторинг маршрутів: %r -> %s (немає: %s, не розібрано: %s)",
-        text, [item["key"] for item in routes], missing, dropped,
+        "Моніторинг маршрутів: %r -> %s (немає: %s, не розібрано: %s, ліній: %d)",
+        text, [item["key"] for item in routes], missing, dropped, len(shapes),
     )
     response: Dict[str, Any] = {
         "mode": "monitor_routes",
@@ -1943,6 +2023,8 @@ def monitor_routes_response(text: str, route_numbers: List[str]) -> Dict[str, An
         "requested_routes": numbers,
         "routes": routes,
         "missing_routes": missing,
+        # Геометрия линий для карты: у клиента её нет (graph.json ему не грузим).
+        "shapes": shapes,
         # reask — «показывать нечего, назовите номер иначе»: тот же флаг, что у
         # clarify, поэтому даже старый клиент не промолчит.
         "reask": not routes,

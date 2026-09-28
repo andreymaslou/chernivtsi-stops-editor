@@ -261,3 +261,64 @@ def test_llm_monitor_without_routes_advances_to_next_model(monkeypatch):
 
     assert calls == ["free-1", "free-2"]
     assert result == {"type": "monitor_routes", "routes": ["7"]}
+
+
+# --- Геометрия линий для карты (идея 2026-09-29, п.2) -----------------------
+
+def test_monitor_response_carries_route_shapes(api_client, monkeypatch):
+    """Линии маршрутов для карты: оба направления и координаты самого города.
+
+    У клиента своей геометрии нет (`osm_routes.json` в проекте не существует,
+    `graph.json` в браузер не грузим), поэтому сервер отдаёт цепочки остановок
+    прямо в ответе — те же, что уезжают в `leg.full_geom` плана.
+    """
+    monkeypatch.setattr(app_main, "call_llm_extract_locations", _monitor_stub(["9", "10"]))
+
+    body = api_client.post("/api/plan", json={"text": "покажи 9 і 10"}).json()
+
+    shapes = {item["key"]: item for item in body["shapes"]}
+    assert set(shapes) == {"bus|9", "bus|10"}
+    for shape in shapes.values():
+        assert len(shape["directions"]) == 2, "у міського маршруту є обидва напрямки"
+        for direction in shape["directions"]:
+            assert len(direction["coords"]) >= 2, "лінія з однієї точки — не лінія"
+            lat, lon = direction["coords"][0]
+            # Чернівці: 48.2–48.4 / 25.8–26.1. Проверка ловит «широту 0» и
+            # случайно попавшую чужую геометрию.
+            assert 48.1 < lat < 48.5 and 25.7 < lon < 26.2, direction["coords"][0]
+    # Порядок направлений — как в графе: A, затем B.
+    assert shapes["bus|9"]["directions"][0]["direction"] == "A"
+
+
+def test_route_shapes_only_for_requested(api_client, monkeypatch):
+    """Линия рисуется только для запрошенного маршрута."""
+    monkeypatch.setattr(app_main, "call_llm_extract_locations", _monitor_stub(["10"]))
+
+    body = api_client.post("/api/plan", json={"text": "покажи 10"}).json()
+
+    assert [item["key"] for item in body["shapes"]] == ["bus|10"]
+
+
+def test_route_shapes_match_keys_with_letter(api_client, monkeypatch):
+    """«9а» = «9A»: ключ фильтра и геометрия обязаны сойтись."""
+    monkeypatch.setattr(app_main, "call_llm_extract_locations", _monitor_stub(["9а"]))
+
+    body = api_client.post("/api/plan", json={"text": "покажи 9а"}).json()
+
+    assert [item["key"] for item in body["routes"]] == ["bus|9A"]
+    assert [item["key"] for item in body["shapes"]] == ["bus|9A"]
+
+
+def test_route_shapes_empty_without_routes(api_client):
+    """Нет маршрутов — нет и геометрии (и никаких исключений)."""
+    assert app_main.route_shapes_for([]) == []
+
+
+def test_route_shapes_empty_for_unknown_number(api_client, monkeypatch):
+    """Номер вне активных маршрутов: нет ключей — нет и геометрии."""
+    monkeypatch.setattr(app_main, "call_llm_extract_locations", _monitor_stub(["42"]))
+
+    body = api_client.post("/api/plan", json={"text": "покажи 42"}).json()
+
+    assert body["routes"] == [] and body["shapes"] == []
+    assert body["missing_routes"] == ["42"]
