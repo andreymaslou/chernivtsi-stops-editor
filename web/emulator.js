@@ -1790,6 +1790,8 @@ function renderVariantCards(plan) {
     // Ціновий пріоритет поставив не-кореневий варіант першим — одразу
     // малюємо саме його, щоб «перша карточка» = те, що на карті.
     clearLayers();
+    vehicleLayer.clearLayers();
+    state.vehicles.clear();
     const root = plan || {};
     renderPlan(Object.assign({}, root, variants[0]));
   }

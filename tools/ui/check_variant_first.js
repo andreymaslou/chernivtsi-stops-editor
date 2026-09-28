@@ -86,6 +86,8 @@ check('активна = перша карточка', eq(sandbox.state.activeVar
 check('на карті намальовано перший варіант', !!drawn && eq(drawn.id, 'fewer_transfers'),
   'lastPlan.id: ' + (drawn && drawn.id) + ', ціна: ' + (drawn && drawn.price_grn));
 check('лінії очищено перед перемальовуванням', cleared === 1, 'clearLayers(): ' + cleared);
+check('маркери живого парку очищено перед перемальовуванням', layers.vehicles === 1, 'vehicleLayer.clearLayers(): ' + layers.vehicles);
+check('кеш машин скинуто', sandbox.state.vehicles.size === 0, 'записів у state.vehicles: ' + sandbox.state.vehicles.size);
 check('цифри саммарі = показаного варіанта', !!drawn && drawn.price_grn === 36 && drawn.total_min === 55,
   drawn ? drawn.total_min + ' хв / ' + drawn.price_grn + ' грн' : 'null');
 check('дефолт у телеметрії = показаний', eq(sandbox.state.defaultVariantId, 'fewer_transfers'), 'default: ' + sandbox.state.defaultVariantId);
