@@ -1043,7 +1043,7 @@ def get_route(request: RouteRequest):
     if locations.get("type") == "off_topic":
         return RouteResponse(
             mode="off_topic",
-            message="Я можу допомогти з пошуком оптимального маршруту, часом у дорозі та вартістю поїздки. Звідки і куди потрібно доїхати?"
+            message="Я можу допомогти з пошуком оптимального маршруту, часом у дорозі та вартістю поїздки, звідки і куди потрібно доїхати?"
         )
 
     if locations.get("type") == "fallback" and not (locations.get("from") and locations.get("to")):
@@ -1379,7 +1379,7 @@ def get_plan(request: PlanRequest):
     if locations.get("type") == "off_topic":
         return {
             "mode": "off_topic",
-            "message": "Я можу допомогти з пошуком оптимального маршруту, часом у дорозі та вартістю поїздки. Звідки і куди потрібно доїхати?",
+            "message": "Я можу допомогти з пошуком оптимального маршруту, часом у дорозі та вартістю поїздки, звідки і куди потрібно доїхати?",
             "user_text": request.text,
         }
 
