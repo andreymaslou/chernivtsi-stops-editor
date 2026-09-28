@@ -501,7 +501,26 @@ SYSTEM_PROMPT_TEMPLATE = """\
    - якщо вказано лише одне місце, друге залиш порожнім ("");
    - відповідь: {{"type": "route", "from": "назва", "to": "назва"}}
 
-2. Якщо запит НЕ стосується транспорту Чернівців (погода, рецепти, жарти,
+2. Якщо користувач просить ПОКАЗАТИ транспорт певних маршрутів (де зараз
+   машини), а не проїхати з точки в точку — «покажи дев'ятку і десятку»,
+   «де зараз 9А», «хочу бачити 5 тролейбус»:
+   - назву маршруту ОБОВ'ЯЗКОВО нормалізуй у цифровий рядок так, як він є в
+     системі: сленг, числівники й порядкові — це теж номер маршруту:
+       «одиничка», «перший» → "1";      «двійка» → "2";
+       «трійка» → "3";                  «четвірка» → "4";
+       «п'ятірка» → "5";                «шістка» → "6";
+       «сімка» → "7";                   «вісімка» → "8";
+       «дев'ятка», «дев'ятий» → "9";    «десятка», «десятий» → "10";
+       «одинадцятка» → "11";            «дванадцятка» → "12";
+       «п'ятнадцятка» → "15";
+   - літеру в номері став латиницею у верхньому регістрі: «9а» → "9A",
+     «15к» → "15K", «8а» → "8A";
+   - НІКОЛИ не вигадуй номер, якого немає в запиті;
+   - якщо разом із номером названо звідки й куди — це НЕ моніторинг, а
+     маршрут (пункт 1);
+   - відповідь: {{"type": "monitor_routes", "routes": ["9", "10"]}}
+
+3. Якщо запит НЕ стосується транспорту Чернівців (погода, рецепти, жарти,
    новини, загальні питання про світ):
    відповідь: {{"type": "off_topic"}}
 
@@ -644,15 +663,21 @@ def _fallback_message(locations: Dict[str, str]) -> str:
     return FALLBACK_INPUT_MESSAGE_UA
 
 
-def extract_locations_with_fallback(user_text: str) -> Dict[str, str]:
-    """Получить locations через LLM, затем через локальный аварийный слой."""
+def extract_locations_with_fallback(user_text: str) -> Dict[str, Any]:
+    """
+    Получить разбор фразы через LLM, затем через локальный аварийный слой.
+
+    Возвращает один из интентов: route (from/to), off_topic, monitor_routes
+    (номера маршрутов) либо error с текстом-подсказкой.
+    """
     locations = call_llm_extract_locations(user_text)
     intent = str(locations.get("type") or "route").strip().lower()
-    if intent == "off_topic":
+    if intent in ("off_topic", "monitor_routes"):
         return locations
     if intent == "route" and (locations.get("from") or locations.get("to")):
         return locations
 
+    # Локальный слой идёт ВТОРЫМ: модель недоступна или не разобрала фразу.
     emergency = emergency_extract_locations(user_text)
     if emergency["from"] or emergency["to"]:
         return {
@@ -661,6 +686,11 @@ def extract_locations_with_fallback(user_text: str) -> Dict[str, str]:
             "to": emergency["to"],
             "message": _fallback_message(emergency),
         }
+    # «Покажи дев'ятку і десятку» моніторинг працює і без моделі: номер
+    # маршруту назван словом/цифрою, а не місцем — Locator тут не потрібен.
+    numbers = parse_route_numbers(user_text)
+    if numbers:
+        return {"type": "monitor_routes", "routes": numbers}
     return {
         "type": "error",
         "from": "",
@@ -670,10 +700,13 @@ def extract_locations_with_fallback(user_text: str) -> Dict[str, str]:
 
 
 
-def call_llm_extract_locations(user_text: str) -> Dict[str, str]:
+def call_llm_extract_locations(user_text: str) -> Dict[str, Any]:
     """
     Отправляет текст пользователя в LLM (через OpenRouter) и возвращает
-    разобранный JSON вида {"from": "...", "to": "..."}.
+    разобранный JSON: {"type": "route", "from": ..., "to": ...} для поездки
+    А→Б, {"type": "off_topic"} для всего остального и
+    {"type": "monitor_routes", "routes": ["9", "10"]} для просьбы показать
+    машины конкретных маршрутов (интент нормализует номера в цифры).
 
     Ответы кэшируются по нормализованной фразе (LRU-подобный сброс, простой
     cutoff при переполнении). В случае любой ошибки (сеть, невалидный JSON от
@@ -701,13 +734,23 @@ def call_llm_extract_locations(user_text: str) -> Dict[str, str]:
             parsed = _parse_llm_json(raw_content)
             if parsed is None:
                 raise ValueError(f"Модель {model_name} вернула не-JSON")
-            result = {
-                "type": str(parsed.get("type", "route")).strip().lower(),
-                "from": str(parsed.get("from") or "").strip(),
-                "to": str(parsed.get("to") or "").strip(),
-            }
-            if result["type"] not in ("route", "off_topic"):
-                raise ValueError(f"Модель {model_name} вернула неизвестный intent")
+            intent = str(parsed.get("type", "route")).strip().lower()
+            if intent == "monitor_routes":
+                # «Покажи дев'ятку і десятку»: номеров может быть несколько, и
+                # словесные формы приводим к цифрам локально — модель это
+                # правило знает, но выполняет не всегда.
+                routes = _clean_route_list(parsed.get("routes"))
+                if not routes:
+                    raise ValueError(f"Модель {model_name} не назвала ни одного маршрута")
+                result = {"type": "monitor_routes", "routes": routes}
+            else:
+                result = {
+                    "type": intent,
+                    "from": str(parsed.get("from") or "").strip(),
+                    "to": str(parsed.get("to") or "").strip(),
+                }
+                if result["type"] not in ("route", "off_topic"):
+                    raise ValueError(f"Модель {model_name} вернула неизвестный intent")
             if cache_key not in _llm_cache and len(_llm_cache) >= LLM_CACHE_MAX:
                 _llm_cache.pop(next(iter(_llm_cache)))
             _llm_cache[cache_key] = result
@@ -908,12 +951,29 @@ class DebugInfo(BaseModel):
 
 
 class RouteResponse(BaseModel):
+    """
+    Ответ /api/route: разбор фразы на пару остановок.
+
+    Режим «моніторинг маршрутів» (ідея 2026-09-28) остановок не возвращает
+    вовсе: вместо from_stop_id/to_stop_id приходят номера, которые назвал
+    пользователь (requested_routes) и разобранные записи активных маршрутов
+    (routes: key/type/label — ключ кнопки фильтра парка в UI).
+    """
+
     mode: Optional[str] = None
     message: Optional[str] = None
     note: Optional[str] = None
     from_stop_id: Optional[int] = None
     to_stop_id: Optional[int] = None
     debug_info: Optional[DebugInfo] = None
+    requested_routes: Optional[List[str]] = None
+    routes: Optional[List[Dict[str, Any]]] = None
+    missing_routes: Optional[List[str]] = None
+    # Готова фраза для озвучки («Показую маршрути 9 та 10.»): у режимі
+    # моніторингу голос звучить із цим полем, інакше клієнт збирав би фразу сам.
+    speech: Optional[Dict[str, Any]] = None
+    # «Показувати нечего, назвіть номер інакше» — той самий флаг, що й у clarify.
+    reask: Optional[bool] = None
 
 
 # ---------------------------------------------------------------------------
@@ -951,6 +1011,10 @@ def get_route(request: RouteRequest):
            ближайшей остановки по гаверсинусу (Уровень 2).
         3. Возвращается пара ID остановок + подробная debug_info,
            объясняющая, каким способом был найден каждый ID.
+
+    Отдельный интент — monitor_routes (идея 2026-09-28): «покажи 9 і 10». Тогда
+    остановки не ищем, а отвечаем режимом mode="monitor_routes" с номерами
+    (requested_routes/routes) — полный план поездки отдаёт /api/plan.
     """
     locator: Optional[Locator] = app_state.get("locator")
     if locator is None:
@@ -963,7 +1027,13 @@ def get_route(request: RouteRequest):
 
     # Шаг 1: LLM извлекает названия точек, а локальный слой страхует его отказ.
     locations = extract_locations_with_fallback(request.text)
-    
+
+    if locations.get("type") == "monitor_routes":
+        # Тот же ответ, что и у /api/plan: клиент, откатившийся на /api/route
+        # (старый сервер без плана), обязан получить и мониторинг.
+        monitor = monitor_routes_response(request.text, locations.get("routes") or [])
+        return RouteResponse(**monitor)
+
     if locations.get("type") == "error":
         return RouteResponse(
             mode="manual_input",
@@ -1275,7 +1345,11 @@ def get_plan(request: PlanRequest):
         "clarify"  — геопоиск неуверен (low_confidence) либо точки не найдены —
                      нужно уточнить у пользователя (reask=true);
         "no_route" — точки найдены, но в пределах двух пересадок маршрут не
-                     строится (обычно ночью, когда маршруты не ходят).
+                     строится (обычно ночью, когда маршруты не ходят);
+        "monitor_routes" — пользователь просит не маршрут А→Б, а показать
+                     машины названных маршрутов («покажи дев'ятку і десятку»):
+                     legs пустые, приходят requested_routes/routes/speech, а
+                     клиент по key программно фильтрует живой парк.
 
     Эмулятор уже умеет рисовать "plan"-режим (legs c path и ТС), а clarify
     показывается подсказкой с просьбой переформулировать фразу.
@@ -1289,6 +1363,11 @@ def get_plan(request: PlanRequest):
 
     # Шаг 1 и 2 — LLM + аварийный локальный разбор → Locator.
     locations = extract_locations_with_fallback(request.text)
+
+    if locations.get("type") == "monitor_routes":
+        # Ни Locator, ни роутер не нужны: точек нет вовсе, а парк клиент
+        # фильтрует сам по ключам маршрутов (renderMonitorRoutes в emulator.js).
+        return monitor_routes_response(request.text, locations.get("routes") or [])
 
     if locations.get("type") == "error":
         return {
@@ -1440,6 +1519,30 @@ def _uk_plural(number: int, one: str, few: str, many: str) -> str:
     return many
 
 
+def _speech_route_label(label: str) -> str:
+    """
+    Номер маршрута для озвучки: «9A» → «9 а».
+
+    Цифра и литера читаются отдельно, а латинская литера (A, B, C, D, E, K —
+    так записаны 8A, 9A, 10A, 15K) произносится украинской буквой: иначе TTS
+    читает «номер 15 k» по-английски. Общий помощник для планов и для
+    мониторинга маршрутов — чтобы «дев'ятка» и «9A» звучали одинаково.
+    """
+    text = str(label or "").strip()
+    if not text:
+        return ""
+    digits = "".join(ch for ch in text if ch.isdigit())
+    letters = "".join(ch for ch in text if ch.isalpha())
+    parts: List[str] = []
+    if digits:
+        parts.append(digits)
+    if letters:
+        parts.append({
+            "a": "а", "b": "б", "c": "в", "d": "д", "e": "е", "k": "к",
+        }.get(letters.lower(), letters.lower()))
+    return " ".join(parts) or text
+
+
 def _speech_route_case(label: str, vehicle: str, case: str = "instr") -> str:
     """
     Название транспорта для озвучки в нужном падеже.
@@ -1453,23 +1556,10 @@ def _speech_route_case(label: str, vehicle: str, case: str = "instr") -> str:
         noun = "тролейбус" if is_trolley else "автобус"
     else:
         noun = "тролейбусом" if is_trolley else "автобусом"
-    label = str(label or "").strip()
-    if not label:
+    spoken = _speech_route_label(label)
+    if not spoken:
         return noun
-    # Номера с буквой (9A) читаем «девять а» — цифра и литера отдельно.
-    # Латиниця в підписі маршруту: A (8A, 9A, 10A, 6A) і K (15K) — обидві
-    # мають звучати українською, інакше TTS читає «номер 15 k» по-англійськи.
-    digits = "".join(ch for ch in label if ch.isdigit())
-    letters = "".join(ch for ch in label if ch.isalpha())
-    parts = []
-    if digits:
-        parts.append(digits)
-    if letters:
-        uk_letter = {
-            "a": "а", "b": "б", "c": "в", "d": "д", "e": "е", "k": "к",
-        }.get(letters.lower(), letters.lower())
-        parts.append(uk_letter)
-    return f"{noun} номер {' '.join(parts)}"
+    return f"{noun} номер {spoken}"
 
 
 def build_plan_speech(plan: Dict[str, Any]) -> str:
@@ -1517,6 +1607,350 @@ def build_plan_speech(plan: Dict[str, Any]) -> str:
         parts.append(f"вартість {_uk_num(value)} {_uk_plural(value, 'гривня', 'гривні', 'гривень')}")
 
     return ", ".join(parts) + "."
+
+
+# ---------------------------------------------------------------------------
+# Моніторинг маршрутів голосом: «покажи дев'ятку і десятку»
+# (ідея 2026-09-28, docs/ideas/2026-09-28-voice-route-monitoring.md)
+# ---------------------------------------------------------------------------
+#
+# Житель, який знає місто, не потребує маршруту А→Б: йому треба побачити, де
+# зараз машини потрібних ліній. Розбір фрази робить LLM (інтент
+# "monitor_routes" у промпті), але нормалізацію номерів вона виконує не
+# завжди — тому тримаємо локальний словник і локальний розбір: він же працює,
+# коли модель недоступна (аварійний шлях без ключа OpenRouter).
+
+# Словесные формы номеров, которые реально звучат в микрофон: сленг («дев'ятка»)
+# и порядковые («дев'ятий»). Формы даём в падежах — распознавание слышит
+# «покажи дев'ятку», а не «дев'ятка», и без этого номер терялся.
+# Ключ — как чует распознавання, значение — цифровой рядок в системе.
+_ROUTE_WORD_FORMS: Dict[str, Tuple[str, ...]] = {
+    "1": ("одиничка", "одиничку", "одинички", "одиниця", "одиницю",
+          "перший", "перша", "перше", "першого", "першу"),
+    "2": ("двійка", "двійку", "двійки", "двійочка", "двойка",
+          "другий", "друга", "друге", "другого", "другу"),
+    "3": ("трійка", "трійку", "трійки", "тройка",
+          "третій", "третя", "третє", "третього", "третю"),
+    "4": ("четвірка", "четвірку", "четвірки", "четверка",
+          "четвертий", "четверта", "четвертого", "четверту"),
+    "5": ("п'ятірка", "п'ятірку", "п'ятірки", "пятірка",
+          "п'ятий", "п'ята", "п'ятого", "п'яту"),
+    "6": ("шістка", "шістку", "шістки", "шестірка",
+          "шестий", "шоста", "шостого", "шосту"),
+    "7": ("сімка", "сімку", "сімки", "сьомий", "сьома", "сьомого", "сьому"),
+    "8": ("вісімка", "вісімку", "вісімки", "восьмий", "восьма", "восьмого", "восьму"),
+    "9": ("дев'ятка", "дев'ятку", "дев'ятки", "девятка",
+          "дев'ятий", "дев'ята", "дев'ятого", "дев'яту"),
+    "10": ("десятка", "десятку", "десятки", "десятий", "десята", "десятого", "десяту"),
+    "11": ("одинадцятка", "одинадцятку", "одинадцятки", "одинадцятий"),
+    "12": ("дванадцятка", "дванадцятку", "дванадцятки", "дванадцятий"),
+    "13": ("тринадцятка", "тринадцятку", "тринадцятки", "тринадцятий"),
+    "14": ("чотирнадцятка", "чотирнадцятку", "чотирнадцятки", "чотирнадцятий"),
+    "15": ("п'ятнадцятка", "п'ятнадцятку", "пятнадцятка", "п'ятнадцятий"),
+    "20": ("двадцятка", "двадцятку", "двадцятки", "двадцятий"),
+}
+ROUTE_WORD_NUMBERS: Dict[str, str] = {
+    word: number
+    for number, words in _ROUTE_WORD_FORMS.items()
+    for word in words
+}
+
+# Хвостовая часть сленгового названия в падежах: «десятка → десятку → десяткою»
+# — номер один и тот же. Основа + этот хвіст закрывают все бытовые формы, а
+# список окончаний намеренно узкий: иначе «п'ятниця» (день недели) стала бы
+# маршрутом 5.
+_ROUTE_SLANG_STEMS: Dict[str, str] = {
+    "одинич": "1", "одиниц": "1",
+    "двій": "2", "двой": "2",
+    "трій": "3", "трой": "3",
+    "четвір": "4", "четвер": "4",
+    "п'ятір": "5", "пятір": "5",
+    "шіст": "6", "шестір": "6",
+    "сім": "7",
+    "вісім": "8",
+    "дев'ят": "9", "девят": "9",
+    "десят": "10",
+    "одинадцят": "11",
+    "дванадцят": "12",
+    "тринадцят": "13",
+    "чотирнадцят": "14",
+    "п'ятнадцят": "15", "пятнадцят": "15",
+    "двадцят": "20",
+}
+_ROUTE_SLANG_SUFFIXES = ("ка", "ку", "ки", "кою", "кой", "ці", "цю", "чка", "чку", "чки")
+
+
+def _route_word_number(word: str) -> str:
+    """
+    Номер маршрута по словесной форме: сначала точные формы, потом основа.
+
+    Точный словарь закрывает сленг и порядковые («дев'ятка», «дев'ятий»), а
+    основа со типовыми окончаниями — остальные падежи, которых в нём нет
+    («десяткою», «одиничкою»): распознавание слышит именно их.
+    """
+    exact = ROUTE_WORD_NUMBERS.get(word)
+    if exact:
+        return exact
+    for stem, number in _ROUTE_SLANG_STEMS.items():
+        if word.startswith(stem) and word[len(stem):] in _ROUTE_SLANG_SUFFIXES:
+            return number
+    return ""
+
+# Слова-маркери моніторингу. Потрібні лише для ЦИФРОВИХ номерів: «покажи 9» —
+# це маршрут, а «до вулиці 9» — адреса. Словесна форма («дев'ятка») у
+# маршрутному контексті однозначна, тому для неї маркер не потрібен.
+MONITOR_MARKERS = re.compile(
+    r"покаж|показат|монітор|монитор|бачит|бач|вивед|вивод|відфільтр|відфільтру|"
+    r"фільтр|увімкн|включ|де\s+зараз|де\s+(їде|iде|їздит|ездит)",
+    re.IGNORECASE,
+)
+
+# Цифрова форма номера: «9», «10», «9а», «8A», «15К», «3/3a» (так номер зве
+# перевізник у live_names). Буква — рівно одна, після цифр або дробу.
+ROUTE_NUMBER_RE = re.compile(r"\d{1,2}(?:/\d{1,2})?[A-Za-zА-Яа-яЇїІіЄєҐґ]?")
+_WORD_TOKEN_RE = re.compile(r"[0-9A-Za-zА-Яа-яЇїІіЄєҐґ'’/]+")
+
+
+def _route_word(text: str) -> str:
+    """Ключ для словаря форм номера: нижний регистр и один апостроф.
+
+    Распознавание и клавиатуры дают разные апострофы (’ ʼ ` ´) — без этого
+    «п’ятірка» не находилась бы в словаре рядом с «п'ятірка».
+    """
+    return (
+        str(text or "").strip().lower()
+        .replace("’", "'").replace("ʼ", "'").replace("`", "'").replace("´", "'")
+    )
+
+
+def _normalize_route_number(raw: str) -> str:
+    """
+    Номер маршруту в том виде, в каком он живёт в манифесте: «9а» → «9A».
+
+    Кириллицу сводим к латинице («8А» → «8A», «15К» → «15K») — та же пара
+    букв, что и в подписях перевозчика; регистр приводим к верхнему, потому
+    что так записан display_name. Слэш не трогаем: «3/3a» — это алиас
+    троллейбуса 3 из live_names, и склеивать его нельзя.
+    """
+    text = str(raw or "").strip()
+    if not text:
+        return ""
+    text = text.upper()
+    for cyrillic, latin in (("А", "A"), ("Б", "B"), ("В", "V"), ("К", "K")):
+        text = text.replace(cyrillic, latin)
+    return text
+
+
+def _clean_route_list(raw: Any) -> List[str]:
+    """
+    Нормализует список номеров от LLM: слова → цифры, дубликаты — вон.
+
+    Модель получает правило нормализации в промпте, но ошибается (вернёт
+    «дев'ятку» словом). Тогда чиню номер локально: пользователь не должен
+    увидеть «Показую маршрути 0» из-за каприза модели.
+    """
+    if isinstance(raw, (str, int, float)):
+        raw = [raw]
+    if not isinstance(raw, (list, tuple)):
+        return []
+    numbers: List[str] = []
+    for item in raw:
+        text = str(item or "").strip()
+        if not text:
+            continue
+        word = _route_word(text)
+        number = _route_word_number(word)
+        if not number:
+            if ROUTE_NUMBER_RE.fullmatch(text):
+                number = _normalize_route_number(text)
+            else:
+                # «маршрут 9», «9-й», «маршрут №10» — вытащим цифры с буквой.
+                found = ROUTE_NUMBER_RE.search(text)
+                number = _normalize_route_number(found.group(0)) if found else ""
+        if number and number not in numbers:
+            numbers.append(number)
+    return numbers
+
+
+def parse_route_numbers(text: str) -> List[str]:
+    """
+    Локальный (без LLM) разбор номеров маршрутов — аварийный слой.
+
+    Возвращает номера в порядке упоминания, без дублей. Правило простое:
+      * словесная форма («дев'ятка», «десятка») — это маршрутная сленг-форма,
+        спутать её не с чем;
+      * цифровая («9», «9А») принимается ТОЛЬКО при слове-маркере моніторингу
+        («покажи», «де зараз»): «як доїхати до вулиці 9» — это адрес, а не
+        маршрут, и такой запрос обязан уйти в обычный план.
+    """
+    if not text:
+        return []
+    has_marker = bool(MONITOR_MARKERS.search(text))
+    numbers: List[str] = []
+    for token in _WORD_TOKEN_RE.findall(text):
+        word = _route_word(token)
+        number = _route_word_number(word)
+        if not number and has_marker and ROUTE_NUMBER_RE.fullmatch(token):
+            number = _normalize_route_number(token)
+        if number and number not in numbers:
+            numbers.append(number)
+    return numbers
+
+
+def _manifest_route_entries() -> List[Dict[str, Any]]:
+    """Активные маршруты города из манифеста (38) — вместе с алиасами."""
+    manifest = app_state.get("routes_manifest") or {}
+    entries: List[Dict[str, Any]] = []
+    for type_name in ("bus", "trolley"):
+        for item in manifest.get(type_name) or []:
+            label = str(item.get("display_name") or item.get("number") or "").strip()
+            if not label:
+                continue
+            entries.append({
+                "type": type_name,
+                "label": label,
+                "number": str(item.get("number") or label).strip(),
+                "aliases": [str(alias) for alias in (item.get("live_names") or [])],
+            })
+    return entries
+
+
+def resolve_requested_routes(
+    route_numbers: List[str],
+) -> Tuple[List[Dict[str, Any]], List[str]]:
+    """
+    Сопоставляет названные номера с активными маршрутами города (манифест).
+
+    Возвращает (найденные, ненайденные). Сравнение идёт по нормализованной
+    подписи (TransitRouter.normalize_label): «9а» = «9A», «8А» = «8A», а
+    «3/3a» — это алиас троллейбуса 3 из live_names. Ключ собирается так же,
+    как ключ кнопки фильтра в UI («bus|9A»): клиент по нему программно сужает
+    живой парк.
+
+    Номер есть и у автобусов, и у троллейбусов («5»)? Отдаём оба: пользователь
+    назвал номер, а не тип ТС, и показать половину линии было бы подменой.
+    Кнопки троллейбусов в панели по умолчанию скрыты — UI включает их сам,
+    когда видит `trolley|*` в ответе.
+    """
+    found: List[Dict[str, Any]] = []
+    missing: List[str] = []
+    entries = _manifest_route_entries()
+    for number in route_numbers or []:
+        wanted = TransitRouter.normalize_label(str(number or ""))
+        if not wanted:
+            continue
+        matches = [
+            entry for entry in entries
+            if any(
+                TransitRouter.normalize_label(candidate) == wanted
+                for candidate in [entry["label"], entry["number"], *entry["aliases"]]
+            )
+        ]
+        if not matches:
+            if str(number) not in missing:
+                missing.append(str(number))
+            continue
+        for entry in matches:
+            key = entry["type"] + "|" + entry["label"]
+            if any(item["key"] == key for item in found):
+                continue
+            found.append({
+                "key": key,
+                "type": entry["type"],
+                "label": entry["label"],
+                "number": entry["number"],
+                "requested": str(number),
+            })
+    return found, missing
+
+
+def build_monitor_speech(routes: List[Dict[str, Any]], missing: List[str]) -> str:
+    """
+    Голосова фраза моніторингу: «Показую маршрути 9 та 10.»
+
+    Ненайдені номери озвучуємо окремо («На жаль, маршрут 42 зараз не
+    працює»): молчание в ответ на названный номер читается как поломка, а на
+    самом деле такого маршрута нет среди активных
+    (.agents/rules/active_routes.md).
+    """
+    labels = [
+        label for label in (_speech_route_label(item.get("label")) for item in routes)
+        if label
+    ]
+    parts: List[str] = []
+    if len(labels) == 1:
+        parts.append("Показую маршрут " + labels[0])
+    elif labels:
+        parts.append("Показую маршрути " + ", ".join(labels[:-1]) + " та " + labels[-1])
+    if missing:
+        numbers = ", ".join(str(item) for item in missing)
+        if len(missing) == 1:
+            parts.append("На жаль, маршрут " + numbers + " зараз не працює")
+        else:
+            parts.append("На жаль, маршрути " + numbers + " зараз не працюють")
+    if not parts:
+        return ""
+    return ", ".join(parts) + "."
+
+
+def _monitor_routes_message(routes: List[Dict[str, Any]], missing: List[str]) -> str:
+    """Текст в панели ответа: что показываем и чего не нашли."""
+    labels = [str(item.get("label") or "") for item in routes if item.get("label")]
+    if len(labels) == 1:
+        text = "Показую маршрут " + labels[0] + " — на карті лише його машини."
+    elif labels:
+        text = ("Показую маршрути " + ", ".join(labels[:-1]) + " та " + labels[-1]
+                + " — на карті лише їхні машини.")
+    else:
+        text = ("Не знаю такого маршруту. Назвіть номер, "
+                "наприклад «покажи дев'ятку і десятку».")
+    if missing:
+        numbers = ", ".join(str(item) for item in missing)
+        if len(missing) == 1:
+            text += f" Маршрут {numbers} зараз не працює — у списку активних його немає."
+        else:
+            text += f" Маршрути {numbers} зараз не працюють — у списку активних їх немає."
+    return text
+
+
+def monitor_routes_response(text: str, route_numbers: List[str]) -> Dict[str, Any]:
+    """
+    Ответ режима «покажи маршрути» (ідея 2026-09-28): без Locator и роутера.
+
+    Пользователю нужен не маршрут А→Б, а карта: где сейчас машины названных
+    линий. Поэтому остановки не ищем вовсе, а отдаём разобранные номера и
+    ключи кнопок фильтра (`bus|9A`): клиент по ним программно сужает живой
+    парк (web/emulator.js, renderMonitorRoutes), а фразу для TTS собираем
+    здесь — на фронт уходит готовый текст.
+    """
+    raw_numbers = [str(item) for item in (route_numbers or [])]
+    # Числа чистим на входе: LLM могла вернуть «дев'ятку» словом (правило в
+    # промпте есть, но модель ошибается) — а ответ клиенту обязан нести
+    # цифровые номера, иначе фильтр парка искать будет нечего.
+    numbers = _clean_route_list(raw_numbers)
+    dropped = [item for item in raw_numbers if not _clean_route_list([item])]
+    routes, missing = resolve_requested_routes(numbers)
+    logger.info(
+        "Моніторинг маршрутів: %r -> %s (немає: %s, не розібрано: %s)",
+        text, [item["key"] for item in routes], missing, dropped,
+    )
+    response: Dict[str, Any] = {
+        "mode": "monitor_routes",
+        "user_text": text,
+        "message": _monitor_routes_message(routes, missing),
+        # requested_routes — как назвали (LLM или локальный разбор), routes —
+        # что реально есть среди активных: key = ключ кнопки фильтра в UI.
+        "requested_routes": numbers,
+        "routes": routes,
+        "missing_routes": missing,
+        # reask — «показывать нечего, назовите номер иначе»: тот же флаг, что у
+        # clarify, поэтому даже старый клиент не промолчит.
+        "reask": not routes,
+    }
+    speech = build_monitor_speech(routes, missing)
+    if speech:
+        response["speech"] = {"text": speech, "lang": "uk-UA"}
+    return response
 
 
 def _clarify_response(

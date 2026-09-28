@@ -1,0 +1,263 @@
+# -*- coding: utf-8 -*-
+"""
+Голосовой мониторинг маршрутов (идея 2026-09-28, docs/ideas/): «покажи
+дев'ятку і десятку» — это не маршрут А→Б, а просьба показать машины названных
+линий. Проверяем три слоя:
+
+  * промпт LLM — новый интент monitor_routes и правило нормализации номеров;
+  * локальный разбор/нормализация номеров (нужен и без модели — без ключа
+    OpenRouter, а также когда модель вернула слово вместо цифры);
+  * контракт /api/plan и /api/route: mode="monitor_routes", requested_routes,
+    routes с ключами кнопок фильтра, speech; остановок и ног нет вовсе.
+"""
+from types import SimpleNamespace
+
+import pytest
+from fastapi.testclient import TestClient
+
+import main as app_main
+
+
+def _fake_client(create):
+    return SimpleNamespace(
+        chat=SimpleNamespace(completions=SimpleNamespace(create=create))
+    )
+
+
+@pytest.fixture
+def api_client():
+    """Сервер целиком: lifespan читает манифест активных маршрутов (38)."""
+    with TestClient(app_main.app) as client:
+        yield client
+
+
+# --- Промпт и локальный разбор номеров --------------------------------------
+
+def test_prompt_teaches_monitor_intent_and_normalization():
+    """Промпт обязан требовать monitor_routes и цифровые номера, а не слова."""
+    prompt = app_main.build_system_prompt("соборка, гравитон")
+    assert "monitor_routes" in prompt
+    assert "дев'ятка" in prompt and "десятка" in prompt
+    assert "9а" in prompt and "9A" in prompt  # правило «литера латиницей»
+    assert "НІКОЛИ не вигадуй номер" in prompt
+
+
+def test_parse_route_numbers_handles_slang_and_declensions():
+    """Сленг и порядковые в падежах — «дев'ятку», а не «дев'ятка»."""
+    assert app_main.parse_route_numbers("покажи дев'ятку і десятку") == ["9", "10"]
+    assert app_main.parse_route_numbers("покажи одиничку") == ["1"]
+    assert app_main.parse_route_numbers("а де зараз п'ятірка з десяткою") == ["5", "10"]
+    assert app_main.parse_route_numbers("хочу бачити дванадцятку") == ["12"]
+
+
+def test_parse_route_numbers_requires_marker_for_digits():
+    """Цифры без слова-маркера — это адрес, а не маршрут («вулиця 9»)."""
+    assert app_main.parse_route_numbers("де зараз 9А") == ["9A"]
+    assert app_main.parse_route_numbers("покажи 5 тролейбус") == ["5"]
+    assert app_main.parse_route_numbers("як доїхати до вулиці 9") == []
+    assert app_main.parse_route_numbers("з Соборки до Гравітону") == []
+
+
+def test_parse_route_numbers_does_not_match_day_of_week():
+    """«п'ятниця» — не маршрут 5: окончания для основы намеренно узкие."""
+    assert app_main.parse_route_numbers("у п'ятницю покажи дев'ятку") == ["9"]
+    assert app_main.parse_route_numbers("покажи розклад на п'ятницю") == []
+
+
+def test_parse_route_numbers_normalizes_letters_and_duplicates():
+    """«9а» = «9A»; повтор номера не дублируется в фразе."""
+    assert app_main.parse_route_numbers("покажи 9а та 9А") == ["9A"]
+    assert app_main.parse_route_numbers("покажи 15к") == ["15K"]
+    assert app_main.parse_route_numbers("де зараз 3/3a") == ["3/3A"]
+    assert app_main.parse_route_numbers("покажи 8 і 8") == ["8"]
+
+
+def test_clean_route_list_fixes_model_answers():
+    """Модель вернула слово или «маршрут №10» — приводим к цифрам локально."""
+    assert app_main._clean_route_list(["дев'ятка", "10"]) == ["9", "10"]
+    assert app_main._clean_route_list(["9а", "дев'ятку", "9A"]) == ["9A", "9"]
+    assert app_main._clean_route_list(["маршрут №15к"]) == ["15K"]
+    assert app_main._clean_route_list([10, "десятий"]) == ["10"]
+    assert app_main._clean_route_list("якась абракадабра") == []
+    assert app_main._clean_route_list(None) == []
+
+
+# --- Сопоставление с активными маршрутами города ----------------------------
+
+def test_resolve_requested_routes_maps_to_filter_keys(api_client):
+    """Ключ = ключ кнопки фильтра в UI («bus|9A»), тип ТС входит в ключ."""
+    found, missing = app_main.resolve_requested_routes(["9", "10"])
+
+    assert [item["key"] for item in found] == ["bus|9", "bus|10"]
+    assert missing == []
+    assert found[0]["type"] == "bus" and found[0]["label"] == "9"
+
+
+def test_resolve_requested_routes_accepts_letters_and_aliases(api_client):
+    """«9а» = «9A», «3/3a» — алиас троллейбуса 3 из live_names."""
+    found_9a, _ = app_main.resolve_requested_routes(["9а"])
+    found_3, _ = app_main.resolve_requested_routes(["3/3a"])
+
+    assert [item["key"] for item in found_9a] == ["bus|9A"]
+    assert [item["key"] for item in found_3] == ["trolley|3"]
+
+
+def test_resolve_requested_routes_returns_both_types_for_same_number(api_client):
+    """«5» есть и у автобусов, и у троллейбусов — отдаём оба, не половину."""
+    found, missing = app_main.resolve_requested_routes(["5"])
+
+    assert [item["key"] for item in found] == ["bus|5", "trolley|5"]
+    assert missing == []
+
+
+def test_resolve_requested_routes_reports_unknown_number(api_client):
+    """Номера вне активных маршрутов городa честно идут в missing."""
+    found, missing = app_main.resolve_requested_routes(["9", "42", "777"])
+
+    assert found and [item["key"] for item in found] == ["bus|9"]
+    assert missing == ["42", "777"]
+
+
+# --- Голосовая фраза --------------------------------------------------------
+
+def test_monitor_speech_phrases():
+    """Одна фраза — «маршрут 9», две и больше — «маршрути 9 та 10»."""
+    routes = [{"key": "bus|9", "type": "bus", "label": "9"},
+              {"key": "bus|10", "type": "bus", "label": "10"}]
+    assert app_main.build_monitor_speech(routes[:1], []) == "Показую маршрут 9."
+    assert app_main.build_monitor_speech(routes, []) == "Показую маршрути 9 та 10."
+    assert app_main.build_monitor_speech(routes, ["42"]) == (
+        "Показую маршрути 9 та 10, На жаль, маршрут 42 зараз не працює.")
+
+
+def test_monitor_speech_reads_letter_in_ukrainian():
+    """«9A» звучит как «9 а» — как и в озвучке планов."""
+    routes = [{"key": "bus|9A", "type": "bus", "label": "9A"}]
+
+    assert app_main.build_monitor_speech(routes, []) == "Показую маршрут 9 а."
+
+
+def test_monitor_speech_is_empty_without_routes_and_missing():
+    """Пустой разбор — молчание: текст-подсказка идёт в панель, не в голос."""
+    assert app_main.build_monitor_speech([], []) == ""
+
+
+
+# --- Контракт /api/plan и /api/route ----------------------------------------
+
+def _monitor_stub(routes):
+    """LLM-заглушка: интент мониторинга с заданными номерами."""
+    return lambda text: {"type": "monitor_routes", "routes": list(routes)}
+
+
+def test_plan_monitor_intent_returns_routes_without_stops(api_client, monkeypatch):
+    """«Покажи 9 і 10»: остановок и ног нет вовсе, фильтр и озвучка на месте."""
+    monkeypatch.setattr(
+        app_main, "call_llm_extract_locations", _monitor_stub(["дев'ятка", "10"])
+    )
+
+    resp = api_client.post("/api/plan", json={"text": "покажи дев'ятку і десятку"})
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["mode"] == "monitor_routes"
+    # Модель вернула слово — в ответ клиенту всё равно уходят цифры.
+    assert body["requested_routes"] == ["9", "10"]
+    assert [item["key"] for item in body["routes"]] == ["bus|9", "bus|10"]
+    assert body["missing_routes"] == []
+    assert body["speech"]["text"] == "Показую маршрути 9 та 10."
+    assert "на карті лише їхні машини" in body["message"]
+    # Геопоиск и роутер не участвуют: точек в фразе нет вовсе.
+    assert "legs" not in body
+    assert body.get("from_stop_id") is None and body.get("to_stop_id") is None
+
+
+def test_plan_monitor_reports_unknown_route(api_client, monkeypatch):
+    """Номер вне активных озвучивается отдельно, найденные — показываются."""
+    monkeypatch.setattr(app_main, "call_llm_extract_locations", _monitor_stub(["9", "42"]))
+
+    body = api_client.post("/api/plan", json={"text": "покажи 9 і 42"}).json()
+
+    assert body["mode"] == "monitor_routes"
+    assert [item["key"] for item in body["routes"]] == ["bus|9"]
+    assert body["missing_routes"] == ["42"]
+    assert "не працює" in body["speech"]["text"]
+
+
+def test_plan_monitor_works_without_llm(api_client, monkeypatch):
+    """Модель недоступна — сленг-номера всё равно дают режим мониторинга."""
+    monkeypatch.setattr(
+        app_main, "call_llm_extract_locations",
+        lambda text: {"type": "error", "from": "", "to": ""},
+    )
+
+    body = api_client.post("/api/plan", json={"text": "покажи дев'ятку"}).json()
+
+    assert body["mode"] == "monitor_routes"
+    assert [item["key"] for item in body["routes"]] == ["bus|9"]
+
+
+def test_route_endpoint_returns_monitor_mode(api_client, monkeypatch):
+    """/api/route (старый клиент) отдаёт тот же режим — схема его знает."""
+    monkeypatch.setattr(app_main, "call_llm_extract_locations", _monitor_stub(["9", "10"]))
+
+    body = api_client.post("/api/route", json={"text": "покажи 9 і 10"}).json()
+
+    assert body["mode"] == "monitor_routes"
+    assert body["requested_routes"] == ["9", "10"]
+    assert [item["key"] for item in body["routes"]] == ["bus|9", "bus|10"]
+    assert body["speech"]["text"] == "Показую маршрути 9 та 10."
+    assert body["from_stop_id"] is None and body["to_stop_id"] is None
+
+
+def test_route_intent_is_not_turned_into_monitor(api_client, monkeypatch):
+    """Обычный А→Б остаётся планом: интенты не смешиваются."""
+    monkeypatch.setattr(
+        app_main, "call_llm_extract_locations",
+        lambda text: {"type": "route", "from": "Соборка", "to": "Гравітон"},
+    )
+
+    body = api_client.post("/api/plan", json={"text": "з Соборки до Гравітону"}).json()
+
+    assert body["mode"] == "plan"
+    assert body["legs"]
+
+
+# --- Разбор ответа LLM ------------------------------------------------------
+
+def test_llm_monitor_intent_normalizes_words(monkeypatch):
+    """Слово от модели («дев'ятку») становится цифрой до ответа клиенту."""
+    def create(*, model, messages, temperature, max_tokens):
+        return SimpleNamespace(choices=[SimpleNamespace(
+            message=SimpleNamespace(
+                content='{"type":"monitor_routes","routes":["дев\'ятку","10"]}')
+        )])
+
+    monkeypatch.setattr(app_main, "OPENROUTER_MODELS", ["free-1"])
+    monkeypatch.setattr(app_main, "llm_client", _fake_client(create))
+    app_main._llm_cache.clear()
+
+    result = app_main.call_llm_extract_locations("покажи дев'ятку і десятку")
+
+    assert result == {"type": "monitor_routes", "routes": ["9", "10"]}
+
+
+def test_llm_monitor_without_routes_advances_to_next_model(monkeypatch):
+    """Интент без номеров — брак: пробуем следующую модель."""
+    calls = []
+
+    def create(*, model, messages, temperature, max_tokens):
+        calls.append(model)
+        content = ('{"type":"monitor_routes","routes":[]}' if model == "free-1"
+                   else '{"type":"monitor_routes","routes":["7"]}')
+        return SimpleNamespace(choices=[SimpleNamespace(
+            message=SimpleNamespace(content=content))])
+
+    monkeypatch.setattr(app_main, "OPENROUTER_MODELS", ["free-1", "free-2"])
+    monkeypatch.setattr(app_main, "llm_client", _fake_client(create))
+    app_main._llm_cache.clear()
+
+    result = app_main.call_llm_extract_locations("покажи сімку")
+
+    assert calls == ["free-1", "free-2"]
+    assert result == {"type": "monitor_routes", "routes": ["7"]}
