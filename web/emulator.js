@@ -1578,11 +1578,12 @@ function transferBadge(number, point, colour, name) {
       className: 'plan-transfer-wrap',
       html: '<div class="plan-transfer" data-transfer="' + number +
         '" style="--route-colour: ' + colour + '">' +
+        '<span class="plan-transfer-icon">🏁</span>' +
         '<span class="plan-transfer-num">' + number + '</span></div>',
-      iconSize: [24, 34],
+      iconSize: null,
       // Якір — внизу «ножки» прапорця: флажок стоит НА остановке, а не парит
       // над ней (как и фініш).
-      iconAnchor: [12, 32],
+      iconAnchor: [17, 32],
     }),
   });
   if (name) {
@@ -1714,19 +1715,23 @@ function renderPlan(plan) {
       // Посадка: номер шага вместо безликой точки — глаз цепляется сразу.
       if (path.length) stepBadge(step, path[0], colour, leg.from).addTo(legLayer);
 
-      // Пересадка: прапорець із номером на посадці 2-ї та наступних ног і
-      // піший зв'язок із місцем виходу. Нога transfer малює його сама, але її
-      // може й не бути (роутер викидає стан «сів і відразу вийшов» — тоді
-      // ноги з'єднуються без перехода) — тоді ведемо пунктир по координатах.
+      // Пересадка: прапорець із номером на висадці поточної ноги (якщо є наступна поїздка).
+      // Це дозволяє пасажиру бачити точне місце виходу перед пішим переходом.
+      const nextTransitIndex = nearestTransitIndex(plan.legs, index, 1);
+      if (nextTransitIndex >= 0 && path.length) {
+        transferBadge(step, legEnds[index], colour, leg.to).addTo(legLayer);
+      }
+
+      // Піший зв'язок із місцем виходу. Нога transfer малює його сама, але її
+      // може й не бути (роутер викидає стан «сів і відразу вийшов»)
       if (step > 1 && path.length) {
-        transferBadge(step - 1, path[0], colour, leg.from).addTo(legLayer);
         const prevEnd = prevTransitIndex >= 0 ? legEnds[prevTransitIndex] : null;
         const bridged = walkBridged.has(prevTransitIndex + '>' + index);
         if (prevEnd && !bridged) {
           const gap = distanceM(prevEnd[0], prevEnd[1], path[0][0], path[0][1]);
           if (gap > SAME_STOP_METERS && gap <= TRANSFER_WALK_MAX_METERS) {
             L.polyline([prevEnd, path[0]], {
-              color: '#808080', weight: 5, dashArray: '1, 10',
+              color: '#194a8d', weight: 5, dashArray: '1, 10',
               lineCap: 'round', lineJoin: 'round', className: 'plan-walk-line',
             }).addTo(legLayer);
             walkBadge([(prevEnd[0] + path[0][0]) / 2, (prevEnd[1] + path[0][1]) / 2])
@@ -1791,7 +1796,7 @@ function renderPlan(plan) {
       // Не малюємо пунктир для першого кроку, якщо не знаємо координату юзера
       if (walkPath.length > 1 && index !== 0) {
         L.polyline(walkPath, {
-          color: '#808080', weight: 5, dashArray: '1, 10',
+          color: '#194a8d', weight: 5, dashArray: '1, 10',
           lineCap: 'round', lineJoin: 'round', className: 'plan-walk-line',
         }).addTo(legLayer);
         walkPath.forEach((point) => bounds.push(point));

@@ -205,8 +205,17 @@ const probe = () => ({
           borderRadius: style.borderRadius,
           borderWidth: parseFloat(style.borderTopWidth),
           background: style.backgroundColor,
+          color: style.color,
           text: el.textContent.trim(),
         };
+      })(),
+      dash: (() => {
+        const el = document.querySelector('.plan-walk-line');
+        return el ? el.getAttribute('stroke-dasharray') : null;
+      })(),
+      lineColor: (() => {
+        const el = document.querySelector('.plan-walk-line');
+        return el ? el.getAttribute('stroke') : null;
       })(),
     };
     // Фолбэк по координатам: ноги transfer НЕТ, а посадка следующей ноги — в
@@ -840,13 +849,15 @@ const probe = () => ({
       JSON.stringify(ux.transferLabels));
   const hasTransfers = Math.max(0, ux.transit - 1) > 0;
   const ts = plan.mapWalk && plan.mapWalk.transferStyle;
-  check('прапорець пересадки — білий кружечок у колір лінії',
-    !!ts && ts.width === 24 && ts.height === 24 && ts.borderRadius === '50%' &&
-    ts.borderWidth >= 2 && ts.background === 'rgb(255, 255, 255)' && ts.text === '1',
+  check('прапорець пересадки — кольоровий кружечок із прапорцем',
+    !!ts && ts.height === 24 && ts.borderRadius === '12px' &&
+    ts.borderWidth === 1 && ts.background !== 'rgb(255, 255, 255)' && ts.text === '🏁1',
     JSON.stringify(ts) + (hasTransfers ? '' : ' (реальний план без пересадок — міряли синтетичний)'));
-  check('пунктир пешої ноги не змінився',
-    !!plan.mapWalk && String(plan.mapWalk.dash).replace(/\s+/g, '') === '1,10',
-    'stroke-dasharray: ' + (plan.mapWalk ? plan.mapWalk.dash : 'немає'));
+  check('пунктир пешої ноги не змінився і став темносинім',
+    !!plan.mapWalk && String(plan.mapWalk.dash).replace(/\s+/g, '') === '1,10' &&
+    plan.mapWalk.lineColor === '#194a8d',
+    'stroke-dasharray: ' + (plan.mapWalk ? plan.mapWalk.dash : 'немає') +
+    ', color: ' + (plan.mapWalk ? plan.mapWalk.lineColor : 'немає'));
   check('фініш позначено', ux.finish === 1, 'іконок фінішу: ' + ux.finish);
   check('фініш у білому круглому бейджі',
     !!ux.finishStyle && ux.steps.length > 0 &&
