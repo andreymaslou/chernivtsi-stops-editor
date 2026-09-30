@@ -327,14 +327,14 @@ def test_route_shapes_empty_for_unknown_number(api_client, monkeypatch):
 # --- Тип ТС в фразе и колізія номера (бриф Gemini 2026-10-01) ---------------
 
 def test_vehicle_type_hint_reads_both_spellings():
-    """«автобус» → bus, «тролейбус»/«троллейбус» → trolley, пусто — нейтрально."""
+    """«автобус» → bus, «тролейбус»/«троллейбус» → trolley, оба → both, ничего → ''."""
     assert app_main._vehicle_type_hint("покажи 4 автобус") == "bus"
     assert app_main._vehicle_type_hint("автобус 4") == "bus"
     assert app_main._vehicle_type_hint("хочу бачити 5 тролейбус") == "trolley"
     assert app_main._vehicle_type_hint("де зараз 5 троллейбус") == "trolley"
     assert app_main._vehicle_type_hint("покажи 4") == ""
-    # Оба типа названы разом — не сужаем (спорно, честнее показать оба).
-    assert app_main._vehicle_type_hint("автобус і тролейбус 5") == ""
+    # Оба типа названы разом — это осознанный выбор «оба», не путать с «не назван».
+    assert app_main._vehicle_type_hint("автобус і тролейбус 5") == "both"
 
 
 def test_resolve_requested_routes_filters_by_explicit_type(api_client):
@@ -412,11 +412,84 @@ def test_plan_monitor_filters_trolley_from_phrase(api_client, monkeypatch):
     assert body["speech"]["text"] == "Показую маршрут 4."
 
 
-def test_plan_monitor_shared_number_speaks_type(api_client, monkeypatch):
-    """Без типу «4» дає обидва маршрути, а голос каже «четвертий … тролейбус»."""
+def test_plan_monitor_shared_number_asks_clarify(api_client, monkeypatch):
+    """Без типу «4» — не показуємо навмання, а питаємо: автобус/тролейбус/обидва."""
     monkeypatch.setattr(app_main, "call_llm_extract_locations", _monitor_stub(["4"]))
 
     body = api_client.post("/api/plan", json={"text": "покажи 4"}).json()
 
+    assert body["mode"] == "monitor_clarify"
+    assert body["reask"] is True
+    assert body["requested_routes"] == ["4"]
+    assert body["ambiguous_routes"] == ["4"]
+    assert "автобусів" in body["message"] and "тролейбусів" in body["message"]
+    options = {opt["id"]: opt for opt in body["clarify_options"]}
+    assert list(options) == ["bus", "trolley", "both"]
+    assert [r["key"] for r in options["bus"]["routes"]] == ["bus|4"]
+    assert [r["key"] for r in options["trolley"]["routes"]] == ["trolley|4"]
+    assert [r["key"] for r in options["both"]["routes"]] == ["bus|4", "trolley|4"]
+    # Каждый вариант несёт готовую геометрию и свою фразу — клиент не парсит заново.
+    assert [s["key"] for s in options["trolley"]["shapes"]] == ["trolley|4"]
+    assert options["both"]["speech"]["text"] == (
+        "Показую четвертий автобус та четвертий тролейбус.")
+    assert options["bus"]["speech"]["text"] == "Показую маршрут 4."
+
+
+def test_plan_monitor_ambiguous_list_gives_three_options(api_client, monkeypatch):
+    """Список «1,3,4,6,23,39»: спільні 1,3,4,6 уточнюємо; 23,39 — завжди автобус."""
+    monkeypatch.setattr(
+        app_main, "call_llm_extract_locations",
+        _monitor_stub(["1", "3", "4", "6", "23", "39"]),
+    )
+
+    body = api_client.post("/api/plan", json={"text": "покажи 1, 3, 4, 6, 23, 39"}).json()
+
+    assert body["mode"] == "monitor_clarify"
+    assert body["ambiguous_routes"] == ["1", "3", "4", "6"]
+    options = {opt["id"]: [r["key"] for r in opt["routes"]] for opt in body["clarify_options"]}
+    assert options["bus"] == ["bus|1", "bus|3", "bus|4", "bus|6", "bus|23", "bus|39"]
+    assert options["trolley"] == [
+        "trolley|1", "trolley|3", "trolley|4", "trolley|6", "bus|23", "bus|39"]
+    assert options["both"] == [
+        "bus|1", "trolley|1", "bus|3", "trolley|3", "bus|4", "trolley|4",
+        "bus|6", "trolley|6", "bus|23", "bus|39"]
+
+
+def test_plan_monitor_unambiguous_number_skips_clarify(api_client, monkeypatch):
+    """«9» є лише в автобуса — питати нема про що, показуємо одразу."""
+    monkeypatch.setattr(app_main, "call_llm_extract_locations", _monitor_stub(["9"]))
+
+    body = api_client.post("/api/plan", json={"text": "покажи дев'ятку"}).json()
+
+    assert body["mode"] == "monitor_routes"
+    assert [item["key"] for item in body["routes"]] == ["bus|9"]
+
+
+def test_plan_monitor_unambiguous_list_skips_clarify(api_client, monkeypatch):
+    """Список без спільних номерів (9,23,39) — однозначний, без карточок."""
+    monkeypatch.setattr(app_main, "call_llm_extract_locations", _monitor_stub(["9", "23", "39"]))
+
+    body = api_client.post("/api/plan", json={"text": "покажи 9, 23, 39"}).json()
+
+    assert body["mode"] == "monitor_routes"
+    assert [item["key"] for item in body["routes"]] == ["bus|9", "bus|23", "bus|39"]
+
+
+def test_plan_monitor_both_types_named_no_clarify(api_client, monkeypatch):
+    """«автобус 4 і тролейбус 4» — тип назван (both), уточнення не потрібне."""
+    monkeypatch.setattr(app_main, "call_llm_extract_locations", _monitor_stub(["4"]))
+
+    body = api_client.post(
+        "/api/plan", json={"text": "покажи автобус 4 і тролейбус 4"}).json()
+
+    assert body["mode"] == "monitor_routes"
     assert [item["key"] for item in body["routes"]] == ["bus|4", "trolley|4"]
-    assert body["speech"]["text"] == "Показую четвертий автобус та четвертий тролейбус."
+
+
+def test_monitor_clarify_question_and_speech():
+    """Вопрос уточнения: тире в панели, точка в голосе (движки читают «—» криво)."""
+    assert app_main._monitor_clarify_question(["4"]) == (
+        "Маршрут 4 є і в автобусів, і в тролейбусів — що показати?")
+    assert app_main._monitor_clarify_speech(["4"]) == (
+        "Маршрут 4 є і в автобусів, і в тролейбусів. Що показати?")
+    assert app_main._monitor_clarify_question(["1", "3", "4", "6"]).startswith("Маршрути 1, 3, 4 та 6")

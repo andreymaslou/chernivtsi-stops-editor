@@ -574,6 +574,9 @@
          (саммарі — це #answer, який малює renderPlan). Клік по картці
          перемальовує план без повторного запиту. -->
     <div id="plan-variants" class="plan-variants" hidden aria-label="Варіанти маршруту"></div>
+    <!-- Картки уточнення типу ТС (01.10.2026): «покажи 4» — автобус/
+         тролейбус/обидва. Рендерить renderMonitorClarify (emulator.js). -->
+    <div id="monitor-clarify" class="plan-variants" hidden aria-label="Уточнення типу транспорту"></div>
     <div id="answer" class="answer"></div>
 
     <textarea id="ask-text" placeholder="Наприклад: Я на Соборці, треба на Гравітон"></textarea>
@@ -656,7 +659,7 @@
   <div id="map" class="map"></div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script src="emulator.js?v=2026-09-29a"></script>
+  <script src="emulator.js?v=2026-10-01a"></script>
 </body>
 
 </html>

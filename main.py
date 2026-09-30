@@ -969,6 +969,11 @@ class RouteResponse(BaseModel):
     requested_routes: Optional[List[str]] = None
     routes: Optional[List[Dict[str, Any]]] = None
     missing_routes: Optional[List[str]] = None
+    # Уточнення типу ТС (01.10.2026): номер є і в автобуса, і в тролейбуса —
+    # віддаємо варіанти (автобуси / тролейбуси / обидва) з ГОТОВИМИ
+    # routes/shapes/speech, щоб клієнт показав картки без повторного розбору.
+    ambiguous_routes: Optional[List[str]] = None
+    clarify_options: Optional[List[Dict[str, Any]]] = None
     # Готова фраза для озвучки («Показую маршрути 9 та 10.»): у режимі
     # моніторингу голос звучить із цим полем, інакше клієнт збирав би фразу сам.
     speech: Optional[Dict[str, Any]] = None
@@ -1829,19 +1834,46 @@ _VEHICLE_TYPE_RE = re.compile(r"(?P<trolley>трол?лейбус)|(?P<bus>ав�
 
 def _vehicle_type_hint(text: str) -> str:
     """
-    Тип ТС, явно названный пользователем: «автобус» → bus, «тролейбус» → trolley.
+    Тип ТС, названный пользователем: «автобус» → bus, «тролейбус» → trolley,
+    оба сразу → both, ничего → "".
 
-    Тип важен только вкупе с номером: «5» есть и у автобусов, и у троллейбусов,
-    и без подсказки мы отдаём оба (см. resolve_requested_routes). Если назван
-    ровно один тип — фильтруем строго; если оба или ни один — не сужаем
-    (пустая строка = «как раньше»).
+    Разница «both» и "" критична для мониторинга: «покажи автобус 4 і тролейбус
+    4» — это осознанный выбор обоих типов (показываем без вопросов), а «покажи
+    4» — тип не назван, и общий номер 4 надо уточнить (см.
+    monitor_routes_response → _monitor_clarify_response).
     """
     found = {match.lastgroup for match in _VEHICLE_TYPE_RE.finditer(str(text or ""))}
     if found == {"trolley"}:
         return "trolley"
     if found == {"bus"}:
         return "bus"
+    if found == {"bus", "trolley"}:
+        return "both"
     return ""
+
+
+def _match_manifest_entries(
+    number: str,
+    entries: Optional[List[Dict[str, Any]]] = None,
+) -> List[Dict[str, Any]]:
+    """Записи манифеста, чей номер/подпись/алиас совпал с названным номером.
+
+    Сравнение — по нормализованной подписи (TransitRouter.normalize_label):
+    «9а» = «9A», «3/3a» — алиас троллейбуса 3. Буква НЕ срезается, поэтому «4»
+    не совпадёт с алиасом «4T» — это разные номера.
+    """
+    if entries is None:
+        entries = _manifest_route_entries()
+    wanted = TransitRouter.normalize_label(str(number or ""))
+    if not wanted:
+        return []
+    return [
+        entry for entry in entries
+        if any(
+            TransitRouter.normalize_label(candidate) == wanted
+            for candidate in [entry["label"], entry["number"], *entry["aliases"]]
+        )
+    ]
 
 
 def resolve_requested_routes(
@@ -1851,39 +1883,75 @@ def resolve_requested_routes(
     """
     Сопоставляет названные номера с активными маршрутами города (манифест).
 
-    Возвращает (найденные, ненайденные). Сравнение идёт по нормализованной
-    подписи (TransitRouter.normalize_label): «9а» = «9A», «8А» = «8A», а
-    «3/3a» — это алиас троллейбуса 3 из live_names. Ключ собирается так же,
-    как ключ кнопки фильтра в UI («bus|9A»): клиент по нему программно сужает
-    живой парк.
+    Возвращает (найденные, ненайденные). Ключ собирается так же, как ключ кнопки
+    фильтра в UI («bus|9A»): клиент по нему программно сужает живой парк.
 
-    Номер есть и у автобусов, и у троллейбусов («5»)? Отдаём оба: пользователь
-    назвал номер, а не тип ТС, и показать половину линии было бы подменой.
-    Кнопки троллейбусов в панели по умолчанию скрыты — UI включает их сам,
-    когда видит `trolley|*` в ответе.
-
-    `vehicle_type` ("bus"/"trolley") — когда тип назван явно («покажи 4
-    автобус»): тогда одноимённый маршрут другого типа не отдаём вовсе.
-    Точность сохраняется: normalize_label оставляет букву, поэтому «4» находит
-    только маршрут с номером «4» и никогда — алиас «4T».
+    Номер есть и у автобусов, и у троллейбусов («5»)? По умолчанию отдаём оба.
+    Но если `vehicle_type` — "bus"/"trolley" (тип назван явно: «покажи 4
+    автобус»), одноимённый маршрут другого типа не отдаём вовсе. "both"/"" — без
+    сужения (мониторинг сам решает, спросить у пользователя или показать всё).
     """
     found: List[Dict[str, Any]] = []
     missing: List[str] = []
-    entries = _manifest_route_entries()
     wanted_type = str(vehicle_type or "").strip().lower()
+    entries = _manifest_route_entries()
     if wanted_type in ("bus", "trolley"):
         entries = [entry for entry in entries if entry["type"] == wanted_type]
     for number in route_numbers or []:
-        wanted = TransitRouter.normalize_label(str(number or ""))
-        if not wanted:
+        matches = _match_manifest_entries(number, entries)
+        if not matches:
+            if str(number) not in missing:
+                missing.append(str(number))
             continue
-        matches = [
-            entry for entry in entries
-            if any(
-                TransitRouter.normalize_label(candidate) == wanted
-                for candidate in [entry["label"], entry["number"], *entry["aliases"]]
-            )
-        ]
+        for entry in matches:
+            key = entry["type"] + "|" + entry["label"]
+            if any(item["key"] == key for item in found):
+                continue
+            found.append({
+                "key": key,
+                "type": entry["type"],
+                "label": entry["label"],
+                "number": entry["number"],
+                "requested": str(number),
+            })
+    return found, missing
+
+
+def _ambiguous_requested_numbers(route_numbers: List[str]) -> List[str]:
+    """
+    Из названных номеров — те, что есть И у автобуса, И у троллейбуса.
+
+    Только они требуют уточнения типа ТС. У «9» троллейбуса нет — номер
+    однозначный, спрашивать нечего; у «4» — есть оба.
+    """
+    entries = _manifest_route_entries()
+    ambiguous: List[str] = []
+    for number in route_numbers or []:
+        types = {entry["type"] for entry in _match_manifest_entries(number, entries)}
+        if types == {"bus", "trolley"} and str(number) not in ambiguous:
+            ambiguous.append(str(number))
+    return ambiguous
+
+
+def _resolve_monitor_choice(
+    route_numbers: List[str],
+    choice: str,
+    ambiguous: List[str],
+) -> Tuple[List[Dict[str, Any]], List[str]]:
+    """
+    Маршруты для одного варианта уточнения мониторинга.
+
+    `choice` — "bus"/"trolley"/"both". Для НЕоднозначных номеров берём выбранный
+    тип, однозначные идут как есть: «покажи 4, 23» в варианте «тролейбус» даст
+    trolley|4 + bus|23 — названный 23 без троллейбуса не теряется.
+    """
+    ambiguous_set = {str(item) for item in (ambiguous or [])}
+    found: List[Dict[str, Any]] = []
+    missing: List[str] = []
+    for number in route_numbers or []:
+        matches = _match_manifest_entries(number)
+        if str(number) in ambiguous_set and choice in ("bus", "trolley"):
+            matches = [entry for entry in matches if entry["type"] == choice]
         if not matches:
             if str(number) not in missing:
                 missing.append(str(number))
@@ -2120,6 +2188,70 @@ def _monitor_routes_message(routes: List[Dict[str, Any]], missing: List[str]) ->
     return text
 
 
+_MONITOR_CHOICES = (
+    ("bus", "🚌 Автобуси"),
+    ("trolley", "🚎 Тролейбуси"),
+    ("both", "🚌🚎 Обидва"),
+)
+
+
+def _monitor_clarify_question(ambiguous: List[str]) -> str:
+    """Вопрос в панели ответа: «... — що показати?» (тире — визуально)."""
+    joined = _join_ua([str(item) for item in ambiguous])
+    noun = "Маршрут" if len(ambiguous) == 1 else "Маршрути"
+    return f"{noun} {joined} є і в автобусів, і в тролейбусів — що показати?"
+
+
+def _monitor_clarify_speech(ambiguous: List[str]) -> str:
+    """Тот же вопрос для TTS: точка вместо тире (движки читают «—» неровно)."""
+    joined = _join_ua([str(item) for item in ambiguous])
+    noun = "Маршрут" if len(ambiguous) == 1 else "Маршрути"
+    return f"{noun} {joined} є і в автобусів, і в тролейбусів. Що показати?"
+
+
+def _monitor_clarify_response(
+    text: str,
+    numbers: List[str],
+    ambiguous: List[str],
+) -> Dict[str, Any]:
+    """
+    Уточнение типа ТС: номер общий, тип не назван (бриф Gemini 01.10.2026).
+
+    Отдаём три готовых варианта (автобусы / троллейбусы / оба): каждый несёт
+    routes + shapes + speech + message, чтобы тап по карточке на клиенте сразу
+    показывал нужный парк — без повторного разбора фразы и без сессии.
+    """
+    options: List[Dict[str, Any]] = []
+    for choice, label in _MONITOR_CHOICES:
+        found, missing = _resolve_monitor_choice(numbers, choice, ambiguous)
+        option: Dict[str, Any] = {
+            "id": choice,
+            "label": label,
+            "routes": found,
+            "shapes": route_shapes_for(found),
+            "missing_routes": missing,
+            "message": _monitor_routes_message(found, missing),
+        }
+        speech = build_monitor_speech(found, missing)
+        if speech:
+            option["speech"] = {"text": speech, "lang": "uk-UA"}
+        options.append(option)
+    logger.info(
+        "Моніторинг: уточнення типу ТС для %s (спільні номери: %s)",
+        numbers, ambiguous,
+    )
+    return {
+        "mode": "monitor_clarify",
+        "user_text": text,
+        "message": _monitor_clarify_question(ambiguous),
+        "requested_routes": numbers,
+        "ambiguous_routes": ambiguous,
+        "clarify_options": options,
+        "reask": True,
+        "speech": {"text": _monitor_clarify_speech(ambiguous), "lang": "uk-UA"},
+    }
+
+
 def monitor_routes_response(
     text: str,
     route_numbers: List[str],
@@ -2148,6 +2280,13 @@ def monitor_routes_response(
     numbers = _clean_route_list(raw_numbers)
     dropped = [item for item in raw_numbers if not _clean_route_list([item])]
     hint = str(vehicle_type or "").strip().lower() or _vehicle_type_hint(text)
+    # Тип не назван, а номер есть и у автобуса, и у троллейбуса («покажи 4»)?
+    # Это не «покажи автобус 4» — неоднозначность: спросим карточками, что
+    # показать (бриф Gemini 01.10.2026), а не угадаем тип молча.
+    if hint == "":
+        ambiguous = _ambiguous_requested_numbers(numbers)
+        if ambiguous:
+            return _monitor_clarify_response(text, numbers, ambiguous)
     routes, missing = resolve_requested_routes(numbers, hint)
     shapes = route_shapes_for(routes)
     logger.info(

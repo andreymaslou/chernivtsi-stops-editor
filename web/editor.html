@@ -224,6 +224,10 @@
              НАД саммарі (#answer). Клік перемальовує план без повторного
              запиту; стилі — у emulator-panel.css, скоуповані під #emu-panel. -->
         <div id="plan-variants" class="plan-variants" hidden aria-label="Варіанти маршруту"></div>
+        <!-- Картки уточнення типу ТС (01.10.2026): «покажи 4» — автобус /
+             тролейбус / обидва. Рендерить renderMonitorClarify (emulator.js);
+             тап по картці одразу показує відповідний парк. -->
+        <div id="monitor-clarify" class="plan-variants" hidden aria-label="Уточнення типу транспорту"></div>
         <div id="answer" class="answer"></div>
 
         <textarea id="ask-text" placeholder="Наприклад: Я на Соборці, треба на Гравітон"></textarea>
@@ -361,7 +365,7 @@
        отдельной странице /ui/emulator.html создаёт свою). -->
   <script src="app.js?v=2026-09-20d"></script>
   <script src="slang-panel.js?v=2026-09-23a"></script>
-  <script src="emulator.js?v=2026-09-29a"></script>
+  <script src="emulator.js?v=2026-10-01a"></script>
 </body>
 
 </html>

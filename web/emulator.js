@@ -1171,8 +1171,12 @@ function setPlaying(on) {
 
 function render(endpoint, data) {
   clearLayers();
+  hideMonitorClarify();
   if (data.mode === 'off_topic') {
     renderOffTopic(data);
+  } else if (data.mode === 'monitor_clarify') {
+    // «Покажи 4» без типу: номер є і в автобуса, і в тролейбуса — карточки вибору.
+    renderMonitorClarify(data);
   } else if (data.mode === 'monitor_routes') {
     // «Покажи дев'ятку і десятку»: рисовать нечего — только парк фильтруем.
     renderMonitorRoutes(data);
@@ -1351,6 +1355,77 @@ function drawMonitorShapes(keys, shapes) {
     });
   });
   return bounds;
+}
+
+/**
+ * Уточнения типу ТС у моніторингу (бриф Gemini 01.10.2026): номер є і в
+ * автобуса, і в тролейбуса («покажи 4»), тип не назван — сервер прислав три
+ * готових варіанти. Малюємо картки; тап показує відповідний парк одразу —
+ * option несе свої routes/shapes/message/speech, розбирати фразу заново не
+ * треба (пам'ять діалогу теж не потрібна).
+ */
+function hideMonitorClarify() {
+  const box = document.getElementById('monitor-clarify');
+  if (box) {
+    box.hidden = true;
+    box.innerHTML = '';
+  }
+}
+
+/** Рядок «що покаже» для картки уточнення: типи згруповані (🚌 … + 🚎 …). */
+function clarifyChoiceLine(option) {
+  const bus = [];
+  const trolley = [];
+  (Array.isArray(option.routes) ? option.routes : []).forEach((route) => {
+    if (!route) return;
+    (route.type === 'trolley' ? trolley : bus).push(String(route.label || ''));
+  });
+  const parts = [];
+  if (bus.length) parts.push('🚌 ' + bus.join(', '));
+  if (trolley.length) parts.push('🚎 ' + trolley.join(', '));
+  return parts.join(' + ');
+}
+
+function renderMonitorClarify(data) {
+  hideVariantCards();
+  hideMonitorClarify();
+  state.lastPlan = null;
+  setTargetBoards(null);
+
+  document.getElementById('answer').innerHTML =
+    '<span class="badge plan">уточнення</span>\n' +
+    esc(data.message || 'Оберіть тип транспорту.');
+  setStatus('оберіть тип на картках', 'ok');
+
+  const box = document.getElementById('monitor-clarify');
+  const options = Array.isArray(data.clarify_options) ? data.clarify_options : [];
+  if (box && options.length) {
+    box.innerHTML = '';
+    options.forEach((option) => {
+      if (!option || !Array.isArray(option.routes) || !option.routes.length) return;
+      const card = document.createElement('button');
+      card.type = 'button';
+      card.className = 'variant-card clarify-card';
+      card.setAttribute('data-clarify-choice', String(option.id || ''));
+      const tag = document.createElement('span');
+      tag.className = 'variant-tag';
+      tag.textContent = String(option.label || option.id || '');
+      card.appendChild(tag);
+      const line = document.createElement('span');
+      line.className = 'variant-route';
+      line.textContent = clarifyChoiceLine(option);
+      card.appendChild(line);
+      card.onclick = () => {
+        stopVoice();
+        hideMonitorClarify();
+        clearLayers();
+        renderMonitorRoutes(option);
+      };
+      box.appendChild(card);
+    });
+    box.hidden = box.childElementCount === 0;
+  }
+  speakUk((data.speech && data.speech.text) || data.message || '');
 }
 
 /** Откат: сервер только понял фразу и вернул две остановки. */
@@ -2739,6 +2814,9 @@ window.Emulator = {
   // /api/plan з mode=monitor_routes напрямую — без ключа OpenRouter — и
   // сверяет фильтр парка + текст, который ушёл в синтез.
   renderMonitorRoutes,
+  // Уточнення типу ТС (бриф 01.10.2026): карточки вибору — UI-проверка подаёт
+  // ответ monitor_clarify напрямую и сверяет тексты и клики.
+  renderMonitorClarify,
   lastSpeech: () => state.lastSpeech,
 };
 

@@ -347,6 +347,70 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     '(очікується 3: два напрямки 9-го + один у 10-го; линия 15-го не рисуется)',
     '| після виходу з режиму:', monitor.shapes.afterClear);
 
+  // Уточнення типу ТС (бриф 01.10.2026, renderMonitorClarify): «покажи 4» без
+  // типу — номер спільний, фронт малює три карточки (🚌/🚎/обидва). Тап по
+  // карточці показує відповідний парк із ГОТОВОГО payload (routes+shapes), без
+  // запиту й без пам'яті діалогу.
+  const clarify = await page.evaluate(async () => {
+    window.Emulator.applySnapshot({
+      source: 'mixed',
+      vehicles: [
+        { vehicle_type: 'bus', route_label: '4', board_number: 'B-4', lat: 48.2921,
+          lon: 25.9358, is_live: true, speed_kmh: 20, heading_deg: 90, source: 'sim' },
+        { vehicle_type: 'trolley', route_label: '4', board_number: 'T-4', lat: 48.2931,
+          lon: 25.9368, is_live: true, speed_kmh: 20, heading_deg: 90, source: 'sim' },
+      ],
+    });
+    const option = (id, label, routes) => ({
+      id, label, routes, shapes: [], missing_routes: [],
+      message: 'Показую маршрут 4 — на карті лише його машини.',
+      speech: { text: 'Показую маршрут 4.', lang: 'uk-UA' },
+    });
+    window.Emulator.renderMonitorClarify({
+      mode: 'monitor_clarify',
+      message: "Маршрут 4 є і в автобусів, і в тролейбусів — що показати?",
+      speech: { text: "Маршрут 4 є і в автобусів, і в тролейбусів. Що показати?", lang: 'uk-UA' },
+      clarify_options: [
+        option('bus', '🚌 Автобуси', [{ key: 'bus|4', type: 'bus', label: '4', number: '4' }]),
+        option('trolley', '🚎 Тролейбуси', [{ key: 'trolley|4', type: 'trolley', label: '4', number: '4' }]),
+        option('both', '🚌🚎 Обидва', [
+          { key: 'bus|4', type: 'bus', label: '4', number: '4' },
+          { key: 'trolley|4', type: 'trolley', label: '4', number: '4' },
+        ]),
+      ],
+    });
+    const box = document.getElementById('monitor-clarify');
+    const cards = box ? Array.prototype.slice.call(box.querySelectorAll('.clarify-card')) : [];
+    const choices = cards.map((c) => c.getAttribute('data-clarify-choice'));
+    const tags = cards.map((c) => ((c.querySelector('.variant-tag') || {}).textContent) || '');
+    const lines = cards.map((c) => ((c.querySelector('.variant-route') || {}).textContent) || '');
+    const question = (document.getElementById('answer') || {}).textContent || '';
+    const trolleyCard = box ? box.querySelector('.clarify-card[data-clarify-choice="trolley"]') : null;
+    if (trolleyCard) trolleyCard.click();
+    await new Promise((r) => setTimeout(r, 300));
+    const chipTrolley = document.querySelector('.route-chip[data-key="trolley|4"]');
+    const chipBus = document.querySelector('.route-chip[data-key="bus|4"]');
+    return {
+      count: cards.length,
+      choices: choices,
+      tags: tags,
+      lines: lines,
+      question: question,
+      hiddenAfter: box ? box.hidden : null,
+      on: [...document.querySelectorAll('.route-chip[aria-pressed="true"]')].map((el) => el.dataset.key),
+      chipTrolleyOff: chipTrolley ? chipTrolley.getAttribute('aria-pressed') : null,
+      chipBusOff: chipBus ? chipBus.getAttribute('aria-pressed') : null,
+      speech: window.Emulator.lastSpeech(),
+    };
+  });
+  console.log('уточнення типу ТС: карточок', clarify.count,
+    '| вибір:', clarify.choices.join(','), '| теги:', clarify.tags.join(' | '));
+  console.log('  питання:', clarify.question.trim().slice(0, 64),
+    '| рядки:', clarify.lines.join(' || '));
+  console.log('  тап 🚎 -> увімкнено', clarify.on.join(','),
+    '| trolley|4:', clarify.chipTrolleyOff, '/ bus|4:', clarify.chipBusOff,
+    '| карточки сховано:', clarify.hiddenAfter, '| голос:', clarify.speech);
+
   console.log('помилок консолі:', errors.length, errors.join(' | '));
   await browser.close();
 
@@ -384,6 +448,14 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     /показую маршрути: 9, 10/.test(monitor.status) &&
     // лінії маршрутів: тільки запрошені, і зникають разом із режимом
     monitor.shapes.drawn === 3 && monitor.shapes.afterClear === 0 &&
+    // уточнення типу ТС: три карточки (bus/trolley/both), тап 🚎 сужує парк
+    clarify.count === 3 && clarify.choices.join(',') === 'bus,trolley,both' &&
+    clarify.tags.join('|') === '🚌 Автобуси|🚎 Тролейбуси|🚌🚎 Обидва' &&
+    /🚌 4/.test(clarify.lines[0]) && /🚎 4/.test(clarify.lines[1]) &&
+    /уточнення/.test(clarify.question) && /4 є і в автобусів/.test(clarify.question) &&
+    clarify.on.join(',') === 'trolley|4' &&
+    clarify.chipTrolleyOff === 'true' && clarify.chipBusOff === 'false' &&
+    clarify.hiddenAfter === true && /Показую маршрут 4/.test(clarify.speech) &&
     /пауза/.test(play.label) && errors.length === 0;
   console.log(ok ? 'OK: потік і фільтр працюють у браузері.' : 'FAIL');
   process.exit(ok ? 0 : 1);
