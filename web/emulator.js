@@ -1279,16 +1279,22 @@ async function renderMonitorRoutes(data) {
   const shapeBounds = drawMonitorShapes(keys, data.shapes);
 
   const labels = keys.map((key) => key.slice(key.indexOf('|') + 1));
+  // Тип берём из ключа («bus|4»/«trolley|4»): при совпадении номера у автобуса
+  // и троллейбуса строка «на карті» иначе читалась бы как «🚌 4 + 🚌 4».
+  const badges = keys.map((key) => {
+    const type = key.slice(0, key.indexOf('|'));
+    return (type === 'trolley' ? '🚎 ' : '🚌 ') + key.slice(key.indexOf('|') + 1);
+  });
   const message = String(data.message || '').trim() ||
     (labels.length ? 'На карті лише машини названих маршрутів.' : 'Не знаю такого маршруту.');
   const parts = ['<span class="badge plan">моніторинг</span>', esc(message)];
-  if (labels.length) {
-    parts.push('на карті: ' + labels.map((label) => esc('🚌 ' + label)).join(' + '));
+  if (badges.length) {
+    parts.push('на карті: ' + badges.map((badge) => esc(badge)).join(' + '));
   }
   document.getElementById('answer').innerHTML = parts.join('\n');
   setStatus(
-    labels.length ? 'показую маршрути: ' + labels.join(', ') : 'маршрут не знайдено',
-    labels.length ? 'ok' : 'error',
+    badges.length ? 'показую маршрути: ' + badges.join(', ') : 'маршрут не знайдено',
+    badges.length ? 'ok' : 'error',
   );
   speakUk(monitorSpeech(data, labels));
   // Маршрут мог быть в другом конце города — показываем его целиком. Парк при

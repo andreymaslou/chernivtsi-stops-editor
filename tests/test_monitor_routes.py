@@ -322,3 +322,101 @@ def test_route_shapes_empty_for_unknown_number(api_client, monkeypatch):
 
     assert body["routes"] == [] and body["shapes"] == []
     assert body["missing_routes"] == ["42"]
+
+
+# --- Тип ТС в фразе и колізія номера (бриф Gemini 2026-10-01) ---------------
+
+def test_vehicle_type_hint_reads_both_spellings():
+    """«автобус» → bus, «тролейбус»/«троллейбус» → trolley, пусто — нейтрально."""
+    assert app_main._vehicle_type_hint("покажи 4 автобус") == "bus"
+    assert app_main._vehicle_type_hint("автобус 4") == "bus"
+    assert app_main._vehicle_type_hint("хочу бачити 5 тролейбус") == "trolley"
+    assert app_main._vehicle_type_hint("де зараз 5 троллейбус") == "trolley"
+    assert app_main._vehicle_type_hint("покажи 4") == ""
+    # Оба типа названы разом — не сужаем (спорно, честнее показать оба).
+    assert app_main._vehicle_type_hint("автобус і тролейбус 5") == ""
+
+
+def test_resolve_requested_routes_filters_by_explicit_type(api_client):
+    """«4 автобус» отсекает троллейбус 4 — тип назван строго."""
+    bus, bus_missing = app_main.resolve_requested_routes(["4"], "bus")
+    trolley, trolley_missing = app_main.resolve_requested_routes(["4"], "trolley")
+
+    assert [item["key"] for item in bus] == ["bus|4"] and bus_missing == []
+    assert [item["key"] for item in trolley] == ["trolley|4"] and trolley_missing == []
+
+
+def test_resolve_requested_routes_number_is_not_fuzzy(api_client):
+    """«8» не захоплює ні «8A», ні чужі букви: лише рівні номери."""
+    found, missing = app_main.resolve_requested_routes(["8"])
+
+    assert [item["key"] for item in found] == ["bus|8", "trolley|8"]
+    assert missing == []
+    # «4T» — це алиас троллейбуса 4, а не окремий «номер T».
+    four_t, _ = app_main.resolve_requested_routes(["4T"])
+    assert [item["key"] for item in four_t] == ["trolley|4"]
+
+
+def test_speech_ordinal_masculine():
+    """Порядковий числівник для озвучки; літери й дроби не порядкові."""
+    assert app_main._speech_ordinal_masc("1") == "перший"
+    assert app_main._speech_ordinal_masc("4") == "четвертий"
+    assert app_main._speech_ordinal_masc("10") == "десятий"
+    assert app_main._speech_ordinal_masc("21") == "двадцять перший"
+    assert app_main._speech_ordinal_masc("43") == "сорок третій"
+    assert app_main._speech_ordinal_masc("9A") == ""
+    assert app_main._speech_ordinal_masc("3/3a") == ""
+
+
+def test_monitor_speech_disambiguates_shared_number():
+    """Один номер у двох типів ТС — озвучка називає тип, а не «4 та 4»."""
+    routes = [{"key": "bus|4", "type": "bus", "label": "4"},
+              {"key": "trolley|4", "type": "trolley", "label": "4"}]
+
+    speech = app_main.build_monitor_speech(routes, [])
+
+    assert speech == "Показую четвертий автобус та четвертий тролейбус."
+    assert "4 та 4" not in speech
+
+
+def test_monitor_message_disambiguates_shared_number():
+    """Панель ответа тоже называет тип, а не склеивает «4 та 4»."""
+    routes = [{"key": "bus|4", "type": "bus", "label": "4"},
+              {"key": "trolley|4", "type": "trolley", "label": "4"}]
+
+    message = app_main._monitor_routes_message(routes, [])
+
+    assert message.startswith("Показую четвертий автобус та четвертий тролейбус")
+    assert "на карті лише їхні машини" in message
+
+
+def test_plan_monitor_filters_bus_from_phrase(api_client, monkeypatch):
+    """«покажи 4 автобус»: на карті лише автобус, троллейбус 4 не їде."""
+    monkeypatch.setattr(app_main, "call_llm_extract_locations", _monitor_stub(["4"]))
+
+    body = api_client.post("/api/plan", json={"text": "покажи 4 автобус"}).json()
+
+    assert body["mode"] == "monitor_routes"
+    assert [item["key"] for item in body["routes"]] == ["bus|4"]
+    assert [item["key"] for item in body["shapes"]] == ["bus|4"]
+    assert body["speech"]["text"] == "Показую маршрут 4."
+
+
+def test_plan_monitor_filters_trolley_from_phrase(api_client, monkeypatch):
+    """«покажи 4 тролейбус»: на карті лише тролейбус."""
+    monkeypatch.setattr(app_main, "call_llm_extract_locations", _monitor_stub(["4"]))
+
+    body = api_client.post("/api/plan", json={"text": "покажи 4 тролейбус"}).json()
+
+    assert [item["key"] for item in body["routes"]] == ["trolley|4"]
+    assert body["speech"]["text"] == "Показую маршрут 4."
+
+
+def test_plan_monitor_shared_number_speaks_type(api_client, monkeypatch):
+    """Без типу «4» дає обидва маршрути, а голос каже «четвертий … тролейбус»."""
+    monkeypatch.setattr(app_main, "call_llm_extract_locations", _monitor_stub(["4"]))
+
+    body = api_client.post("/api/plan", json={"text": "покажи 4"}).json()
+
+    assert [item["key"] for item in body["routes"]] == ["bus|4", "trolley|4"]
+    assert body["speech"]["text"] == "Показую четвертий автобус та четвертий тролейбус."

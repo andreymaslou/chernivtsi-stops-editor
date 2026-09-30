@@ -1820,8 +1820,33 @@ def _manifest_route_entries() -> List[Dict[str, Any]]:
     return entries
 
 
+# Тип ТС в запите: «покажи 4 автобус» / «де зараз 5 тролейбус». Нужен, чтобы
+# строго отсечь одноимённый маршрут другого типа: «4» автобуса — это не «4»
+# троллейбуса (у перевозчика тот же борт идёт как «4T», но это другой маршрут).
+# Покрываем оба написания: украинское «тролейбус» и русское «троллейбус».
+_VEHICLE_TYPE_RE = re.compile(r"(?P<trolley>трол?лейбус)|(?P<bus>автобус)", re.IGNORECASE)
+
+
+def _vehicle_type_hint(text: str) -> str:
+    """
+    Тип ТС, явно названный пользователем: «автобус» → bus, «тролейбус» → trolley.
+
+    Тип важен только вкупе с номером: «5» есть и у автобусов, и у троллейбусов,
+    и без подсказки мы отдаём оба (см. resolve_requested_routes). Если назван
+    ровно один тип — фильтруем строго; если оба или ни один — не сужаем
+    (пустая строка = «как раньше»).
+    """
+    found = {match.lastgroup for match in _VEHICLE_TYPE_RE.finditer(str(text or ""))}
+    if found == {"trolley"}:
+        return "trolley"
+    if found == {"bus"}:
+        return "bus"
+    return ""
+
+
 def resolve_requested_routes(
     route_numbers: List[str],
+    vehicle_type: str = "",
 ) -> Tuple[List[Dict[str, Any]], List[str]]:
     """
     Сопоставляет названные номера с активными маршрутами города (манифест).
@@ -1836,10 +1861,18 @@ def resolve_requested_routes(
     назвал номер, а не тип ТС, и показать половину линии было бы подменой.
     Кнопки троллейбусов в панели по умолчанию скрыты — UI включает их сам,
     когда видит `trolley|*` в ответе.
+
+    `vehicle_type` ("bus"/"trolley") — когда тип назван явно («покажи 4
+    автобус»): тогда одноимённый маршрут другого типа не отдаём вовсе.
+    Точность сохраняется: normalize_label оставляет букву, поэтому «4» находит
+    только маршрут с номером «4» и никогда — алиас «4T».
     """
     found: List[Dict[str, Any]] = []
     missing: List[str] = []
     entries = _manifest_route_entries()
+    wanted_type = str(vehicle_type or "").strip().lower()
+    if wanted_type in ("bus", "trolley"):
+        entries = [entry for entry in entries if entry["type"] == wanted_type]
     for number in route_numbers or []:
         wanted = TransitRouter.normalize_label(str(number or ""))
         if not wanted:
@@ -1941,24 +1974,116 @@ def route_shapes_for(routes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return [item for item in shapes.values() if item["directions"]]
 
 
+_UA_ORDINAL_ONES = {
+    1: "перший", 2: "другий", 3: "третій", 4: "четвертий", 5: "п'ятий",
+    6: "шостий", 7: "сьомий", 8: "восьмий", 9: "дев'ятий",
+}
+_UA_ORDINAL_TEENS = {
+    10: "десятий", 11: "одинадцятий", 12: "дванадцятий", 13: "тринадцятий",
+    14: "чотирнадцятий", 15: "п'ятнадцятий", 16: "шістнадцятий",
+    17: "сімнадцятий", 18: "вісімнадцятий", 19: "дев'ятнадцятий",
+}
+_UA_ORDINAL_TENS_CARD = {2: "двадцять", 3: "тридцять", 4: "сорок"}
+_UA_ORDINAL_TENS_FULL = {2: "двадцятий", 3: "тридцятий", 4: "сороковий"}
+
+
+def _speech_ordinal_masc(number: str) -> str:
+    """
+    Порядковий числівник чоловічого роду: «4» → «четвертий».
+
+    Потрібен для природної озвучки колізії номера («четвертий автобус та
+    четвертий тролейбус»). Працює для чисел активних маршрутів; на «9A» чи
+    «3/3a» поверне порожньо — там лишається звична форма «маршрут 9 а».
+    """
+    text = str(number or "").strip()
+    if not text.isdigit():
+        return ""
+    value = int(text)
+    if value in _UA_ORDINAL_ONES:
+        return _UA_ORDINAL_ONES[value]
+    if value in _UA_ORDINAL_TEENS:
+        return _UA_ORDINAL_TEENS[value]
+    tens, ones = divmod(value, 10)
+    if tens in _UA_ORDINAL_TENS_CARD:
+        if ones == 0:
+            return _UA_ORDINAL_TENS_FULL[tens]
+        if ones in _UA_ORDINAL_ONES:
+            return _UA_ORDINAL_TENS_CARD[tens] + " " + _UA_ORDINAL_ONES[ones]
+    return ""
+
+
+def _speech_vehicle_noun(vehicle: str) -> str:
+    """«автобус» / «тролейбус» (називний відмінок) за типом маршруту."""
+    return "тролейбус" if str(vehicle).lower().startswith("trolley") else "автобус"
+
+
+def _join_ua(items: List[str]) -> str:
+    """Перелічення по-українськи: «A, B та C»."""
+    parts = [str(item) for item in items if str(item)]
+    if not parts:
+        return ""
+    if len(parts) == 1:
+        return parts[0]
+    return ", ".join(parts[:-1]) + " та " + parts[-1]
+
+
+def _monitor_route_names(routes: List[Dict[str, Any]]) -> Tuple[List[str], bool]:
+    """
+    Назви маршрутів для тексту й озвучки + ознака «номер спільний».
+
+    Звичний випадок — «маршрут 9». Колізія — коли той самий номер є і в
+    автобуса, і в тролейбуса («4»): дві однакові цифри злилися б у «чотири та
+    чотири». Тоді називаємо тип ТС і порядковий номер: «четвертий автобус»,
+    «четвертий тролейбус» (бриф Gemini 2026-10-01).
+    """
+    items = [item for item in (routes or []) if item]
+    counts: Dict[str, int] = {}
+    for item in items:
+        key = TransitRouter.normalize_label(str(item.get("label") or ""))
+        if key:
+            counts[key] = counts.get(key, 0) + 1
+    collision = any(count > 1 for count in counts.values())
+    names: List[str] = []
+    for item in items:
+        label = str(item.get("label") or "").strip()
+        spoken = _speech_route_label(label)
+        if not spoken:
+            continue
+        key = TransitRouter.normalize_label(label)
+        if collision and counts.get(key, 0) > 1 and label.isdigit():
+            ordinal = _speech_ordinal_masc(label)
+            if ordinal:
+                names.append(ordinal + " " + _speech_vehicle_noun(item.get("type")))
+                continue
+        names.append("маршрут " + spoken)
+    return names, collision
+
+
 def build_monitor_speech(routes: List[Dict[str, Any]], missing: List[str]) -> str:
     """
     Голосова фраза моніторингу: «Показую маршрути 9 та 10.»
+
+    Якщо номер спільний для автобуса й тролейбуса («покажи 4»), говоримо тип
+    ТС і порядковий номер — «Показую четвертий автобус та четвертий
+    тролейбус», а не «4 та 4» (бриф Gemini 2026-10-01).
 
     Ненайдені номери озвучуємо окремо («На жаль, маршрут 42 зараз не
     працює»): молчание в ответ на названный номер читается как поломка, а на
     самом деле такого маршрута нет среди активных
     (.agents/rules/active_routes.md).
     """
-    labels = [
-        label for label in (_speech_route_label(item.get("label")) for item in routes)
-        if label
-    ]
+    names, collision = _monitor_route_names(routes)
     parts: List[str] = []
-    if len(labels) == 1:
-        parts.append("Показую маршрут " + labels[0])
-    elif labels:
-        parts.append("Показую маршрути " + ", ".join(labels[:-1]) + " та " + labels[-1])
+    if collision:
+        parts.append("Показую " + _join_ua(names))
+    elif len(names) == 1:
+        parts.append("Показую " + names[0])
+    elif names:
+        spoken = [
+            name[len("маршрут "):] if name.startswith("маршрут ") else name
+            for name in names
+        ]
+        parts.append("Показую маршрути " + ", ".join(spoken[:-1]) + " та " + spoken[-1])
     if missing:
         numbers = ", ".join(str(item) for item in missing)
         if len(missing) == 1:
@@ -1972,8 +2097,13 @@ def build_monitor_speech(routes: List[Dict[str, Any]], missing: List[str]) -> st
 
 def _monitor_routes_message(routes: List[Dict[str, Any]], missing: List[str]) -> str:
     """Текст в панели ответа: что показываем и чего не нашли."""
+    names, collision = _monitor_route_names(routes)
     labels = [str(item.get("label") or "") for item in routes if item.get("label")]
-    if len(labels) == 1:
+    if collision:
+        # «4» є і в автобуса, і в тролейбуса: у панелі теж називаємо тип ТС,
+        # щоб не читалося «4 та 4» (бриф Gemini 2026-10-01).
+        text = "Показую " + _join_ua(names) + " — на карті лише їхні машини."
+    elif len(labels) == 1:
         text = "Показую маршрут " + labels[0] + " — на карті лише його машини."
     elif labels:
         text = ("Показую маршрути " + ", ".join(labels[:-1]) + " та " + labels[-1]
@@ -1990,7 +2120,11 @@ def _monitor_routes_message(routes: List[Dict[str, Any]], missing: List[str]) ->
     return text
 
 
-def monitor_routes_response(text: str, route_numbers: List[str]) -> Dict[str, Any]:
+def monitor_routes_response(
+    text: str,
+    route_numbers: List[str],
+    vehicle_type: str = "",
+) -> Dict[str, Any]:
     """
     Ответ режима «покажи маршрути» (ідея 2026-09-28): без Locator и роутера.
 
@@ -2001,6 +2135,11 @@ def monitor_routes_response(text: str, route_numbers: List[str]) -> Dict[str, An
     здесь — на фронт уходит готовый текст. Вместе с ключами едет `shapes` —
     геометрия линий (оба направления), чтобы на карте были видны не только
     машины, но и сам маршрут (идея 2026-09-29, п.2).
+
+    `vehicle_type` («автобус»/«тролейбус» в фразе) сужает выдачу строго до
+    названного типа: «покажи 4 автобус» не притащит тролейбус «4». Тип ищем и
+    локально по тексту (поле от LLM — лишь подсказка сверху), чтобы работало и
+    без ключа OpenRouter.
     """
     raw_numbers = [str(item) for item in (route_numbers or [])]
     # Числа чистим на входе: LLM могла вернуть «дев'ятку» словом (правило в
@@ -2008,11 +2147,12 @@ def monitor_routes_response(text: str, route_numbers: List[str]) -> Dict[str, An
     # цифровые номера, иначе фильтр парка искать будет нечего.
     numbers = _clean_route_list(raw_numbers)
     dropped = [item for item in raw_numbers if not _clean_route_list([item])]
-    routes, missing = resolve_requested_routes(numbers)
+    hint = str(vehicle_type or "").strip().lower() or _vehicle_type_hint(text)
+    routes, missing = resolve_requested_routes(numbers, hint)
     shapes = route_shapes_for(routes)
     logger.info(
-        "Моніторинг маршрутів: %r -> %s (немає: %s, не розібрано: %s, ліній: %d)",
-        text, [item["key"] for item in routes], missing, dropped, len(shapes),
+        "Моніторинг маршрутів: %r -> %s (немає: %s, не розібрано: %s, тип: %s, ліній: %d)",
+        text, [item["key"] for item in routes], missing, dropped, hint or "—", len(shapes),
     )
     response: Dict[str, Any] = {
         "mode": "monitor_routes",
