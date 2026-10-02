@@ -7,10 +7,6 @@ logger = logging.getLogger(__name__)
 
 tts_model = None
 
-# Ключи для облачных API (читаются из .env)
-OPENAI_TTS_KEY = os.getenv("OPENAI_TTS_KEY")
-ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
-
 # Для ElevenLabs нужен ID голоса. По умолчанию берем какой-то красивый (например, Antony или Marcus)
 # 21m00Tcm4TlvDq8ikWAM = Rachel, pNInz6obpgDQGcFmaJcg = Adam (популярные)
 ELEVENLABS_VOICE_ID = "pNInz6obpgDQGcFmaJcg" # Adam
@@ -54,6 +50,10 @@ def normalize_text(text: str) -> str:
         return text
 
 def generate_tts_base64(text: str, speaker: str = 'mykyta') -> str:
+    # Динамически читаем ключи, чтобы они подхватились после load_dotenv() в main.py
+    OPENAI_TTS_KEY = os.getenv("OPENAI_TTS_KEY")
+    ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
+
     # 1. Попытка ElevenLabs (если есть ключ)
     if ELEVENLABS_API_KEY:
         import requests
