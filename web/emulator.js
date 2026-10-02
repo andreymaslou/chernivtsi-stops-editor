@@ -1952,15 +1952,40 @@ function renderVehicles(vehicles, bounds, planLegs) {
 // (дорожче/довше) підсвічуємо приглушеним помаранчевим (⚠️), НЕ чистим
 // червоним: це чесний розмен час↔гроші, а не помилка.
 
+let currentAudioTTS = null;
+
 /** Зупинити озвучення, якщо синтез грає. Голос (Web Speech TTS) — етап 4
  *  плану емулятора, і сторінка його вже вміє вимикати: клік по картці — явна
  *  дія «я вибрав інакше», читати старий варіант поверх нового не можна. */
 function stopVoice() {
+  if (currentAudioTTS) {
+    currentAudioTTS.pause();
+    currentAudioTTS.currentTime = 0;
+    currentAudioTTS = null;
+  }
   if (typeof window.speechSynthesis !== 'undefined' &&
       typeof window.speechSynthesis.cancel === 'function') {
     try { window.speechSynthesis.cancel(); } catch (err) { /* немає голосів */ }
   }
 }
+
+async function playAudioFromApi(text, speaker) {
+  try {
+    const res = await fetch(`/api/tts?text=${encodeURIComponent(text)}&speaker=${encodeURIComponent(speaker)}`);
+    if (!res.ok) throw new Error('TTS API failed');
+    const data = await res.json();
+    if (data.audio_base64) {
+      stopVoice();
+      currentAudioTTS = new Audio("data:audio/wav;base64," + data.audio_base64);
+      currentAudioTTS.play();
+      return true;
+    }
+  } catch (err) {
+    console.error("Помилка генерації локального голосу, граємо системний", err);
+  }
+  return false;
+}
+
 
 /**
  * Коротка фраза вголос (uk-UA) — для режимів без плана: моніторинг маршрутів.
@@ -1974,6 +1999,19 @@ function speakUk(text) {
   const phrase = String(text || '').trim();
   if (!phrase) return;
   state.lastSpeech = phrase;
+
+  const voiceSelect = document.getElementById('tts-voice-select');
+  const voice = voiceSelect ? voiceSelect.value : 'system';
+  if (voice !== 'system') {
+    playAudioFromApi(phrase, voice).then(success => {
+      if (!success) fallbackSpeakUk(phrase);
+    });
+    return;
+  }
+  fallbackSpeakUk(phrase);
+}
+
+function fallbackSpeakUk(phrase) {
   if (typeof window.speechSynthesis === 'undefined' ||
       typeof window.SpeechSynthesisUtterance !== 'function') return;
   try {
@@ -1990,20 +2028,32 @@ function speakUk(text) {
  *  тролейбус». Готову фразу собирає сервер у полі `speech.text`; якщо його
  *  немає (старый сервер) — залишаємо короткий варіант из цифр плану. */
 function speakPlanSummary(plan) {
-  if (typeof window.speechSynthesis === 'undefined' ||
-      typeof window.SpeechSynthesisUtterance !== 'function') return;
   const mins = Number(plan && plan.total_min);
   if (!Number.isFinite(mins)) return;
+
+  const speech = plan && plan.speech;
+  let text = (speech && typeof speech.text === 'string') ? speech.text.trim() : '';
+  if (!text) {
+    text = 'План: ' + Math.round(mins) + ' хвилин';
+    const price = Number(plan.price_grn);
+    if (Number.isFinite(price)) text += ', ' + Math.round(price) + ' гривень';
+  }
+
+  const voiceSelect = document.getElementById('tts-voice-select');
+  const voice = voiceSelect ? voiceSelect.value : 'system';
+  if (voice !== 'system') {
+    playAudioFromApi(text, voice).then(success => {
+      if (!success) fallbackSpeakPlanSummary(text);
+    });
+    return;
+  }
+  fallbackSpeakPlanSummary(text);
+}
+
+function fallbackSpeakPlanSummary(text) {
+  if (typeof window.speechSynthesis === 'undefined' ||
+      typeof window.SpeechSynthesisUtterance !== 'function') return;
   try {
-    // 1) Якщо сервер уже зібрав голосову фразу — читаємо саме її.
-    const speech = plan && plan.speech;
-    let text = (speech && typeof speech.text === 'string') ? speech.text.trim() : '';
-    if (!text) {
-      // 2) Fallback: коротко, як раніше.
-      text = 'План: ' + Math.round(mins) + ' хвилин';
-      const price = Number(plan.price_grn);
-      if (Number.isFinite(price)) text += ', ' + Math.round(price) + ' гривень';
-    }
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = 'uk-UA';
     window.speechSynthesis.cancel();

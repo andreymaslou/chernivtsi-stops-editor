@@ -50,6 +50,7 @@ from slang_store import (
     upsert_stop,
 )
 from storage import append_jsonl
+import tts_layer
 
 # ---------------------------------------------------------------------------
 # Инициализация окружения и логирования
@@ -860,6 +861,8 @@ async def lifespan(app: FastAPI):
             len(router.routes), len(router.nodes),
         )
     app_state["router"] = router
+
+    tts_layer.init_tts()
 
     # Whitelist активных маршрутов (38) — для фильтра парка в эмуляторе
     # (/api/manifest). Файл маленький и меняется вместе с данными графа,
@@ -2979,6 +2982,14 @@ def create_feedback(request: FeedbackRequest):
         "created_at": record["created_at"],
         "kind": record["kind"],
     }
+
+
+@app.get("/api/tts")
+async def api_tts(text: str, speaker: str = 'mykyta'):
+    audio_base64 = tts_layer.generate_tts_base64(text, speaker)
+    if not audio_base64:
+        raise HTTPException(status_code=503, detail="TTS engine not available")
+    return {"audio_base64": audio_base64}
 
 
 @app.get("/api/feedback")
