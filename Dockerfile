@@ -15,7 +15,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Скачиваем модель Silero прямо при сборке образа, чтобы она всегда была на сервере
-RUN wget -qO /app/v3_ua.pt "https://models.silero.ai/models/tts/ua/v3_ua.pt"
+RUN wget -qO /app/v4_ua.pt "https://models.silero.ai/models/tts/ua/v4_ua.pt"
 
 EXPOSE 8000
 
