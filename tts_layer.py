@@ -252,9 +252,25 @@ def _synth_elevenlabs(text: str, profile: Dict[str, str]):
     return res.content, MIME_MP3
 
 
+def _azure_region() -> Optional[str]:
+    """Идентификатор региона Azure Speech (`westeurope`), а не URL.
+
+    В портале на странице «Keys and Endpoint» рядом лежат две строки: `Location/Region`
+    (`westeurope`) и `Endpoint` (`https://westeurope.api.cognitive.microsoft.com/`).
+    Вторую копируют чаще, и тогда URL собирался бы как
+    `https://https://westeurope.api...` (400/502). Достаём регион из любой формы.
+    """
+    raw = (os.getenv("AZURE_SPEECH_REGION") or "").strip().lower()
+    if not raw:
+        return None
+    host = raw.removeprefix("https://").removeprefix("http://").split("/")[0]
+    region = host.split(".")[0]
+    return region or None
+
+
 def _synth_azure(text: str, profile: Dict[str, str]):
     api_key = os.getenv("AZURE_SPEECH_KEY")
-    region = os.getenv("AZURE_SPEECH_REGION")
+    region = _azure_region()
     voice = profile.get("azure")
     if not api_key or not region or not voice:
         return None
@@ -272,6 +288,9 @@ def _synth_azure(text: str, profile: Dict[str, str]):
             "Ocp-Apim-Subscription-Key": api_key,
             "Content-Type": "application/ssml+xml",
             "X-Microsoft-OutputFormat": _engine_model("azure"),
+            # User-Agent в контракте REST-API указан как обязательный: без него
+            # часть регионов отвечает 400 на SSML-запрос.
+            "User-Agent": "transgps-emulator/1.0",
         },
         content=ssml.encode("utf-8"),
         timeout=_timeout(),

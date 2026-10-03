@@ -31,3 +31,54 @@
 1. **Премиальный UX**: Идеальный дикторский голос, одинаковый на всех устройствах, независимо от системного языка.
 2. **Моментальный отклик**: Аудиофайлы весят ~20-40 КБ и загружаются быстрее, чем успевает проиграть UI-анимация. Отсутствует лаг "холодного старта" системного TTS на Android.
 3. **Экономия**: За счет высокой повторяемости маршрутов, после первоначального "прогрева" кеша количество платных обращений к API стремится к нулю.
+## Резерв: Azure Speech (Free F0)
+
+Основной движок — ElevenLabs, но он один и платный: если ключ отвалится
+(права/квота/сеть), озвучка молча уйдёт на системный голос браузера. Второй движок —
+Azure Speech с **родными украинскими** нейронными голосами `uk-UA-OstapNeural`
+(муж.) и `uk-UA-PolinaNeural` (жен.): профили daniel/adam/george → Ostap,
+alice/sarah → Polina.
+
+Тариф **Free (F0)**: **0.5 млн символов в месяц** бесплатно, дальше Azure отвечает
+`429` — автоматического перехода на платный S0 нет, поэтому счёт молча не растёт.
+С кэшем Варианта A повторов в этот лимит почти не попадает.
+
+### Как получить ключ
+
+1. Аккаунт: <https://azure.microsoft.com/free/>.
+2. Создать ресурс Speech:
+   <https://portal.azure.com/#create/Microsoft.CognitiveServicesSpeechServices>
+   — Pricing tier **Free F0**, Region **West Europe** (ближайший к Украине;
+   «своего» региона для uk-UA у Azure нет).
+3. Keys and Endpoint:
+   <https://portal.azure.com/#view/Microsoft_Azure_ProjectOxford/CognitiveServicesHub/~/SpeechServices>
+   → **KEY 1** в `AZURE_SPEECH_KEY`, **Location/Region** (`westeurope`) в
+   `AZURE_SPEECH_REGION`. Нужен именно регион, не Endpoint: ключ регион-скоупный,
+   чужой регион даёт `401` (код умеет вырезать регион из Endpoint, но лучше сразу
+   копировать правильную строку).
+4. Прослушать голоса без кода: <https://speech.microsoft.com/portal/voicegallery>.
+
+### Справочники
+
+| Что | Ссылка |
+| --- | --- |
+| REST text-to-speech (заголовки, SSML, форматы) | <https://learn.microsoft.com/azure/ai-services/speech-service/rest-text-to-speech> |
+| Языки и голоса (uk-UA) | <https://learn.microsoft.com/azure/ai-services/speech-service/language-support?tabs=tts> |
+| Квоты и лимиты (F0 не повышается) | <https://learn.microsoft.com/azure/ai-services/speech-service/speech-services-quotas-and-limits> |
+| Регионы | <https://learn.microsoft.com/azure/ai-services/speech-service/regions> |
+| Цены (F0 = 0.5 млн символов/мес, S0 — по прайсу) | <https://azure.microsoft.com/pricing/details/cognitive-services/speech-services/> |
+
+### Проверка
+
+```powershell
+# локально (ключи из .env)
+python _tts_azure_check.py
+
+# на сервере (ключи берутся из env_file уже запущенного контейнера)
+scp _tts_azure_check.py root@169.58.82.105:/tmp/
+ssh root@169.58.82.105 "docker cp /tmp/_tts_azure_check.py api_router:/tmp/ && docker exec api_router python /tmp/_tts_azure_check.py"
+```
+
+Скрипт печатает маску ключа, список голосов `uk-UA` этого региона и синтезирует
+пробную фразу в `data/tts_samples/azure_*.mp3` — та же фраза, что у сэмплов
+ElevenLabs, поэтому голоса сравниваются «на слух» один в один.

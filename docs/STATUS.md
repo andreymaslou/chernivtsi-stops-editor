@@ -264,6 +264,19 @@ sarah, легаси `mykyta`/`borys` мапятся на дефолт), резу
 Тесты движка TTS в проекте не завязаны (`pytest` не трогали); логику профилей и
 кэша проверяет `_tts_selftest.py` (в `.gitignore`, как прочие `_*.py`).
 
+**Резерв Azure Speech: код готов, ждёт ключа.** Ветка Azure в `tts_layer` написана и
+стоит в `TTS_PROVIDER_ORDER` (ElevenLabs → Azure → OpenAI), но без
+`AZURE_SPEECH_KEY` в `.env` молча пропускается — поэтому сегодня фактический
+резерв — системный голос браузера (Web Speech). Голоса родные украинские:
+`uk-UA-OstapNeural` (мужские профили daniel/adam/george) и `uk-UA-PolinaNeural`
+(женские alice/sarah). Тариф **Free (F0)** даёт **0.5 млн символов в месяц**
+бесплатно; лимит жёсткий — при исчерпании Azure отвечает `429`, автоматического
+перехода на платный S0 нет (данные Microsoft Q&A + `speech-services-quotas-and-limits`).
+Полный путь получения ключа (портал, копирование Key1/Location, лимиты F0,
+регионы, прослушивание голосов) выписан ссылками в `.env.example`;
+проверка одной командой — `_tts_azure_check.py` (ключ → список голосов `uk-UA`
+региона → синтез пробной фразы в `data/tts_samples/azure_*.mp3`).
+
 ## 3. Быстрые проверки (6 команд)
 
 ```powershell
@@ -673,6 +686,18 @@ A/B ≈ 235 → 150 мс (со счётчиками) и haversine 33 168 → 133
     украинский через `eleven_multilingual_v2` — отдельные «украинские» голоса
     покупать не нужно.
 
+30. **Azure: ключ привязан к региону, а в портале рядом лежат Region и Endpoint.**
+    Ресурс Speech отдаёт `KEY 1`, валидный **только для своего региона** (с чужим
+    `AZURE_SPEECH_REGION` Azure отвечает `401`), и две похожие строки на странице
+    «Keys and Endpoint»: `Location` (`westeurope`) и `Endpoint`
+    (`https://westeurope.api.cognitive.microsoft.com/`). Скопированный Endpoint в
+    `AZURE_SPEECH_REGION` дал бы URL `https://https://…`, поэтому
+    `tts_layer._azure_region()` вырезает идентификатор региона из любой формы, а
+    `_synth_azure` шлёт `User-Agent` (в контракте REST он обязателен — без него
+    часть регионов отвечает `400`). Голоса uk-UA — `uk-UA-OstapNeural` /
+    `uk-UA-PolinaNeural`, `xml:lang='uk-UA'` в SSML обязателен. Проверка без
+    кабинета: `_tts_azure_check.py` (ключ → `GET .../voices/list` → синтез пробы);
+    `429` там означает исчерпанный лимит Free (F0) — 0.5 млн символов в месяц.
 ## 5. Открытые задачи
 
 1. **HTTPS — сделано 2026-09-23 (через nip.io); «свой домен» остался на будущее.**
