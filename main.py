@@ -2985,11 +2985,19 @@ def create_feedback(request: FeedbackRequest):
 
 
 @app.get("/api/tts")
-async def api_tts(text: str, speaker: str = 'mykyta'):
-    audio_base64 = tts_layer.generate_tts_base64(text, speaker)
+def api_tts(text: str, speaker: str = 'mykyta'):
+    """Синтез речи для эмулятора (ElevenLabs/OpenAI/Silero — см. tts_layer).
+
+    Обычный `def`, а НЕ `async def`: синтез (Silero на CPU, внешний HTTP в облако)
+    блокирующий, в корутине он замораживал бы весь event loop — включая
+    /api/fleet/stream и /api/plan. FastAPI уводит обычные `def` в threadpool, как
+    и остальные тяжёлые эндпоинты проекта (например /api/plan).
+    `mime` отдаём наружу: облако возвращает mp3, Silero — wav.
+    """
+    audio_base64, mime = tts_layer.generate_tts(text, speaker)
     if not audio_base64:
         raise HTTPException(status_code=503, detail="TTS engine not available")
-    return {"audio_base64": audio_base64}
+    return {"audio_base64": audio_base64, "mime": mime}
 
 
 @app.get("/api/feedback")

@@ -1976,7 +1976,10 @@ async function playAudioFromApi(text, speaker) {
     const data = await res.json();
     if (data.audio_base64) {
       stopVoice();
-      currentAudioTTS = new Audio("data:audio/wav;base64," + data.audio_base64);
+      // MIME приходит с сервера: облако (ElevenLabs/OpenAI) отдаёт mp3, локальный
+      // Silero — wav. Жёсткий "audio/wav" для mp3-байтов — неверный тип.
+      const mime = data.mime || 'audio/wav';
+      currentAudioTTS = new Audio(`data:${mime};base64,` + data.audio_base64);
       currentAudioTTS.play();
       return true;
     }

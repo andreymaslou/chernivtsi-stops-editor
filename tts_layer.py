@@ -49,23 +49,45 @@ def normalize_text(text: str) -> str:
     except ImportError:
         return text
 
-def generate_tts_base64(text: str, speaker: str = 'mykyta') -> str:
-    # Динамически читаем ключи, чтобы они подхватились после load_dotenv() в main.py
+# Таймаут HTTP-запросов к облачным TTS. Без него зависший/тормозящий API держит
+# воркер бесконечно, а клиент ждёт звук с открытым запросом.
+TTS_HTTP_TIMEOUT_SEC = 20.0
+
+# MIME отдачи: облака (ElevenLabs, OpenAI tts-1) отдают MP3, локальный Silero — WAV.
+MIME_MP3 = "audio/mpeg"
+MIME_WAV = "audio/wav"
+
+
+def generate_tts(text: str, speaker: str = 'mykyta'):
+    """Синтез речи. Возвращает кортеж `(base64_аудио, mime)`.
+
+    Приоритет провайдеров: ElevenLabs → OpenAI → локальный Silero (V4/V3).
+    `mime` нужен клиенту: облака отдают mp3, Silero — wav, и фронтенд не должен
+    угадывать формат (раньше всегда подставлялся `audio/wav`).
+
+    Ключи читаем ВНУТРИ функции: main.py вызывает load_dotenv() уже после импорта
+    модуля, поэтому значения, взятые на уровне модуля, «замораживались» и правка
+    .env требовала пересборки контейнера (см. коммит 2c804a9).
+    """
     OPENAI_TTS_KEY = os.getenv("OPENAI_TTS_KEY")
     ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
 
-    # 1. Попытка ElevenLabs (если есть ключ)
+    # 1. Попытка ElevenLabs (если есть ключ).
+    # Берём httpx, а НЕ requests: requests нет в requirements.txt и в образе он
+    # не установлен, поэтому раньше `import requests` падал с ImportError и ветка
+    # ElevenLabs молча пропускалась даже с корректным ключом. httpx уже есть в
+    # зависимостях проекта (и им же пользуется openai).
     if ELEVENLABS_API_KEY:
-        import requests
         try:
+            import httpx
             url = f"https://api.elevenlabs.io/v1/text-to-speech/{ELEVENLABS_VOICE_ID}"
             headers = {"xi-api-key": ELEVENLABS_API_KEY, "Content-Type": "application/json"}
             data = {"text": text, "model_id": "eleven_multilingual_v2"}
-            res = requests.post(url, json=data, headers=headers)
+            res = httpx.post(url, json=data, headers=headers, timeout=TTS_HTTP_TIMEOUT_SEC)
             if res.status_code == 200:
-                return base64.b64encode(res.content).decode('utf-8')
-            else:
-                logger.error(f"ElevenLabs error: {res.text}")
+                logger.info(f"TTS: ElevenLabs (голос {ELEVENLABS_VOICE_ID}, mp3)")
+                return base64.b64encode(res.content).decode('utf-8'), MIME_MP3
+            logger.error(f"ElevenLabs error {res.status_code}: {res.text[:300]}")
         except Exception as e:
             logger.error(f"ElevenLabs error: {e}")
 
@@ -74,25 +96,28 @@ def generate_tts_base64(text: str, speaker: str = 'mykyta') -> str:
         try:
             from openai import OpenAI
             # Создаем отдельный клиент без base_url, чтобы запрос шел напрямую в OpenAI, а не в OpenRouter
-            client = OpenAI(api_key=OPENAI_TTS_KEY)
-            
+            client = OpenAI(api_key=OPENAI_TTS_KEY, timeout=TTS_HTTP_TIMEOUT_SEC)
+
             # В OpenAI есть голоса: alloy, echo, fable, onyx, nova, shimmer
             # 'onyx' - отличный глубокий мужской голос
             voice = "onyx" if speaker == "mykyta" else "nova"
-            
+
             response = client.audio.speech.create(
                 model="tts-1",
                 voice=voice,
                 input=text
             )
-            return base64.b64encode(response.content).decode('utf-8')
+            logger.info(f"TTS: OpenAI tts-1 (голос {voice}, mp3)")
+            return base64.b64encode(response.content).decode('utf-8'), MIME_MP3
         except Exception as e:
             logger.error(f"OpenAI TTS error: {e}")
 
     # 3. Фолбэк на локальный Silero V4/V3
     global tts_model
     if tts_model is None:
-        return None
+        # Ни одного провайдера: клиент получит 503 и уйдёт на системный голос.
+        logger.warning("TTS: недоступны ни облако (нет ключей), ни Silero (модель не загружена)")
+        return None, MIME_WAV
     import soundfile as sf
     try:
         text = normalize_text(text)
@@ -100,8 +125,15 @@ def generate_tts_base64(text: str, speaker: str = 'mykyta') -> str:
         with io.BytesIO() as wav_io:
             sf.write(wav_io, audio_tensor.numpy(), 48000, format='WAV', subtype='PCM_16')
             wav_io.seek(0)
-            return base64.b64encode(wav_io.read()).decode('utf-8')
+            logger.info(f"TTS: Silero локальный (голос {speaker}, wav)")
+            return base64.b64encode(wav_io.read()).decode('utf-8'), MIME_WAV
     except Exception as e:
         logger.error(f"Ошибка при генерации Silero TTS: {e}")
-        return None
+        return None, MIME_WAV
+
+
+def generate_tts_base64(text: str, speaker: str = 'mykyta'):
+    """Совместимый фасад для вызовов, которым MIME не важен (только base64)."""
+    audio_base64, _mime = generate_tts(text, speaker)
+    return audio_base64
 
