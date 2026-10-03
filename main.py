@@ -862,7 +862,8 @@ async def lifespan(app: FastAPI):
         )
     app_state["router"] = router
 
-    tts_layer.init_tts()
+    # Прогрев TTS больше не нужен: локальной модели (Silero) нет, а ключи
+    # облачных движков читаются в момент синтеза — см. tts_layer.generate_tts.
 
     # Whitelist активных маршрутов (38) — для фильтра парка в эмуляторе
     # (/api/manifest). Файл маленький и меняется вместе с данными графа,
@@ -2985,19 +2986,27 @@ def create_feedback(request: FeedbackRequest):
 
 
 @app.get("/api/tts")
-def api_tts(text: str, speaker: str = 'mykyta'):
-    """Синтез речи для эмулятора (ElevenLabs/OpenAI/Silero — см. tts_layer).
+def api_tts(text: str, speaker: str = 'daniel'):
+    """Синтез речи для эмулятора (ElevenLabs -> Azure -> OpenAI, см. tts_layer).
 
-    Обычный `def`, а НЕ `async def`: синтез (Silero на CPU, внешний HTTP в облако)
-    блокирующий, в корутине он замораживал бы весь event loop — включая
+    Обычный `def`, а НЕ `async def`: синтез — блокирующий внешний HTTP-запрос к
+    облаку. В корутине он замораживал бы весь event loop — включая
     /api/fleet/stream и /api/plan. FastAPI уводит обычные `def` в threadpool, как
     и остальные тяжёлые эндпоинты проекта (например /api/plan).
-    `mime` отдаём наружу: облако возвращает mp3, Silero — wav.
+
+    `mime` отдаём наружу: облака возвращают mp3. Поля `engine` и `cache`
+    показывают, какой движок ответил и попали ли мы в дисковый кэш озвучки
+    (data/tts_cache/) — по ним видно экономию платных символов.
     """
-    audio_base64, mime = tts_layer.generate_tts(text, speaker)
+    audio_base64, mime, meta = tts_layer.generate_tts(text, speaker)
     if not audio_base64:
         raise HTTPException(status_code=503, detail="TTS engine not available")
-    return {"audio_base64": audio_base64, "mime": mime}
+    return {
+        "audio_base64": audio_base64,
+        "mime": mime,
+        "engine": meta.get("engine"),
+        "cache": meta.get("cache"),
+    }
 
 
 @app.get("/api/feedback")

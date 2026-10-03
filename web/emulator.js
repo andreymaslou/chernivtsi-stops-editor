@@ -1976,15 +1976,15 @@ async function playAudioFromApi(text, speaker) {
     const data = await res.json();
     if (data.audio_base64) {
       stopVoice();
-      // MIME приходит с сервера: облако (ElevenLabs/OpenAI) отдаёт mp3, локальный
-      // Silero — wav. Жёсткий "audio/wav" для mp3-байтов — неверный тип.
+      // MIME приходит с сервера: облачные движки (ElevenLabs/Azure/OpenAI)
+      // отдают mp3. Жёсткий "audio/wav" для mp3-байтов — неверный тип.
       const mime = data.mime || 'audio/wav';
       currentAudioTTS = new Audio(`data:${mime};base64,` + data.audio_base64);
       currentAudioTTS.play();
       return true;
     }
   } catch (err) {
-    console.error("Помилка генерації локального голосу, граємо системний", err);
+    console.error("Помилка серверної озвучки, граємо системний голос", err);
   }
   return false;
 }
