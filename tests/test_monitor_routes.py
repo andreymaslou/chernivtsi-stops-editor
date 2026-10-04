@@ -121,20 +121,20 @@ def test_resolve_requested_routes_reports_unknown_number(api_client):
 # --- Голосовая фраза --------------------------------------------------------
 
 def test_monitor_speech_phrases():
-    """Одна фраза — «маршрут 9», две и больше — «маршрути 9 та 10»."""
+    """Одна фраза — «маршрут дев'ять», дві і більше — «маршрути дев'ять та десять»."""
     routes = [{"key": "bus|9", "type": "bus", "label": "9"},
               {"key": "bus|10", "type": "bus", "label": "10"}]
-    assert app_main.build_monitor_speech(routes[:1], []) == "Показую маршрут 9."
-    assert app_main.build_monitor_speech(routes, []) == "Показую маршрути 9 та 10."
+    assert app_main.build_monitor_speech(routes[:1], []) == "Показую маршрут дев'ять."
+    assert app_main.build_monitor_speech(routes, []) == "Показую маршрути дев'ять та десять."
     assert app_main.build_monitor_speech(routes, ["42"]) == (
-        "Показую маршрути 9 та 10, На жаль, маршрут 42 зараз не працює.")
+        "Показую маршрути дев'ять та десять, На жаль, маршрут сорок два зараз не працює.")
 
 
 def test_monitor_speech_reads_letter_in_ukrainian():
-    """«9A» звучит как «9 а» — как и в озвучке планов."""
+    """«9A» звучить як «дев'ять а» — як і в озвучці планов."""
     routes = [{"key": "bus|9A", "type": "bus", "label": "9A"}]
 
-    assert app_main.build_monitor_speech(routes, []) == "Показую маршрут 9 а."
+    assert app_main.build_monitor_speech(routes, []) == "Показую маршрут дев'ять а."
 
 
 def test_monitor_speech_is_empty_without_routes_and_missing():
@@ -165,7 +165,7 @@ def test_plan_monitor_intent_returns_routes_without_stops(api_client, monkeypatc
     assert body["requested_routes"] == ["9", "10"]
     assert [item["key"] for item in body["routes"]] == ["bus|9", "bus|10"]
     assert body["missing_routes"] == []
-    assert body["speech"]["text"] == "Показую маршрути 9 та 10."
+    assert body["speech"]["text"] == "Показую маршрути дев'ять та десять."
     assert "на карті лише їхні машини" in body["message"]
     # Геопоиск и роутер не участвуют: точек в фразе нет вовсе.
     assert "legs" not in body
@@ -206,7 +206,7 @@ def test_route_endpoint_returns_monitor_mode(api_client, monkeypatch):
     assert body["mode"] == "monitor_routes"
     assert body["requested_routes"] == ["9", "10"]
     assert [item["key"] for item in body["routes"]] == ["bus|9", "bus|10"]
-    assert body["speech"]["text"] == "Показую маршрути 9 та 10."
+    assert body["speech"]["text"] == "Показую маршрути дев'ять та десять."
     assert body["from_stop_id"] is None and body["to_stop_id"] is None
 
 
@@ -399,7 +399,7 @@ def test_plan_monitor_filters_bus_from_phrase(api_client, monkeypatch):
     assert body["mode"] == "monitor_routes"
     assert [item["key"] for item in body["routes"]] == ["bus|4"]
     assert [item["key"] for item in body["shapes"]] == ["bus|4"]
-    assert body["speech"]["text"] == "Показую маршрут 4."
+    assert body["speech"]["text"] == "Показую маршрут чотири."
 
 
 def test_plan_monitor_filters_trolley_from_phrase(api_client, monkeypatch):
@@ -409,7 +409,7 @@ def test_plan_monitor_filters_trolley_from_phrase(api_client, monkeypatch):
     body = api_client.post("/api/plan", json={"text": "покажи 4 тролейбус"}).json()
 
     assert [item["key"] for item in body["routes"]] == ["trolley|4"]
-    assert body["speech"]["text"] == "Показую маршрут 4."
+    assert body["speech"]["text"] == "Показую маршрут чотири."
 
 
 def test_plan_monitor_shared_number_asks_clarify(api_client, monkeypatch):
@@ -432,7 +432,7 @@ def test_plan_monitor_shared_number_asks_clarify(api_client, monkeypatch):
     assert [s["key"] for s in options["trolley"]["shapes"]] == ["trolley|4"]
     assert options["both"]["speech"]["text"] == (
         "Показую четвертий автобус та четвертий тролейбус.")
-    assert options["bus"]["speech"]["text"] == "Показую маршрут 4."
+    assert options["bus"]["speech"]["text"] == "Показую маршрут чотири."
 
 
 def test_plan_monitor_ambiguous_list_gives_three_options(api_client, monkeypatch):
@@ -491,5 +491,5 @@ def test_monitor_clarify_question_and_speech():
     assert app_main._monitor_clarify_question(["4"]) == (
         "Маршрут 4 є і в автобусів, і в тролейбусів — що показати?")
     assert app_main._monitor_clarify_speech(["4"]) == (
-        "Маршрут 4 є і в автобусів, і в тролейбусів. Що показати?")
+        "Маршрут чотири є і в автобусів, і в тролейбусів. Що показати?")
     assert app_main._monitor_clarify_question(["1", "3", "4", "6"]).startswith("Маршрути 1, 3, 4 та 6")

@@ -18,15 +18,15 @@ def _bus(route, vehicle="bus"):
 
 def test_single_leg_speech_names_the_route():
     text = main.build_plan_speech(_plan([_bus("9")]))
-    assert text.startswith("Поїздка автобусом номер 9")
-    assert "34 хвилини" in text
-    assert "20 гривень" in text
+    assert text.startswith("Поїздка автобусом номер дев'ять")
+    assert "тридцять чотири хвилини" in text
+    assert "двадцять гривень" in text
     assert text.endswith(".")
 
 
 def test_trolley_is_named_as_trolley():
     text = main.build_plan_speech(_plan([_bus("3", vehicle="trolley")]))
-    assert "тролейбусом номер 3" in text
+    assert "тролейбусом номер три" in text
 
 
 def test_transfer_uses_accusative_after_na():
@@ -37,8 +37,8 @@ def test_transfer_uses_accusative_after_na():
         _bus("3", vehicle="trolley"),
     ]
     text = main.build_plan_speech(_plan(legs, total_min=49, price_grn=40))
-    assert "з пересадкою на тролейбус номер 3" in text
-    assert "тролейбусом номер 3" not in text
+    assert "з пересадкою на тролейбус номер три" in text
+    assert "тролейбусом номер три" not in text
 
 
 def test_all_legs_are_spoken_with_two_transfers():
@@ -55,20 +55,20 @@ def test_all_legs_are_spoken_with_two_transfers():
         _bus("3", vehicle="trolley"),
     ]
     text = main.build_plan_speech(_plan(legs, total_min=60, price_grn=36))
-    assert "автобусом номер 10 а" in text
-    assert "автобусом номер 5" in text  # середня нога більше не губиться
-    assert "з пересадкою на тролейбус номер 3" in text
+    assert "автобусом номер десять а" in text
+    assert "автобусом номер п'ять" in text  # середня нога більше не губиться
+    assert "з пересадкою на тролейбус номер три" in text
     # Ноги зв'язує «потім», а падеж останньої лишається знахідним.
     assert ", потім " in text
-    assert "тролейбусом номер 3" not in text
+    assert "тролейбусом номер три" not in text
 
 
 def test_middle_leg_keeps_instrumental_case():
     """Середня нога — орудний відмінок: «тролейбусом номер 39»."""
     legs = [_bus("13"), _bus("39", vehicle="trolley"), _bus("2")]
     text = main.build_plan_speech(_plan(legs))
-    assert "Поїздка автобусом номер 13, потім тролейбусом номер 39" in text
-    assert "з пересадкою на автобус номер 2" in text
+    assert "Поїздка автобусом номер тринадцять, потім тролейбусом номер тридцять дев'ять" in text
+    assert "з пересадкою на автобус номер два" in text
 
 
 def test_ukrainian_plural_forms():
@@ -83,14 +83,14 @@ def test_ukrainian_plural_forms():
 
 def test_letter_suffix_spoken_separately():
     text = main.build_plan_speech(_plan([_bus("5A")]))
-    assert "номер 5 а" in text
+    assert "номер п'ять а" in text
 
 
 def test_latin_k_in_route_label_is_spoken_in_ukrainian():
-    """«15K» звучить як «номер 15 к», а не «номер 15 k» (TTS читав по-англійськи)."""
+    """«15K» звучить як «номер п'ятнадцять к», а не «номер 15 k» (TTS читав по-англійськи)."""
     text = main.build_plan_speech(_plan([_bus("15K")]))
-    assert "номер 15 к" in text
-    assert "номер 15 k" not in text
+    assert "номер п'ятнадцять к" in text
+    assert "номер п'ятнадцять k" not in text
 
 
 def test_free_ticket_has_no_price():

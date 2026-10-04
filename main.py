@@ -51,6 +51,7 @@ from slang_store import (
 )
 from storage import append_jsonl
 import tts_layer
+import uk_textnorm
 
 # ---------------------------------------------------------------------------
 # Инициализация окружения и логирования
@@ -1510,14 +1511,6 @@ def get_plan(request: PlanRequest):
     return plan
 
 
-def _uk_num(value: float) -> str:
-    """Число прописью по-украински — для голоса, который читает цифры."""
-    rounded = int(round(float(value)))
-    if rounded == rounded // 1:
-        return str(rounded)
-    return str(rounded)
-
-
 def _uk_plural(number: int, one: str, few: str, many: str) -> str:
     """Украинское склонение: 1 хвилина, 2 хвилини, 5 хвилин."""
     n = abs(int(number))
@@ -1530,26 +1523,16 @@ def _uk_plural(number: int, one: str, few: str, many: str) -> str:
 
 def _speech_route_label(label: str) -> str:
     """
-    Номер маршрута для озвучки: «9A» → «9 а».
+    Номер маршрута для озвучки: «9A» → «дев'ять а».
 
-    Цифра и литера читаются отдельно, а латинская литера (A, B, C, D, E, K —
-    так записаны 8A, 9A, 10A, 15K) произносится украинской буквой: иначе TTS
-    читает «номер 15 k» по-английски. Общий помощник для планов и для
-    мониторинга маршрутов — чтобы «дев'ятка» и «9A» звучали одинаково.
+    Делегирует uk_textnorm.route_number: цифры раскрываются словами
+    («номер дев'ять»), а латинская литера (A, B, C, D, E, K —
+    так записаны 8A, 9A, 10A, 15K) произносится украинской буквой:
+    иначе TTS читает «номер 15 k» по-английски. Общий помощник для
+    планов и для мониторинга маршрутов — чтобы «дев'ятка» и «9A»
+    звучали одинаково.
     """
-    text = str(label or "").strip()
-    if not text:
-        return ""
-    digits = "".join(ch for ch in text if ch.isdigit())
-    letters = "".join(ch for ch in text if ch.isalpha())
-    parts: List[str] = []
-    if digits:
-        parts.append(digits)
-    if letters:
-        parts.append({
-            "a": "а", "b": "б", "c": "в", "d": "д", "e": "е", "k": "к",
-        }.get(letters.lower(), letters.lower()))
-    return " ".join(parts) or text
+    return uk_textnorm.route_number(label)
 
 
 def _speech_route_case(label: str, vehicle: str, case: str = "instr") -> str:
@@ -1607,13 +1590,14 @@ def build_plan_speech(plan: Dict[str, Any]) -> str:
 
     total_min = plan.get("total_min")
     if isinstance(total_min, (int, float)):
-        value = int(round(total_min))
-        parts.append(f"приблизно {_uk_num(value)} {_uk_plural(value, 'хвилина', 'хвилини', 'хвилин')}")
+        # Числа раскрыты словами ДО TTS: движки (ElevenLabs, OpenAI)
+        # нормализуют цифры по-своему — часто без узгодження роду
+        # («тридцять два хвилини» замість «тридцять дві»).
+        parts.append(f"приблизно {uk_textnorm.minutes(total_min)}")
 
     price = plan.get("price_grn")
     if isinstance(price, (int, float)) and price > 0:
-        value = int(round(price))
-        parts.append(f"вартість {_uk_num(value)} {_uk_plural(value, 'гривня', 'гривні', 'гривень')}")
+        parts.append(f"вартість {uk_textnorm.money(price)}")
 
     return ", ".join(parts) + "."
 
@@ -2131,6 +2115,23 @@ def _monitor_route_names(routes: List[Dict[str, Any]]) -> Tuple[List[str], bool]
     return names, collision
 
 
+def _speech_numbers(items: List[str]) -> List[str]:
+    """Номери маршрутів словами для промови (карточка цифри не втрачає).
+
+    «42» -> «сорок два»: рухач TTS сам нормалізує цифри по-своєму,
+    а нам потрібна впевнена українська форма. Нечислове залишаємо
+    як є (захист від сміття у відповіді LLM).
+    """
+    out: List[str] = []
+    for item in items:
+        text = str(item).strip()
+        if text.isdigit():
+            out.append(uk_textnorm.cardinal(int(text)))
+        else:
+            out.append(text)
+    return out
+
+
 def build_monitor_speech(routes: List[Dict[str, Any]], missing: List[str]) -> str:
     """
     Голосова фраза моніторингу: «Показую маршрути 9 та 10.»
@@ -2157,7 +2158,7 @@ def build_monitor_speech(routes: List[Dict[str, Any]], missing: List[str]) -> st
         ]
         parts.append("Показую маршрути " + ", ".join(spoken[:-1]) + " та " + spoken[-1])
     if missing:
-        numbers = ", ".join(str(item) for item in missing)
+        numbers = ", ".join(_speech_numbers(missing))
         if len(missing) == 1:
             parts.append("На жаль, маршрут " + numbers + " зараз не працює")
         else:
@@ -2208,7 +2209,7 @@ def _monitor_clarify_question(ambiguous: List[str]) -> str:
 
 def _monitor_clarify_speech(ambiguous: List[str]) -> str:
     """Тот же вопрос для TTS: точка вместо тире (движки читают «—» неровно)."""
-    joined = _join_ua([str(item) for item in ambiguous])
+    joined = _join_ua(_speech_numbers(ambiguous))
     noun = "Маршрут" if len(ambiguous) == 1 else "Маршрути"
     return f"{noun} {joined} є і в автобусів, і в тролейбусів. Що показати?"
 
