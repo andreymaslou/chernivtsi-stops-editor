@@ -30,6 +30,8 @@ from pathlib import Path
 from typing import Callable, Dict, Optional, Tuple
 from xml.sax.saxutils import escape as xml_escape
 
+import uk_textnorm
+
 logger = logging.getLogger(__name__)
 
 # MIME отдачи: облачные движки отдают mp3. WAV оставлен для совместимости —
@@ -339,6 +341,17 @@ def generate_tts(text: str, speaker: str = "daniel"):
     ответу было видно, какой движок сработал и был ли это кэш-хит.
     """
     text = (text or "").strip()
+    # Підстраховка TN: якщо цифра потрапила в текст мімо шаблонів
+    # main.py (повідомлення LLM, довільний текст /api/tts), розкриваємо
+    # її словами ДО кешу — інакше TN рухача нормалізує по-своєму
+    # (часто без узгодження роду). Кеш-ключ рахується від нормалізованого
+    # тексту, тож «34 хвилини» і «тридцять чотири хвилини» — один запис.
+    normalized = uk_textnorm.expand_digits(text)
+    if normalized != text:
+        logger.info(
+            "TTS: TN підстраховка розкрила цифри: %r -> %r", text, normalized
+        )
+        text = normalized
     voice_key, profile = resolve_voice(speaker)
     if not text:
         return None, MIME_MP3, {"engine": None, "cache": "none", "voice": voice_key, "chars": 0}
