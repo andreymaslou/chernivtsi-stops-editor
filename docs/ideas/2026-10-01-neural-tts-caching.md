@@ -48,11 +48,13 @@ alice/sarah → Polina.
 1. Аккаунт: <https://azure.microsoft.com/free/>.
 2. Создать ресурс Speech:
    <https://portal.azure.com/#create/Microsoft.CognitiveServicesSpeechServices>
-   — Pricing tier **Free F0**, Region **West Europe** (ближайший к Украине;
-   «своего» региона для uk-UA у Azure нет).
+   — Pricing tier **Free F0**, Region **North Europe** (рабочий вариант;
+   «своего» региона для uk-UA у Azure нет). West Europe может отказать новым
+   подпискам с `LocationIneligible` — тогда берём North Europe, Sweden Central,
+   Germany West Central или Poland Central. Голоса uk-UA есть во всех регионах.
 3. Keys and Endpoint:
    <https://portal.azure.com/#view/Microsoft_Azure_ProjectOxford/CognitiveServicesHub/~/SpeechServices>
-   → **KEY 1** в `AZURE_SPEECH_KEY`, **Location/Region** (`westeurope`) в
+   → **KEY 1** в `AZURE_SPEECH_KEY`, **Location/Region** (`northeurope`) в
    `AZURE_SPEECH_REGION`. Нужен именно регион, не Endpoint: ключ регион-скоупный,
    чужой регион даёт `401` (код умеет вырезать регион из Endpoint, но лучше сразу
    копировать правильную строку).
