@@ -79,6 +79,21 @@ VOICE_PROFILES: Dict[str, Dict[str, str]] = {
         "azure": "uk-UA-PolinaNeural",
         "openai": "nova",
     },
+    # Прямой выбор родных голосов Azure (uk-UA). Поле "engine" ставит движок
+    # первым в очереди; voice_id ElevenLabs намеренно нет — иначе профиль мог
+    # бы озвучиться чужим голосом. Резерв при сбое Azure — OpenAI.
+    "ostap": {
+        "label": "Остап — Azure",
+        "engine": "azure",
+        "azure": "uk-UA-OstapNeural",
+        "openai": "onyx",
+    },
+    "polina": {
+        "label": "Поліна — Azure",
+        "engine": "azure",
+        "azure": "uk-UA-PolinaNeural",
+        "openai": "nova",
+    },
 }
 
 FALLBACK_VOICE = "daniel"
@@ -334,6 +349,15 @@ def _provider_order():
     return order or list(DEFAULT_PROVIDER_ORDER)
 
 
+def _order_for(profile: Dict[str, str]):
+    """Порядок движков для профиля: закреплённый движок профиля — первым."""
+    order = _provider_order()
+    pinned = (profile.get("engine") or "").strip().lower()
+    if pinned in order:
+        return [pinned] + [name for name in order if name != pinned]
+    return order
+
+
 def generate_tts(text: str, speaker: str = "daniel"):
     """Синтез речи. Возвращает кортеж (base64_аудио, mime, meta).
 
@@ -356,7 +380,7 @@ def generate_tts(text: str, speaker: str = "daniel"):
     if not text:
         return None, MIME_MP3, {"engine": None, "cache": "none", "voice": voice_key, "chars": 0}
 
-    order = _provider_order()
+    order = _order_for(profile)
 
     # 1. Кэш. Проверяем ДО сети: сводки плана повторяются, и хит не тратит символы.
     for engine in order:
