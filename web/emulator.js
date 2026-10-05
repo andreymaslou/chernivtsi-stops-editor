@@ -1219,11 +1219,8 @@ function renderInfo(data) {
   if (data.reask) parts.push('підказка: назвіть зупинку або вулицю, наприклад «Соборка», «Гравітон»');
   document.getElementById('answer').innerHTML = parts.join('\n');
   setStatus(data.mode === 'manual_input' ? 'введіть початок і пункт призначення' : (data.reask ? 'переформулюйте фразу' : 'маршрут не знайдено'), 'error');
-  if (data.mode === 'manual_input' && data.message && typeof window.speechSynthesis !== 'undefined') {
-    stopVoice();
-    const utterance = new SpeechSynthesisUtterance(data.message);
-    utterance.lang = 'uk-UA';
-    window.speechSynthesis.speak(utterance);
+  if (data.mode === 'manual_input' && data.message) {
+    speakWithSystemVoice(data.message);
   }
 }
 
@@ -1235,11 +1232,8 @@ function renderOffTopic(data) {
   document.getElementById('answer').innerHTML = parts.join('');
   setStatus('запит не стосується маршрутів', 'ok');
 
-  if (data.message && typeof window.speechSynthesis !== 'undefined') {
-    stopVoice();
-    const utterance = new SpeechSynthesisUtterance(data.message);
-    utterance.lang = 'uk-UA';
-    window.speechSynthesis.speak(utterance);
+  if (data.message) {
+    speakWithSystemVoice(data.message);
   }
 }
 
@@ -2014,15 +2008,63 @@ function speakUk(text) {
   fallbackSpeakUk(phrase);
 }
 
-function fallbackSpeakUk(phrase) {
+/**
+ * Найкращий системний голос uk-UA серед встановлених в ОС.
+ * Повертає null, якщо українського немає — тоді браузер
+ * сам обере дефолтний (часто російський або англійський),
+ * і українська фраза звучить з акцентом.
+ */
+function pickUkrainianVoice() {
   if (typeof window.speechSynthesis === 'undefined' ||
-      typeof window.SpeechSynthesisUtterance !== 'function') return;
+      typeof window.speechSynthesis.getVoices !== 'function') {
+    return null;
+  }
+  const voices = window.speechSynthesis.getVoices() || [];
+  if (!voices.length) {
+    return null; // у Chrome голоси завантажуються асинхронно
+  }
+  const uk = voices.filter(function (v) {
+    return (v.lang || '').toLowerCase().indexOf('uk') === 0;
+  });
+  return uk.length ? uk[0] : null;
+}
+
+/**
+ * Фраза системним голосом (Web Speech API) з явним вибором
+ * українського голосу, якщо він є в ОС. Повертає true, коли
+ * синтез запущено. Одноразово попереджає у консоль, якщо
+ * українського голосу не встановлено — озвучка піде
+ * дефолтним голосом (акцент) або мовчитиме.
+ */
+function speakWithSystemVoice(text) {
+  if (typeof window.speechSynthesis === 'undefined' ||
+      typeof window.SpeechSynthesisUtterance !== 'function') {
+    return false;
+  }
   try {
-    const utterance = new SpeechSynthesisUtterance(phrase);
+    const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = 'uk-UA';
+    const voice = pickUkrainianVoice();
+    if (voice) {
+      utterance.voice = voice;
+    } else if (window.speechSynthesis.getVoices().length &&
+               !state.warnedNoUkVoice) {
+      state.warnedNoUkVoice = true;
+      console.warn(
+        'Системний український голос не знайдено: озвучка ' +
+        'може звучати з акцентом. Встановіть голос uk-UA в ' +
+        'налаштуваннях ОС або оберіть хмарний голос у списку.'
+      );
+    }
     stopVoice();
     window.speechSynthesis.speak(utterance);
+    return true;
   } catch (err) { /* синтез може бути вимкнений — текст і так видно */ }
+  return false;
+}
+
+function fallbackSpeakUk(phrase) {
+  speakWithSystemVoice(phrase);
 }
 
 /** Озвучення відповіді паралельно з появою карток (Web Speech, uk-UA).
@@ -2054,14 +2096,7 @@ function speakPlanSummary(plan) {
 }
 
 function fallbackSpeakPlanSummary(text) {
-  if (typeof window.speechSynthesis === 'undefined' ||
-      typeof window.SpeechSynthesisUtterance !== 'function') return;
-  try {
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = 'uk-UA';
-    window.speechSynthesis.cancel();
-    window.speechSynthesis.speak(utterance);
-  } catch (err) { /* синтез може бути вимкнений — текст і так видно */ }
+  speakWithSystemVoice(text);
 }
 
 function hideVariantCards() {
