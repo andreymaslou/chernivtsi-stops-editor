@@ -2593,6 +2593,15 @@ loadManifest();
 // не любить перезапуск, а один живий інстанс на всіх — джерело «залиплих»
 // станів і воронки мікрофона, яку браузер не відпускає.
 //
+// Два режими (як у Telegram):
+//   * УТРИМАННЯ (≥ VOICE_HOLD_MS): натиснув і тримаєш — слухаємо,
+//     відпустив — зупиняємо. Текст пишеться одразу (interimResults),
+//     тому «поки утримуєш — бачиш, що розпізналось»; відпустив —
+//     фінальний текст одразу надіслано.
+//   * КОРОТКИЙ ТАП (< VOICE_HOLD_MS): старий режим перемикача —
+//     перший тап вмикає, другий вимикає. Важливо для слабовидих:
+//     рівний тап простіший за рівномірне утримання.
+//
 // Доступ до мікрофона — машина станів (navigator.permissions → 'microphone'):
 //   * granted — слухаємо одразу, без жодних шторок;
 //   * prompt  — перший клік показує НАШУ шторку з поясненням (pre-permission);
@@ -2610,6 +2619,13 @@ const voicePanel = document.getElementById('ai-voice-hint');
 const voiceHint = document.getElementById('ai-voice-text');
 let voiceRec = null;      // поточний екземпляр розпізнавання (null = не слухаємо)
 let voiceWanted = false;  // юзер хоче слухати (другий клік = стоп)
+const VOICE_HOLD_MS = 350;    // коротше — тап (перемикач), довше — утримання
+const VOICE_MAX_MS = 20000;   // авто-стоп: не слухаємо вічно
+let voiceGesture = false;     // зараз утримується кнопка (hold-to-talk)
+let voiceDownAt = 0;          // час pointerdown поточного жесту
+let voiceStarting = false;    // старт уже йде (async permission) — синхронний замок
+let voiceMaxTimer = null;     // таймер авто-стопу VOICE_MAX_MS
+let ignoreNextClick = false;  // клік, народжений тапом, що ввімкнув режим
 
 // Шторка дозволу: розмітка #voice-perm-modal живе в editor.html (поруч із
 // export-modal), стилі — style.css (.perm-body). На emulator.html елементів
@@ -2704,6 +2720,8 @@ function wasVoiceAsked() {
 function resetVoiceHint() {
   voiceWanted = false;
   voiceRec = null;
+  voiceGesture = false;
+  if (voiceMaxTimer) { clearTimeout(voiceMaxTimer); voiceMaxTimer = null; }
   if (voiceBtn) voiceBtn.classList.remove('recording');
   if (voiceHint) voiceHint.innerHTML = '(AI-ЗАПИТАЙ МЕНЕ)';
 }
@@ -2721,41 +2739,104 @@ if (voicePanel && voiceHint) {
     // не обіцяти голос, якого тут не буває.
     if (voiceBtn) voiceBtn.style.display = 'none';
   } else {
-    voicePanel.addEventListener('click', async () => {
-      // Другий клік під час запису — явна зупинка.
-      if (voiceWanted && voiceRec) {
-        voiceRec.stop();
+    // --- Утримання (Telegram-стиль) ----------------------------------
+    // Натиснув і тримаєш — слухаємо, відпустив — зупиняємо.
+    // Текст пишиться одразу (interimResults), тому «поки
+    // утримуєш — бачиш, що розпізналось».
+    voicePanel.addEventListener('pointerdown', () => {
+      if (voiceWanted || voiceRec || voiceStarting || voiceGesture) return;
+      if (voiceModal && !voiceModal.classList.contains('hidden')) return;
+      voiceDownAt = Date.now();
+      voiceGesture = true;
+      startVoiceRecognition();
+    });
+
+    /** Кінець жесту (відпустив кнопку). Тримав коротко —
+     *  тап: режим перемикача, слухаємо дали. Довго —
+     *  стоп: фінальний текст прийде в onresult і
+     *  відправиться. pointercancel — браузер забрав
+     *  жест (скролл тощо): теж стоп. */
+    const endVoiceGesture = (cancelled) => {
+      if (!voiceGesture) return;
+      voiceGesture = false;
+      const held = Date.now() - voiceDownAt;
+      if (!cancelled && held < VOICE_HOLD_MS) {
+        // Клік, народжений цим самим тапом, ігноруємо —
+        // інакше він одразу вимкне те, що щойно ввімкнули.
+        ignoreNextClick = true;
+        setTimeout(() => { ignoreNextClick = false; }, 0);
         return;
       }
+      if (voiceRec) {
+        try { voiceRec.stop(); } catch (err) { /* ще не стартував */ }
+      }
+    };
+    window.addEventListener('pointerup', () => endVoiceGesture(false));
+    window.addEventListener('pointercancel', () => endVoiceGesture(true));
+
+    // Клік (мишка / короткий тап): другий клік під час
+    // запису — явна зупинка; перший — старт перемикачем.
+    voicePanel.addEventListener('click', () => {
+      if (ignoreNextClick) return;
+      if (voiceWanted && voiceRec) {
+        try { voiceRec.stop(); } catch (err) { /* вже зупинено */ }
+        return;
+      }
+      startVoiceRecognition();
+    });
+
+    /** Старт розпізнавання: машина станів дозволу (див.
+     *  шапку блоку), потім — новий екземпляр. Може йти
+     *  з pointerdown (утримання) і з кліка (перемикач)
+     *  — синхронний замок voiceStarting не дає одному
+     *  жесту запустити два розпізнавання одночасно. */
+    async function startVoiceRecognition() {
+      if (voiceWanted || voiceRec || voiceStarting) return;
       // Шторка вже відкрита — повторний клік під нею нічого не додає.
       if (voiceModal && !voiceModal.classList.contains('hidden')) return;
+      voiceStarting = true;
 
-      // Небезпечне зʼєднання (HTTP без HTTPS — зокрема тест-стенд по IP): браузер
-      // блокує мікрофон на рівні платформи, тому ні нашого, ні системного запиту
-      // не буде. Не турбуємо ні permissions, ні start() — одразу пояснюємо причину.
+      // Небезпечне зʼєднання (HTTP без HTTPS — зокрема тест-стенд по IP):
+      // браузер блокує мікрофон на рівні платформи, тому ні нашого,
+      // ні системного запиту не буде. Не турбуємо permissions —
+      // одразу пояснюємо причину.
       if (voiceInsecure()) {
+        voiceStarting = false;
         openVoiceModal('insecure');
         return;
       }
 
-      // Машина станів дозволу (див. шапку блоку): denied — одразу інструкція,
-      // 'prompt' без прапорця — наша шторка-пояснення, решта — старт.
+      // Машина станів дозволу: denied — одразу інструкція,
+      // 'prompt' без прапорця — наша шторка-пояснення,
+      // 'granted' (або 'prompt' із прапорцем) — старт.
       const state = await getMicPermissionState();
-      if (voiceWanted && voiceRec) return;  // поки питають — встигли стартувати
+      if (voiceWanted && voiceRec) { voiceStarting = false; return; }
       if (state === 'denied') {
+        voiceStarting = false;
         openVoiceModal('denied');
         return;
       }
       if (state !== 'granted' && voiceModal && !wasVoiceAsked()) {
+        voiceStarting = false;
         openVoiceModal('ask');
         return;
       }
 
       voiceWanted = true;
+      voiceStarting = false;
       voiceRec = new SpeechRec();
       voiceRec.lang = 'uk-UA';
-      voiceRec.interimResults = false;  // одразу фінальний текст, без «привидів»
+      // Живий текст під час утримання: проміжні результати
+      // пишемо в поле одразу, фінальний — відправляємо.
+      voiceRec.interimResults = true;
       voiceRec.maxAlternatives = 1;
+
+      // Авто-стоп: не слухаємо вічно (забув відпустити / тиша).
+      voiceMaxTimer = setTimeout(() => {
+        if (voiceRec) {
+          try { voiceRec.stop(); } catch (err) { /* вже зупинено */ }
+        }
+      }, VOICE_MAX_MS);
 
       // UI стан «слухаю»: текст підказки + червона пульсуюча іконка (.recording).
       voiceRec.onstart = () => {
@@ -2763,15 +2844,25 @@ if (voicePanel && voiceHint) {
         voiceHint.innerHTML = '(Слухаю<span class="listen-dots"><span>.</span><span>.</span><span>.</span></span>)';
       };
 
-      // Успіх: розпізнаний текст — у поле запиту, потім програмний клік по
-      // кнопці пошуку (ask() сама перевірить порожнечу й покличе бекенд).
+      // Успіх: проміжний текст — у поле запиту (видно
+      // одразу, поки утримуєш); фінальний — теж у поле
+      // і програмний клік по кнопці пошуку (як у Telegram:
+      // відпустив — надіслано; ask() сама перевірить
+      // порожнечу й покличе бекенд).
       voiceRec.onresult = (event) => {
-        const transcript = event.results[0][0].transcript;
         const input = document.getElementById('ask-text');
         const askButton = document.getElementById('ask-btn');
         if (!input || !askButton) return;
-        input.value = transcript;
-        askButton.click();
+        let interim = '';
+        let finalText = '';
+        for (let i = event.resultIndex || 0; i < event.results.length; i++) {
+          const item = event.results[i];
+          if (item.isFinal) finalText += item[0].transcript;
+          else interim += item[0].transcript;
+        }
+        const text = (finalText || interim).trim();
+        if (text) input.value = text;
+        if (finalText) askButton.click();
       };
 
       voiceRec.onerror = (event) => {
@@ -2796,7 +2887,7 @@ if (voicePanel && voiceHint) {
         resetVoiceHint();
         voiceNotify('⚠ Не вдалося стартувати розпізнавання: ' + err.message);
       }
-    });
+    }
 
     // Кнопки шторки дозволу. «Дозволити» у режимі ask: прапорець «пояснення вже
     // було» встановлюємо і робимо клік по кнопці мікрофона — станова машина

@@ -14,7 +14,7 @@
  * нього сторінка віддає 401 і тест не стартує. Без цих флагів поведінка
  * не змінюється — локальний сервер пароля не просить.
  *
- * Шість сценаріїв:
+ * Сім сценаріїв:
  *   A. Мок Web Speech + дозвіл 'granted': клік → «(Слухаю...)» + .recording →
  *      текст у #ask-text → клік #ask-btn (помічено POST /api/plan) → onend →
  *      базовий стан + CSS .recording; шторка дозволу НЕ показується.
@@ -29,6 +29,9 @@
  *      шторка «Потрібен HTTPS» замість інструкцій, які там не працюють;
  *      розпізнавання навіть не створюється. Стан підмінюємо стабом
  *      isSecureContext (реальний тестовий URL — завжди localhost, тобто secure).
+ *   G. Утримання (Telegram-стиль): pointerdown → тримаємо → pointerup —
+ *      стоп; проміжний текст у полі УЖЕ під час утримання, фінальний —
+ *      після відпустження, запит відправлено одразу.
  *
  * Реальний сервіс розпізнавання у headless непередбачуваний (мережа, тиша,
  * not-allowed), а реальний стан permissions у свіжому профілі — теж, тому
@@ -117,15 +120,43 @@ async function scenarioMock(browser) {
   await page.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'no-preference' }]);
   // Підміна конструктора ще ДО завантаження скриптів сторінки.
   await page.evaluateOnNewDocument((text) => {
+    // SpeechRecognitionResult — масив альтернатив І isFinal
+    // на самому результаті (як у реальному Web Speech API).
+    const fakeResult = (transcript, isFinal) => {
+      const alternatives = [{ transcript }];
+      alternatives.isFinal = isFinal;
+      return alternatives;
+    };
     class FakeRecognition {
       start() {
         setTimeout(() => this.onstart && this.onstart(), 100);
+        // Проміжний результат — як живий текст під час утримання.
         setTimeout(() => {
-          if (this.onresult) this.onresult({ results: [[{ transcript: text }]] });
+          if (this._done) return;
+          if (this.onresult) this.onresult({
+            resultIndex: 0,
+            results: [fakeResult(text, false)],
+          });
+        }, 300);
+        // Фінальний — розпізнавання завершилось (тишина або stop()).
+        setTimeout(() => {
+          if (this._done) return;
+          this._done = true;
+          if (this.onresult) this.onresult({
+            resultIndex: 0,
+            results: [fakeResult(text, true)],
+          });
           setTimeout(() => this.onend && this.onend(), 300);
         }, 700);
       }
       stop() {
+        // Реальний движок: stop() дає останній фінальний результат.
+        if (this._done) return;
+        this._done = true;
+        if (this.onresult) this.onresult({
+          resultIndex: 0,
+          results: [fakeResult(text, true)],
+        });
         if (this.onend) this.onend();
       }
     }
@@ -210,6 +241,110 @@ async function scenarioMock(browser) {
   check('A: CSS пульс emu-voice-pulse', css.animation === 'emu-voice-pulse', css.animation);
 
   check('A: сторінка без необроблених помилок', errors.length === 0, errors.join(' | '));
+  await page.close();
+}
+
+// ---------------------------------------------------------------------------
+// G. Утримання (Telegram-стиль): pointerdown → тримаємо → pointerup —
+//    стоп. Проміжний текст у полі УЖЕ під час утримання; фінальний —
+//    після відпустження (stop() дає результат), запит відправлено одразу.
+// ---------------------------------------------------------------------------
+async function scenarioHold(browser) {
+  console.log('\n--- G. Утримання (hold-to-talk) ---');
+  const page = await openPage(browser);
+  const errors = [];
+  let planRequests = 0;
+  page.on('pageerror', (err) => errors.push(String(err)));
+  page.on('request', (req) => {
+    if (req.method() === 'POST' && req.url().includes('/api/plan')) planRequests += 1;
+  });
+  await page.setViewport({ width: 1400, height: 900 });
+  await page.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'no-preference' }]);
+  // Мок Web Speech + дозвіл 'granted' — як у сценарії A.
+  await page.evaluateOnNewDocument((text) => {
+    // SpeechRecognitionResult — масив альтернатив І isFinal
+    // на самому результаті (як у реальному Web Speech API).
+    const fakeResult = (transcript, isFinal) => {
+      const alternatives = [{ transcript }];
+      alternatives.isFinal = isFinal;
+      return alternatives;
+    };
+    class FakeRecognition {
+      start() {
+        setTimeout(() => this.onstart && this.onstart(), 100);
+        // Проміжний результат — як живий текст під час утримання.
+        setTimeout(() => {
+          if (this._done) return;
+          if (this.onresult) this.onresult({
+            resultIndex: 0,
+            results: [fakeResult(text, false)],
+          });
+        }, 300);
+        // Фінальний — розпізнавання завершилось (тишина або stop()).
+        setTimeout(() => {
+          if (this._done) return;
+          this._done = true;
+          if (this.onresult) this.onresult({
+            resultIndex: 0,
+            results: [fakeResult(text, true)],
+          });
+          setTimeout(() => this.onend && this.onend(), 300);
+        }, 900);
+      }
+      stop() {
+        // Реальний движок: stop() дає останній фінальний результат.
+        if (this._done) return;
+        this._done = true;
+        if (this.onresult) this.onresult({
+          resultIndex: 0,
+          results: [fakeResult(text, true)],
+        });
+        if (this.onend) this.onend();
+      }
+    }
+    window.SpeechRecognition = FakeRecognition;
+    window.webkitSpeechRecognition = FakeRecognition;
+  }, TRANSCRIPT);
+  await page.evaluateOnNewDocument(() => {
+    try {
+      Object.defineProperty(navigator, 'permissions', {
+        configurable: true,
+        value: { query: async () => ({ state: 'granted', onchange: null }) },
+      });
+    } catch (err) { /* не вийшло — спрацює реальний стан браузера */ }
+  });
+
+  await page.goto(URL, { waitUntil: 'networkidle2', timeout: 45000 });
+  await page.waitForSelector('#ai-voice-btn', { timeout: 10000 });
+
+  // Утримуємо кнопку ~900 мс (довше за VOICE_HOLD_MS = 350).
+  const box = await (await page.$('#ai-voice-btn')).boundingBox();
+  const cx = box.x + box.width / 2;
+  const cy = box.y + box.height / 2;
+  await page.mouse.move(cx, cy);
+  await page.mouse.down();
+  // Проміжний текст зʼявляється в полі УЖЕ під час утримання.
+  const interim = await waitFor(page, () => {
+    const input = document.getElementById('ask-text');
+    return input && input.value ? input.value : null;
+  }, 3000, 50);
+  check('G: проміжний текст у #ask-text під час утримання',
+    interim === TRANSCRIPT, String(interim));
+  await sleep(900);
+  await page.mouse.up();
+
+  // Фінальний текст — після відпустження (stop() дав результат).
+  const typed = await waitFor(page, () => {
+    const input = document.getElementById('ask-text');
+    return input && input.value ? input.value : null;
+  }, 4000, 50);
+  check('G: фінальний текст у #ask-text', typed === TRANSCRIPT, String(typed));
+
+  await sleep(2000);   // даємо ask() відправити запит
+  check('G: #ask-btn запустив POST /api/plan', planRequests > 0,
+    'запитів: ' + planRequests);
+  check('G: сторінка без необроблених помилок', errors.length === 0,
+    errors.join(' | '));
   await page.close();
 }
 
@@ -303,15 +438,43 @@ async function scenarioFirstAsk(browser) {
   await page.setViewport({ width: 1400, height: 900 });
   // Мок Web Speech + стан 'prompt' — обидва ДО скриптів сторінки.
   await page.evaluateOnNewDocument((text) => {
+    // SpeechRecognitionResult — масив альтернатив І isFinal
+    // на самому результаті (як у реальному Web Speech API).
+    const fakeResult = (transcript, isFinal) => {
+      const alternatives = [{ transcript }];
+      alternatives.isFinal = isFinal;
+      return alternatives;
+    };
     class FakeRecognition {
       start() {
         setTimeout(() => this.onstart && this.onstart(), 100);
+        // Проміжний результат — як живий текст під час утримання.
         setTimeout(() => {
-          if (this.onresult) this.onresult({ results: [[{ transcript: text }]] });
+          if (this._done) return;
+          if (this.onresult) this.onresult({
+            resultIndex: 0,
+            results: [fakeResult(text, false)],
+          });
+        }, 300);
+        // Фінальний — розпізнавання завершилось (тишина або stop()).
+        setTimeout(() => {
+          if (this._done) return;
+          this._done = true;
+          if (this.onresult) this.onresult({
+            resultIndex: 0,
+            results: [fakeResult(text, true)],
+          });
           setTimeout(() => this.onend && this.onend(), 300);
         }, 700);
       }
       stop() {
+        // Реальний движок: stop() дає останній фінальний результат.
+        if (this._done) return;
+        this._done = true;
+        if (this.onresult) this.onresult({
+          resultIndex: 0,
+          results: [fakeResult(text, true)],
+        });
         if (this.onend) this.onend();
       }
     }
@@ -588,6 +751,7 @@ async function scenarioInsecureContext(browser) {
   }
   try {
     await scenarioMock(browser);
+    await scenarioHold(browser);
     await scenarioNoApi(browser);
     await scenarioReal(browser);
     await scenarioFirstAsk(browser);

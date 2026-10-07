@@ -499,6 +499,15 @@ body.zoom-out .veh-wrap .veh-sim-badge { display: none; }
 
 #ai-voice-btn.recording { animation: emu-voice-pulse 1s infinite ease-in-out; }
 
+/* Утримання (hold-to-talk): утримувати панель не повинно скролити
+ * сторінку чи викликати контекстне меню на мобільних. */
+#ai-voice-hint {
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
 @keyframes emu-voice-pulse {
   0%, 100% { transform: scale(1); }
   50% { transform: scale(1.15); }

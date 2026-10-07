@@ -54,9 +54,9 @@ Basic Auth. ⚠️ В мобильное приложение (RN) эти же �
 
 | Что | Где именно |
 |---|---|
-| Логика (машина станів дозволу, шторка, Web Speech) | `web/emulator.js` — блок «Голосове введення»: `SpeechRec`, `voiceBtn`/`voiceHint`, `getMicPermissionState`, `voiceInsecure`, `voiceModalBodyHtml`, `openVoiceModal`/`closeVoiceModal`, `markVoiceAsked`/`wasVoiceAsked`, `resetVoiceHint` |
-| Кнопка 🎤 и шторка дозволу | `web/editor.html` — `#ai-voice-hint`/`#ai-voice-btn` и `#voice-perm-modal`; стилі — `web/style.css` (`.perm-body`, `.perm-warn`), пульс запису — `web/emulator-panel.css` (`.recording`, `emu-voice-pulse`) |
-| Smoke-тест (6 сценариев A–F) | `tools/ui/check_voice.js` — `node tools/ui/check_voice.js` (нужен живой `python main.py`) |
+| Логика (машина станів дозволу, шторка, Web Speech, утримання) | `web/emulator.js` — блок «Голосове введення»: `SpeechRec`, `voiceBtn`/`voiceHint`, `getMicPermissionState`, `voiceInsecure`, `voiceModalBodyHtml`, `openVoiceModal`/`closeVoiceModal`, `markVoiceAsked`/`wasVoiceAsked`, `resetVoiceHint`, `startVoiceRecognition` + `pointerdown`/`pointerup`/`pointercancel` (hold-to-talk: `VOICE_HOLD_MS`, `VOICE_MAX_MS`, `voiceGesture`/`voiceStarting`/`ignoreNextClick`) |
+| Кнопка 🎤 и шторка дозволу | `web/editor.html` — `#ai-voice-hint`/`#ai-voice-btn` и `#voice-perm-modal`; стилі — `web/style.css` (`.perm-body`, `.perm-warn`), пульс запису — `web/emulator-panel.css` (`.recording`, `emu-voice-pulse`; `#ai-voice-hint` — `touch-action:none` для утримання) |
+| Smoke-тест (7 сценаріїв A–G) | `tools/ui/check_voice.js` — `node tools/ui/check_voice.js` (нужен живой `python main.py`); G — утримання (hold-to-talk): проміжний текст уже під час утримання, фінальний → одразу відправка |
 | Почему на HTTP не работало и как включили HTTPS | `deploy/README_HTTPS.md` §0.1 (состояние + грабли), этот файл §5.1 |
 | План развития (GPS, пеший пунктир до нужной остановки) | `docs/PLAN-assistant-geo-walk.md` |
 
