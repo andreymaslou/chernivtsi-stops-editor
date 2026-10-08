@@ -31,8 +31,8 @@
  *      телеметрія §13.3: подія йде і при показі карток (chosen=null), і при
  *      кліку (chosen=id), з тим самим порядком карток, що на екрані;
  *   6. попап машини: структура, світлий бейдж, екранування зовнішніх рядків;
- *   7. розвантаження при віддаленні: zoom < 13 — крапки без номера й стрілки,
- *      zoom >= 13 — повний маркер, і крапка не з'їжджає з координати;
+ *   7. розвантаження при віддаленні: zoom < 11 — крапки без номера й стрілки,
+ *      zoom >= 11 — повний маркер, і крапка не з'їжджає з координати;
  *   7.1 бейдж «SIM» на віртуальних машинах (§3): плашка видна ЛИШЕ у машин з
  *      класом .sim (у моно sim — на всіх маркерах), на реальному борті трекера
  *      її нема; data-source збігається з класом sim;
@@ -703,9 +703,9 @@ const probe = () => ({
     }, { timeout: 5000, polling: 150 }).catch(() => {});
     return page.evaluate(probe);
   };
-  const dots = await atZoom(12);
-  await page.screenshot({ path: path.join(OUT, 'zoom12_dots.png') });
-  report.shots.push('zoom12_dots.png');
+  const dots = await atZoom(10);
+  await page.screenshot({ path: path.join(OUT, 'zoom10_dots.png') });
+  report.shots.push('zoom10_dots.png');
   const full = await atZoom(14);
   await page.screenshot({ path: path.join(OUT, 'zoom14_markers.png') });
   report.shots.push('zoom14_markers.png');
@@ -733,7 +733,7 @@ const probe = () => ({
   check('крапка не з\'їжджає з координати',
     driftFull !== null && driftDots !== null && driftFull <= 10 && driftDots <= 10,
     'зсув центру маркера від точки Leaflet: ' + driftFull + ' px при 14, ' +
-    driftDots + ' px при 12');
+    driftDots + ' px при 10');
 
   check('стиснення маркера плавне (transition містить transform)',
     /transform/.test(full.zoom.transition),
