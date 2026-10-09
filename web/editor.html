@@ -15,7 +15,7 @@
   <!-- Панель эмулятора: стили скоупированы под #emu-panel (см. файл), чтобы
        не переопределять разметку/цвета редактора. -->
   <link rel="stylesheet" href="slang-panel.css?v=2026-09-23a" />
-  <link rel="stylesheet" href="emulator-panel.css?v=2026-10-07a" />
+  <link rel="stylesheet" href="emulator-panel.css?v=2026-10-08b" />
   <!-- ⚠️ ?v=... у css/js — защита от кэша браузера. Без него телефон после
        деплоя продолжал рисовать СТАРЫЙ CSS (панель 45vh вместо шторок): сервер
        отдавал новый файл, а Chrome — свою копию. Поднимайте версию при правках
@@ -190,13 +190,26 @@
           <button type="button" id="slang-panel-save" class="btn btn-primary">Сохранить</button>
         </div>
       </aside>
-      <div class="map-hint" id="ai-voice-hint" style="display:flex; justify-content:space-between; align-items:center; cursor:pointer; pointer-events:auto; padding: 10px 16px 10px 24px;">
+      <!-- Нижня підказка. Пилюля БІЛЬШЕ НЕ кнопка (pointer-events:none з
+           style.css .map-hint) — клікабельні лише два круги: 🔊 (озвучка,
+           #ai-sound-btn) і 🎤 (мікрофон, #ai-voice-btn). Весь планшет раніше
+           вів на голосове введення й глушив перетягування карти — тепер карта
+           панорамується під ним, а голос/звук вимикаються явно по колу. -->
+      <div class="map-hint" id="ai-voice-hint" style="display:flex; justify-content:space-between; align-items:center; padding: 10px 16px 10px 24px;">
+        <button id="ai-sound-btn" class="sound-btn" type="button" title="Вимкнути озвучку" aria-label="Увімкнути або вимкнути озвучку маршруту" aria-pressed="false">
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+            <path fill="#ffffff" d="M3 9v6h4l5 5V4L7 9H3z"/>
+            <path fill="#ffffff" d="M16.5 8.79a4.5 4.5 0 0 1 0 6.42"/>
+            <path fill="#ffffff" d="M19.07 5.93a8.97 8.97 0 0 1 0 12.14"/>
+            <line class="slash" x1="4" y1="20" x2="20" y2="4"/>
+          </svg>
+        </button>
         <div style="display:flex; flex-direction:column; gap:2px;">
           <span id="ai-voice-text" style="color: #ffffff; font-weight: 800; font-size: 16px; letter-spacing: 0.5px;">(AI-ЗАПИТАЙ МЕНЕ)</span>
           <span style="color: rgba(255,255,255,0.7); font-weight: bold; font-size: 11px; letter-spacing: 0.2px; margin-left: 10px;">Маршрути · пересадки · час · ціна</span>
         </div>
-        <button id="ai-voice-btn" class="btn-icon" title="Голосове введення" style="pointer-events:none; background:transparent; border:none; margin-left:12px; padding:0; display:flex; align-items:center;">
-          <svg viewBox="0 0 24 24" width="28" height="28" fill="#ffffff">
+        <button id="ai-voice-btn" class="voice-btn" type="button" title="Голосове введення" aria-label="Голосове введення">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="#ffffff">
             <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5-3c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>
           </svg>
         </button>
@@ -218,6 +231,13 @@
               <option value="sarah">🎙️ Сара — жіночий</option>
               <option value="ostap">☁️ Остап — Azure</option>
               <option value="polina">☁️ Поліна — Azure</option>
+              <option value="vev">🎙️ Vev — Deep &amp; Pleasant</option>
+              <option value="kateryna">🎙️ Kateryna — Warm</option>
+              <option value="yevhen">🎙️ Yevhen — Resonant</option>
+              <option value="mariya">🎙️ Mariya — Educational</option>
+              <option value="alex">🎙️ Alex — Storyteller</option>
+              <option value="casanova">🎙️ Casanova — Whispered</option>
+              <option value="anton">🎙️ Anton — Mysterious</option>
             </select>
             <a href="/ui/admin.html">⚙️ Сленг і скарги</a>
             <a href="/docs" style="margin-left:10px;">API</a>
@@ -375,7 +395,7 @@
        отдельной странице /ui/emulator.html создаёт свою). -->
   <script src="app.js?v=2026-09-20d"></script>
   <script src="slang-panel.js?v=2026-09-23a"></script>
-  <script src="emulator.js?v=2026-10-08a"></script>
+  <script src="emulator.js?v=2026-10-08b"></script>
 </body>
 
 </html>

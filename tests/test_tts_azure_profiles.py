@@ -1,4 +1,4 @@
-"""Профили Azure (ostap/polina): прямой выбор родных голосов uk-UA.
+"""Профили голосов: кастомные ElevenLabs (male/female) и порядок движков.
 
 Движки подменены фейками — тест не ходит в сеть и не пишет на диск.
 """
@@ -27,8 +27,25 @@ def _fake_engines(monkeypatch, failing=()):
     return calls
 
 
-def test_azure_profiles_exist_with_native_voices():
+def test_custom_voices_exist_with_elevenlabs_ids():
+    custom = {
+        "vev": "ZwwNZP0QbNaQsoNgkPWr",
+        "kateryna": "GUEwnFXohLVek3cFXbW4",
+        "yevhen": "TEyBWD5tAHAWqAGEv6yI",
+        "mariya": "2OXYbN1uGomXXJtv9Dq6",
+        "alex": "0p9W8EFOJbkw3zD1oNop",
+        "casanova": "IM2NskAf9RDJ9aOlvoTu",
+        "anton": "dZde1M1SiLkAKiqjpqqT",
+    }
+    for key, voice_id in custom.items():
+        assert tts_layer.VOICE_PROFILES[key]["elevenlabs"] == voice_id, key
+
+
+def test_pinned_azure_profiles_exist():
+    # Закреплённые Azure-профили: родные uk-UA, engine ставится первым.
+    assert tts_layer.VOICE_PROFILES["ostap"]["engine"] == "azure"
     assert tts_layer.VOICE_PROFILES["ostap"]["azure"] == "uk-UA-OstapNeural"
+    assert tts_layer.VOICE_PROFILES["polina"]["engine"] == "azure"
     assert tts_layer.VOICE_PROFILES["polina"]["azure"] == "uk-UA-PolinaNeural"
     # У закреплённых профилей нет voice_id ElevenLabs — чужой голос исключён.
     assert "elevenlabs" not in tts_layer.VOICE_PROFILES["ostap"]
@@ -43,13 +60,6 @@ def test_pinned_profile_goes_to_azure_first(monkeypatch):
     assert calls[0] == ("azure", "uk-UA-OstapNeural")
 
 
-def test_regular_profile_keeps_default_order(monkeypatch):
-    calls = _fake_engines(monkeypatch)
-    _audio, _mime, meta = tts_layer.generate_tts("тест", "daniel")
-    assert meta["engine"] == "elevenlabs"
-    assert calls[0][0] == "elevenlabs"
-
-
 def test_pinned_profile_falls_back_to_openai_not_elevenlabs(monkeypatch):
     calls = _fake_engines(monkeypatch, failing=("azure",))
     _audio, _mime, meta = tts_layer.generate_tts("тест", "polina")
@@ -57,3 +67,26 @@ def test_pinned_profile_falls_back_to_openai_not_elevenlabs(monkeypatch):
     assert [name for name, _ in calls] == ["azure", "elevenlabs", "openai"]
     # ElevenLabs вызван, но без voice_id -> вернул None и не озвучил.
     assert calls[1] == ("elevenlabs", None)
+
+
+def test_regular_profile_keeps_default_order(monkeypatch):
+    calls = _fake_engines(monkeypatch)
+    _audio, _mime, meta = tts_layer.generate_tts("тест", "daniel")
+    assert meta["engine"] == "elevenlabs"
+    assert calls[0][0] == "elevenlabs"
+
+
+def test_custom_voice_resolves_and_goes_to_elevenlabs_first(monkeypatch):
+    calls = _fake_engines(monkeypatch)
+    _audio, _mime, meta = tts_layer.generate_tts("тест", "vev")
+    assert meta["voice"] == "vev"
+    assert meta["engine"] == "elevenlabs"
+    assert calls[0] == ("elevenlabs", "ZwwNZP0QbNaQsoNgkPWr")
+
+
+def test_unknown_speaker_falls_back_to_default(monkeypatch):
+    calls = _fake_engines(monkeypatch)
+    _audio, _mime, meta = tts_layer.generate_tts("тест", "нет-такого-голоса")
+    assert meta["voice"] == tts_layer.FALLBACK_VOICE
+    assert meta["engine"] == "elevenlabs"
+    assert calls[0][0] == "elevenlabs"

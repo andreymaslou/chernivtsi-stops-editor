@@ -491,22 +491,52 @@ body.zoom-out .veh-wrap .veh-sim-badge { display: none; }
   }
 }
 
-/* Голосове введення: кнопка мікрофона у .map-hint (розмітка web/editor.html).
- * SVG іконки лежить прямо в кнопці з атрибутом fill="#ffffff" — атрибут має
- * пріоритет presentation-атрибута, тому CSS-правило .recording svg перебиває
- * його без !important. Пульс — той самий прийом, що в .plan-step вище. */
-#ai-voice-btn.recording svg { fill: #ef4444; }
-
-#ai-voice-btn.recording { animation: emu-voice-pulse 1s infinite ease-in-out; }
-
-/* Утримання (hold-to-talk): утримувати панель не повинно скролити
- * сторінку чи викликати контекстне меню на мобільних. */
-#ai-voice-hint {
+/* Голосове введення та озвучка: у .map-hint (web/editor.html) тепер два круги —
+ * 🔊 (#ai-sound-btn, вмикає/вимикає озвучку) і 🎤 (#ai-voice-btn, мікрофон).
+ * Пилюля сама БІЛЬШЕ НЕ кнопка: .map-hint у style.css має pointer-events:none,
+ * тож колам потрібен явний pointer-events:auto, а планшет під ними знову
+ * панорамує карту. Раніше жест hold-to-talk вів на всю пилюлю й глушив
+ * перетягування карти (touch-action:none на #ai-voice-hint). */
+#ai-sound-btn,
+#ai-voice-btn {
+  pointer-events: auto;
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  cursor: pointer;
+  /* Утримання мікрофона (hold-to-talk) не повинно скролити сторінку чи
+   * викликати довгим тапом контекстне меню — тому на колах, а не на пилюлі. */
   touch-action: none;
+  -webkit-touch-callout: none;
   user-select: none;
   -webkit-user-select: none;
-  -webkit-touch-callout: none;
 }
+
+#ai-voice-btn { margin-left: 12px; }
+#ai-sound-btn { margin-right: 4px; }
+
+/* Перекреслення динаміка: лінія .slash прихована, поки звук увімкнено; при
+ * .is-muted — червона риска, а корпус із хвилями стають сірими. */
+#ai-sound-btn .slash {
+  stroke: var(--danger);
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  opacity: 0;
+}
+#ai-sound-btn.is-muted .slash { opacity: 1; }
+#ai-sound-btn.is-muted svg path { fill: var(--text-secondary); }
+
+/* Пульс запису: колір SVG перебиває presentation-атрибут fill="#ffffff"
+ * без !important (той самий прийом, що в .plan-step). */
+#ai-voice-btn.recording svg { fill: #ef4444; }
+#ai-voice-btn.recording { animation: emu-voice-pulse 1s infinite ease-in-out; }
 
 @keyframes emu-voice-pulse {
   0%, 100% { transform: scale(1); }

@@ -70,7 +70,20 @@ const state = {
   // через window.Emulator: у headless-браузері голос не послухати, а факт
   // озвучки («показую маршрути 9 та 10») перевірити треба.
   lastSpeech: '',
+  // Озвучку можна вимкнути кружечком 🔊 у підказці .map-hint (#ai-sound-btn).
+  // Мьют ріже синтез ДО запиту /api/tts — інакше платний рушій (ElevenLabs/
+  // Azure) усе одно генерував би аудіо впусту. Переживає перезавантаження через
+  // localStorage (transgps_sound_muted). Ініціалізується одразу після state нижче.
+  soundMuted: false,
 };
+
+// --- Озвучка: мьют (кружок 🔊 у підказці .map-hint) --------------------------
+// Джерело правди в рантаймі — state.soundMuted; localStorage лише переживає
+// перезавантаження. Ініціалізуємо безумовно (щойно вище): кнопки 🔊 може не бути
+// на окремій сторінці emulator.html, але асистент там теж говорить — мьют має
+// діяти всюди, тож speakUk/speakPlanSummary читають state, а не наявність кнопки.
+const SOUND_KEY = 'transgps_sound_muted';
+try { state.soundMuted = localStorage.getItem(SOUND_KEY) === '1'; } catch (err) { /* приватний режим */ }
 
 // ---------------------------------------------------------------------------
 // Карта
@@ -2001,6 +2014,9 @@ function speakUk(text) {
   const phrase = String(text || '').trim();
   if (!phrase) return;
   state.lastSpeech = phrase;
+  // Мьют: журнал lastSpeech уже записан (это «какую фразу породили», не зависит
+  // от звука), но синтез не запускаем — иначе /api/tts уйдёт впустую за деньги.
+  if (state.soundMuted) return;
 
   const voiceSelect = document.getElementById('tts-voice-select');
   const voice = voiceSelect ? voiceSelect.value : 'system';
@@ -2088,6 +2104,9 @@ function speakPlanSummary(plan) {
     const price = Number(plan.price_grn);
     if (Number.isFinite(price)) text += ', ' + Math.round(price) + ' гривень';
   }
+
+  // Мьют (кружок 🔊): не озвучиваем ответ и не дёргаем платный /api/tts.
+  if (state.soundMuted) return;
 
   const voiceSelect = document.getElementById('tts-voice-select');
   const voice = voiceSelect ? voiceSelect.value : 'system';
@@ -2748,7 +2767,7 @@ if (voicePanel && voiceHint) {
     // Натиснув і тримаєш — слухаємо, відпустив — зупиняємо.
     // Текст пишиться одразу (interimResults), тому «поки
     // утримуєш — бачиш, що розпізналось».
-    voicePanel.addEventListener('pointerdown', () => {
+    voiceBtn.addEventListener('pointerdown', () => {
       if (voiceWanted || voiceRec || voiceStarting || voiceGesture) return;
       if (voiceModal && !voiceModal.classList.contains('hidden')) return;
       voiceDownAt = Date.now();
@@ -2779,9 +2798,9 @@ if (voicePanel && voiceHint) {
     window.addEventListener('pointerup', () => endVoiceGesture(false));
     window.addEventListener('pointercancel', () => endVoiceGesture(true));
 
-    // Клік (мишка / короткий тап): другий клік під час
+    // Клік (мишка / короткий тап) по кружку мікрофона: другий клік під час
     // запису — явна зупинка; перший — старт перемикачем.
-    voicePanel.addEventListener('click', () => {
+    voiceBtn.addEventListener('click', () => {
       if (ignoreNextClick) return;
       if (voiceWanted && voiceRec) {
         try { voiceRec.stop(); } catch (err) { /* вже зупинено */ }
@@ -2917,6 +2936,39 @@ if (voicePanel && voiceHint) {
   }
 }
 
+// --- Кружок озвучки 🔊 (#ai-sound-btn) --------------------------------------
+// Кружок у підказці .map-hint вмикає/вимикає озвучку відповідей асистента.
+// Це НЕ мікрофон: мьют глушить тільки відповідь (speakUk/speakPlanSummary),
+// розпізнавання голосу лишається живим. Ініціалізуємо окремо від блоку
+// мікрофона вище — навіть у браузері без Web Speech (Firefox) мьут має працювати.
+// Розмітка і стилі (перекреслена риска .slash) — editor.html та emulator-panel.css.
+const soundBtn = document.getElementById('ai-sound-btn');
+
+/** Відбити стан мьюта на кружку: клас .is-muted (перекреслення + сірий корпус)
+ *  і aria-pressed для доступності. Викликається на старті й після кожного кліку. */
+function applySoundMutedUI() {
+  if (!soundBtn) return;
+  soundBtn.classList.toggle('is-muted', state.soundMuted);
+  soundBtn.setAttribute('aria-pressed', state.soundMuted ? 'true' : 'false');
+  soundBtn.title = state.soundMuted ? 'Увімкнути озвучку' : 'Вимкнути озвучку';
+}
+
+if (soundBtn) {
+  // Стартове зображення кружка відповідає збереженому в localStorage стану.
+  applySoundMutedUI();
+  soundBtn.addEventListener('click', () => {
+    state.soundMuted = !state.soundMuted;
+    try {
+      if (state.soundMuted) localStorage.setItem(SOUND_KEY, '1');
+      else localStorage.removeItem(SOUND_KEY);
+    } catch (err) { /* приватний режим — стан доживе до перезавантаження */ }
+    // Вимкнули — одразу ріжемо те, що зараз грає (якщо асистент ще говорить).
+    if (state.soundMuted) stopVoice();
+    applySoundMutedUI();
+  });
+}
+
+
 // --- Легенда карти (специфікація дизайну, п. 2) ------------------------------
 //
 // Пояснює кольори маркерів ТС і пішохідні пересадки. Живе як звичайний контрол
@@ -3002,6 +3054,10 @@ window.Emulator = {
   // ответ monitor_clarify напрямую и сверяет тексты и клики.
   renderMonitorClarify,
   lastSpeech: () => state.lastSpeech,
+  // Стан мьюта озвучки (кружок 🔊): UI-проверка сверяет, что при mute фраза
+  // в lastSpeech есть, а синтез не пошёл. Симметрично lastSpeech — читаем
+  // приватное состояние, не роясь в DOM кружка.
+  soundMuted: () => state.soundMuted,
 };
 
 })(); // конец IIFE: внутренние имена не текут в глобальную область редактора

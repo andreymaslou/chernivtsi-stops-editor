@@ -45,9 +45,11 @@ _MIME_EXT = {MIME_MP3: ".mp3", MIME_WAV: ".wav"}
 # Голосовые профили
 # ---------------------------------------------------------------------------
 # Ключ профиля = значение <option> в UI (уходит в ?speaker=). Внутри — voice_id
-# каждого движка. Все голоса ElevenLabs ниже — premade (категория premade из
-# GET /v1/voices), то есть доступны на любом тарифе и читают украинский через
-# multilingual-модель. Для Azure выбраны родные uk-UA нейронные голоса.
+# каждого движка. daniel/adam/george/alice/sarah — premade (категория premade
+# из GET /v1/voices), доступны на любом тарифе и читают украинский через
+# multilingual-модель. vev/kateryna/yevhen/mariya/alex/casanova/anton — голоса
+# из кабинета ElevenLabs (категория professional): работают только с API-ключом
+# workspace, который их создал. Для Azure — родные uk-UA нейронные голоса.
 VOICE_PROFILES: Dict[str, Dict[str, str]] = {
     "daniel": {
         "label": "Деніел — диктор",
@@ -79,8 +81,9 @@ VOICE_PROFILES: Dict[str, Dict[str, str]] = {
         "azure": "uk-UA-PolinaNeural",
         "openai": "nova",
     },
-    # Прямой выбор родных голосов Azure (uk-UA). Поле "engine" ставит движок
-    # первым в очереди; voice_id ElevenLabs намеренно нет — иначе профиль мог
+    # Прямой выбор родных голосов Azure (uk-UA) — бесплатный F0-ключ
+    # (0.5 млн символов/мес). Поле "engine" ставит движок первым в
+    # очереди; voice_id ElevenLabs намеренно нет — иначе профиль мог
     # бы озвучиться чужим голосом. Резерв при сбое Azure — OpenAI.
     "ostap": {
         "label": "Остап — Azure",
@@ -93,6 +96,50 @@ VOICE_PROFILES: Dict[str, Dict[str, str]] = {
         "engine": "azure",
         "azure": "uk-UA-PolinaNeural",
         "openai": "nova",
+    },
+    # Голоса из кабинета ElevenLabs (категория professional). Резерв при
+    # сбое ElevenLabs — Azure (родной uk-UA), затем OpenAI.
+    "vev": {
+        "label": "Vev — Deep & Pleasant",
+        "elevenlabs": "ZwwNZP0QbNaQsoNgkPWr",  # Vev — Deep and Pleasant (мужской)
+        "azure": "uk-UA-OstapNeural",
+        "openai": "onyx",
+    },
+    "kateryna": {
+        "label": "Kateryna — Warm",
+        "elevenlabs": "GUEwnFXohLVek3cFXbW4",  # Kateryna Krupkina — Warm (женский)
+        "azure": "uk-UA-PolinaNeural",
+        "openai": "nova",
+    },
+    "yevhen": {
+        "label": "Yevhen — Resonant",
+        "elevenlabs": "TEyBWD5tAHAWqAGEv6yI",  # Yevhen — Resonant and Distinctive
+        "azure": "uk-UA-OstapNeural",
+        "openai": "onyx",
+    },
+    "mariya": {
+        "label": "Mariya — Educational",
+        "elevenlabs": "2OXYbN1uGomXXJtv9Dq6",  # Mariya Maro — Educational and Harmonious
+        "azure": "uk-UA-PolinaNeural",
+        "openai": "nova",
+    },
+    "alex": {
+        "label": "Alex — Storyteller",
+        "elevenlabs": "0p9W8EFOJbkw3zD1oNop",  # Alex — Warm Storyteller
+        "azure": "uk-UA-OstapNeural",
+        "openai": "onyx",
+    },
+    "casanova": {
+        "label": "Casanova — Whispered",
+        "elevenlabs": "IM2NskAf9RDJ9aOlvoTu",  # Casanova — Your Love Story, Whispered
+        "azure": "uk-UA-OstapNeural",
+        "openai": "onyx",
+    },
+    "anton": {
+        "label": "Anton — Mysterious",
+        "elevenlabs": "dZde1M1SiLkAKiqjpqqT",  # Anton — Unusual, Pleasant and Mysterious
+        "azure": "uk-UA-OstapNeural",
+        "openai": "onyx",
     },
 }
 
