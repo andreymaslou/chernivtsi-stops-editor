@@ -1,11 +1,14 @@
 """Серверная озвучка эмулятора (TTS).
 
 Движки пробуются по порядку TTS_PROVIDER_ORDER (по умолчанию
-elevenlabs,azure,openai); первый, кто ответит, отдаёт звук:
+elevenlabs,azure,openai); первый, кто ответит, отдаёт звук.
+Профили ostap/polina закреплены на Azure (поле "engine" ставит
+azure первым) — родные uk-UA-нейронные голоса, поэтому Azure —
+фактически основной движок, а ElevenLabs/OpenAI — резерв:
 
-  1. ElevenLabs — основной (model=eleven_multilingual_v2, mp3). Голос приходит
-     из UI (?speaker=) и раскрывается в voice_id профиля (VOICE_PROFILES).
-  2. Azure Speech — резерв (голоса uk-UA-OstapNeural / uk-UA-PolinaNeural).
+  1. Azure Speech — основной (uk-UA-OstapNeural / uk-UA-PolinaNeural).
+  2. ElevenLabs — резерв (нужен voice_id профиля; у закреплённых
+     профилей его нет, движок вернёт None).
   3. OpenAI tts-1 — последний резерв (голоса onyx/nova).
 
 Локального Silero здесь больше нет. Модель v4_ua.pt умела только `mykyta`
@@ -44,43 +47,16 @@ _MIME_EXT = {MIME_MP3: ".mp3", MIME_WAV: ".wav"}
 # ---------------------------------------------------------------------------
 # Голосовые профили
 # ---------------------------------------------------------------------------
-# Ключ профиля = значение <option> в UI (уходит в ?speaker=). Внутри — voice_id
-# каждого движка. daniel/adam/george/alice/sarah — premade (категория premade
-# из GET /v1/voices), доступны на любом тарифе и читают украинский через
-# multilingual-модель. vev/kateryna/yevhen/mariya/alex/casanova/anton — голоса
-# из кабинета ElevenLabs (категория professional): работают только с API-ключом
-# workspace, который их создал. Для Azure — родные uk-UA нейронные голоса.
+# Ключ профиля = значение <option> в UI (уходит в ?speaker=). В списке —
+# только задействованные голоса: ostap/polina закреплены на Azure
+# (родные uk-UA-нейронные, ключ F0 — 0.5 млн символов/мес). Поле
+# "engine" ставит azure первым в очереди; voice_id ElevenLabs намеренно
+# нет — иначе профиль мог бы озвучиться чужим голосом. Резерв при
+# сбое Azure — OpenAI. Голоса ElevenLabs (5 premade + 7 из кабинета)
+# убраны 10.10.2026: free-аккаунт исчерпан (401 quota_exceeded),
+# библиотечные требуют платный план (402) — а везде они fallback'ились
+# на Остапа/Поліну. История профилей — в git (e736971, c9e9eed).
 VOICE_PROFILES: Dict[str, Dict[str, str]] = {
-    "daniel": {
-        "label": "Деніел — диктор",
-        "elevenlabs": "onwK4e9ZLuTAKqWW03F9",  # Daniel, Steady Broadcaster
-        "azure": "uk-UA-OstapNeural",
-        "openai": "onyx",
-    },
-    "adam": {
-        "label": "Адам",
-        "elevenlabs": "pNInz6obpgDQGcFmaJgB",  # Adam, Dominant/Firm
-        "azure": "uk-UA-OstapNeural",
-        "openai": "onyx",
-    },
-    "george": {
-        "label": "Джордж",
-        "elevenlabs": "JBFqnCBsd6RMkjVDRZzb",  # George, Warm Storyteller
-        "azure": "uk-UA-OstapNeural",
-        "openai": "onyx",
-    },
-    "alice": {
-        "label": "Аліса — жіночий",
-        "elevenlabs": "Xb7hH8MSUJpSbSDYk0k2",  # Alice, Clear Educator
-        "azure": "uk-UA-PolinaNeural",
-        "openai": "nova",
-    },
-    "sarah": {
-        "label": "Сара — жіночий",
-        "elevenlabs": "EXAVITQu4vr4xnSDxMaL",  # Sarah, Mature/Confident
-        "azure": "uk-UA-PolinaNeural",
-        "openai": "nova",
-    },
     # Прямой выбор родных голосов Azure (uk-UA) — бесплатный F0-ключ
     # (0.5 млн символов/мес). Поле "engine" ставит движок первым в
     # очереди; voice_id ElevenLabs намеренно нет — иначе профиль мог
@@ -97,57 +73,13 @@ VOICE_PROFILES: Dict[str, Dict[str, str]] = {
         "azure": "uk-UA-PolinaNeural",
         "openai": "nova",
     },
-    # Голоса из кабинета ElevenLabs (категория professional). Резерв при
-    # сбое ElevenLabs — Azure (родной uk-UA), затем OpenAI.
-    "vev": {
-        "label": "Vev — Deep & Pleasant",
-        "elevenlabs": "ZwwNZP0QbNaQsoNgkPWr",  # Vev — Deep and Pleasant (мужской)
-        "azure": "uk-UA-OstapNeural",
-        "openai": "onyx",
-    },
-    "kateryna": {
-        "label": "Kateryna — Warm",
-        "elevenlabs": "GUEwnFXohLVek3cFXbW4",  # Kateryna Krupkina — Warm (женский)
-        "azure": "uk-UA-PolinaNeural",
-        "openai": "nova",
-    },
-    "yevhen": {
-        "label": "Yevhen — Resonant",
-        "elevenlabs": "TEyBWD5tAHAWqAGEv6yI",  # Yevhen — Resonant and Distinctive
-        "azure": "uk-UA-OstapNeural",
-        "openai": "onyx",
-    },
-    "mariya": {
-        "label": "Mariya — Educational",
-        "elevenlabs": "2OXYbN1uGomXXJtv9Dq6",  # Mariya Maro — Educational and Harmonious
-        "azure": "uk-UA-PolinaNeural",
-        "openai": "nova",
-    },
-    "alex": {
-        "label": "Alex — Storyteller",
-        "elevenlabs": "0p9W8EFOJbkw3zD1oNop",  # Alex — Warm Storyteller
-        "azure": "uk-UA-OstapNeural",
-        "openai": "onyx",
-    },
-    "casanova": {
-        "label": "Casanova — Whispered",
-        "elevenlabs": "IM2NskAf9RDJ9aOlvoTu",  # Casanova — Your Love Story, Whispered
-        "azure": "uk-UA-OstapNeural",
-        "openai": "onyx",
-    },
-    "anton": {
-        "label": "Anton — Mysterious",
-        "elevenlabs": "dZde1M1SiLkAKiqjpqqT",  # Anton — Unusual, Pleasant and Mysterious
-        "azure": "uk-UA-OstapNeural",
-        "openai": "onyx",
-    },
 }
 
-FALLBACK_VOICE = "daniel"
+FALLBACK_VOICE = "ostap"
 
 # Голоса старого Silero-селектора: сохранённый в браузере выбор (mykyta/borys)
 # должен продолжать звучать, а не упираться в неизвестный профиль.
-LEGACY_VOICE_ALIASES = {"mykyta": "daniel", "borys": "daniel", "random": FALLBACK_VOICE}
+LEGACY_VOICE_ALIASES = {"mykyta": "ostap", "borys": "ostap", "random": FALLBACK_VOICE}
 
 
 def _default_voice_key() -> str:

@@ -257,33 +257,36 @@ PyTorch/torchaudio (~200 МБ), `soundfile`, `num2words`, `libsndfile1` и `wget
 эти ~150 МБ в образ.
 Новый `tts_layer.py`: движки пробуются по `TTS_PROVIDER_ORDER`
 (ElevenLabs → Azure Speech → OpenAI `tts-1`), голос из UI (`?speaker=`)
-раскрывается в `voice_id` профиля (`VOICE_PROFILES`: daniel/adam/george/alice/
-sarah — premade-голоса; ostap/polina — закреплённые Azure-профили (родные
-uk-UA, `engine: azure`); vev/kateryna/yevhen/mariya/alex/casanova/anton —
-голоса из кабинета ElevenLabs (professional, привязаны к workspace); легаси `mykyta`/`borys`
-мапятся на дефолт), результаты кладутся в дисковый
+раскрывается в `voice_id` профиля. `VOICE_PROFILES` — только
+задействованные голоса: **ostap/polina** — закреплённые Azure-профили
+(родные uk-UA, `engine: azure`), пара «мужской + женский»; легаси
+`mykyta`/`borys` мапятся на Остапа, результаты кладутся в дисковый
 кэш `data/tts_cache/<engine>/<sha1>.{mp3,json}` — **Вариант A** (хеш всей фразы):
 повторная фраза отдаётся с диска и не тратит платные символы. `/api/tts`
 дополнительно отдаёт `engine` и `cache` (`hit`/`miss`), по ним видно экономию.
 Тесты движка TTS в проекте не завязаны (`pytest` не трогали); логику профилей и
 кэша проверяет `_tts_selftest.py` (в `.gitignore`, как прочие `_*.py`).
 
-**Azure Speech: ключ есть, движок жив (09.10.2026).** Ресурс Speech
-`chernivtsi-tts-yosyp` (North Europe → `northeurope`), тариф Free (F0):
-**0.5 млн символов в месяц** бесплатно; лимит жёсткий — при исчерпании
-Azure отвечает `429`, автоматического перехода на платный S0 нет.
-Голоса родные украинские: `uk-UA-OstapNeural` (мужские профили) и
-`uk-UA-PolinaNeural` (женские) — закреплённые профили ostap/polina в UI.
+**Azure Speech: ключ есть, движок жив и основной (10.10.2026).** Ресурс
+Speech `chernivtsi-tts-yosyp` (North Europe → `northeurope`), тариф
+Free (F0): **0.5 млн символов в месяц** бесплатно; лимит жёсткий — при
+исчерпании Azure отвечает `429`, автоматического перехода на платный
+S0 нет. Голоса родные украинские: `uk-UA-OstapNeural` / `uk-UA-PolinaNeural`
+— закреплённые профили ostap/polina, **единственная задействованная
+пара «мужской + женский»** в UI (плюс 🔊 Системний — браузерный
+Web Speech, бесплатный резерв). Дефолтний голос — Остап (`FALLBACK_VOICE`,
+дефолт `?speaker=` в `/api/tts`).
 Проверка e2e: `/api/tts` → Azure 200, повтор той же фразы → `cache=hit`.
-**ElevenLabs free-аккаунт почти исчерпан:** премадé-голоса отвечают
-`401 quota_exceeded` (осталось ~15 кредитов из 5000, фраза на 28), а
-библиотечные голоса (7 профилей из кабинета) — `402 paid_plan_required`:
-free-план не даёт их использовать через API, только в веб-приложении.
-Пока Azure — единственный реально работающий движок; при выставлении
-`TTS_PROVIDER_ORDER=azure,elevenlabs,openai` он станет основным для всех
-профилей. Полный путь получения ключа (портал, копирование Key1/Location,
-лимиты F0, регионы, прослушивание голосов) выписан ссылками в `.env.example`;
-проверка одной командой — `_tts_azure_check.py`.
+**ElevenLabs free-аккаунт исчерпан:** премадé-голоса отвечают
+`401 quota_exceeded` (осталось ~15 кредитов из 5000, фраза на 28),
+библиотечные голоса — `402 paid_plan_required` (free-план не даёт их
+через API). Поэтому 10.10.2026 голоса ElevenLabs (5 premade + 7 из
+кабинета) убраны из `VOICE_PROFILES` и UI: везде они fallback'ились
+на Остапа и вводили в заблуждение. История профилей — в коммитах
+(`e736971`, `c9e9eed`). Полный путь получения ключа Azure (портал,
+копирование Key1/Location, лимиты F0, регионы, прослушивание голосов)
+выписан ссылками в `.env.example`; проверка одной командой —
+`_tts_azure_check.py`.
 
 ## 3. Быстрые проверки (6 команд)
 

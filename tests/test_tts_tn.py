@@ -28,7 +28,7 @@ def test_generate_tts_expands_digits_before_synth(monkeypatch):
     assert captured["text"] == "номер дев'ять, приблизно тридцять дві хвилини"
     assert audio  # base64 не порожній
     assert mime == "audio/mpeg"
-    assert meta["engine"] == "elevenlabs"
+    assert meta["engine"] == "azure"
     assert meta["cache"] == "miss"
 
 
@@ -69,9 +69,9 @@ def test_generate_tts_cache_key_on_normalized_text(monkeypatch):
 
     key_from_digits = tts_layer._cache_key(
         uk_textnorm.expand_digits("34 хвилини"),
-        "daniel", "eleven_multilingual_v2",
+        "ostap", "eleven_multilingual_v2",
     )
     key_from_words = tts_layer._cache_key(
-        "тридцять чотири хвилини", "daniel", "eleven_multilingual_v2",
+        "тридцять чотири хвилини", "ostap", "eleven_multilingual_v2",
     )
     assert key_from_digits == key_from_words

@@ -2987,7 +2987,7 @@ def create_feedback(request: FeedbackRequest):
 
 
 @app.get("/api/tts")
-def api_tts(text: str, speaker: str = 'daniel'):
+def api_tts(text: str, speaker: str = 'ostap'):
     """Синтез речи для эмулятора (ElevenLabs -> Azure -> OpenAI, см. tts_layer).
 
     Обычный `def`, а НЕ `async def`: синтез — блокирующий внешний HTTP-запрос к
